@@ -1,0 +1,24 @@
+{
+  "name": "revomail-frontend-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "start": "node server.js",
+    "pm2:start": "npm run build && pm2 start ecosystem.config.cjs",
+    "pm2:logs": "pm2 logs revomail-demo",
+    "pm2:restart": "npm run build && pm2 restart revomail-demo",
+    "pm2:stop": "pm2 stop revomail-demo",
+    "pm2:delete": "pm2 delete revomail-demo"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "lucide": "^0.468.0"
+  },
+  "devDependencies": {
+    "vite": "^6.1.0"
+  }
+}
