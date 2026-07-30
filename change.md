@@ -1,37 +1,52 @@
-# Initial GitHub publication
+# Reserve backend and project-support directories
 
-Date: 2026-07-18
+Date: 2026-07-31
 
 ## Scope
 
-Published the verified RevoMail frontend demo to the empty GitHub repository `luckykevvv/RevoMail` as its initial `main` branch commit.
+Prepared a provider-neutral directory structure for future backend and shared work, and documented the complete repository layout for contributors.
 
 ## Changes
 
-- Copied the application source, production server, package manifests, environment example, PM2 configuration, favicon, and README into the repository root.
-- Excluded generated dependencies and build output through `.gitignore`.
-- Archived the frontend implementation record as `change/change-1.md` because repository publication is a separate task.
-- Kept the original presentation and course artifacts outside the Git repository.
+- Added a structure-only `backend/` workspace with boundaries for configuration, HTTP transport, middleware, services, domain rules, external providers, persistence, jobs, utilities, and tests.
+- Added `shared/`, `docs/`, and `scripts/` workspaces with ownership rules.
+- Rewrote the root README to explain project status, current commands, environment behavior, repository structure, architecture boundaries, and contributor workflow.
+- Updated `todo.md` to record that the placeholder structure exists without marking backend implementation requirements complete.
+- Extended `.gitignore` to cover local `.env.*` variants while retaining sanitized `.env.example` files.
+- Archived the AI-agent instruction task as `change/change-4.md`.
+- Included the previously uncommitted English requirements backlog, contributor-agent instructions, and their numbered change records in the same requested local commit.
 
-## Commands used
+## Reason
+
+The team needs stable locations for upcoming backend, API-contract, architecture, testing, and automation work. The structure must support collaboration without prematurely choosing a backend framework or implying that unimplemented integrations already exist.
+
+## Key Commands
 
 ```powershell
-git status --short
-git remote -v
+git status --short --branch
 git ls-files -v | Select-String '^S'
-git ls-remote --symref https://github.com/luckykevvv/RevoMail.git HEAD
-git -c http.proxy= -c https.proxy= ls-remote --heads https://github.com/luckykevvv/RevoMail.git
-git -c http.proxy= -c https.proxy= clone https://github.com/luckykevvv/RevoMail.git RevoMail
-Copy-Item <verified RevoMail source files> -Destination .
+rg --files -g '!node_modules' -g '!dist'
+Move-Item -LiteralPath 'change.md' -Destination 'change\change-4.md'
 npm ci
 npm run build
+rg -n "[ \t]+$" README.md backend shared docs scripts change.md
+git check-ignore -v .env .env.local .env.production
+git diff --check
 git add --all
-git commit -m "feat: add interactive RevoMail frontend demo"
-git -c http.proxy= -c https.proxy= push -u origin main
+git diff --cached --check
+git commit -m "chore: add project structure and contributor docs"
 ```
 
 ## Validation
 
-- Remote repository was confirmed empty before the initial commit.
-- `npm ci` and `npm run build` are required to pass before push.
-- The pushed commit and remote `main` reference are verified after publication.
+- Confirmed that the existing frontend still installs and builds successfully.
+- Confirmed that all directories shown in the README exist in the repository.
+- Confirmed that documented npm and PM2 commands match `package.json`.
+- Confirmed that `.env`, `.env.local`, and `.env.production` are ignored while `.env.example` remains eligible for tracking.
+- Confirmed that Markdown changes contain no trailing whitespace or Git whitespace errors.
+
+## Remaining Work
+
+- The backend directories are placeholders only; no backend framework, API, database, queue, provider SDK, or runtime has been selected.
+- Backend technology selection remains an open P0 requirement in `todo.md`.
+- The changes are committed locally and have not been pushed.
