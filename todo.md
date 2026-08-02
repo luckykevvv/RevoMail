@@ -30,12 +30,13 @@ Target users:
 - [x] Added light, dark, and mobile layouts.
 - [x] Added Vite build scripts, an Express production entry point, and PM2 configuration.
 - [x] Reserved backend, shared-contract, architecture, API documentation, and automation directories; Module 1 subsequently selected the authentication stack.
-- [x] Implemented the Module 1 authentication foundation: PostgreSQL models and migrations, encrypted provider credentials, server-side sessions, Google/Microsoft OAuth adapters, and connected-account UI/API states.
+- [x] Implemented the Module 1 authentication foundation: PostgreSQL models and migrations, encrypted provider credentials, server-side sessions, Google OAuth support, a pending Microsoft OAuth adapter, and connected-account UI/API states.
 
 ### Not Yet Completed
 
 - [ ] Integrate real OAuth, email, LLM, speech recognition, and calendar APIs.
-- [ ] Verify Google and Microsoft OAuth authorization, refresh, and revocation end to end with provider test applications and test accounts.
+- [ ] Verify Google OAuth authorization, refresh, and revocation end to end with a provider test application and test account.
+- [ ] Microsoft OAuth and Microsoft Graph support is pending and is not part of the currently supported MVP provider path.
 - [ ] Implement the backend service, database, task queue, and user sessions.
 - [ ] Add automated tests, security review, monitoring, and production deployment.
 
@@ -44,7 +45,7 @@ Target users:
 ### FR-01 Authentication and Authorization
 
 - [ ] Integrate Google OAuth 2.0.
-- [ ] Integrate Microsoft OAuth 2.0.
+- [ ] Integrate Microsoft OAuth 2.0. **Status: pending; retain the adapter but defer provider setup and release validation.**
 - [ ] Request only the email and calendar permissions required by enabled features.
 - [ ] Support secure sign-out, token refresh, token expiration, and authorization revocation.
 - [ ] Show understandable error messages and a retry option when authentication fails.
@@ -201,7 +202,7 @@ Acceptance criteria:
 ### P0: External Services
 
 - [ ] Implement a Google Gmail API adapter.
-- [ ] Implement a Microsoft Graph Mail adapter.
+- [ ] Implement a Microsoft Graph Mail adapter. **Status: pending.**
 - [ ] Implement Google Calendar and Microsoft Calendar adapters.
 - [ ] Define a replaceable LLM provider interface.
 - [ ] Define a Speech-to-Text provider interface.

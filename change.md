@@ -17,6 +17,7 @@ Implement GitHub Module #1 and sub-issues #11, #12, #15, and #18: Google and Mic
 - Added responsive connected-account permission, reconnect, confirmed disconnect, partial-failure, retry, and mobile-visible sign-out UI.
 - Added unit, API, and PostgreSQL integration tests plus a sanitized local OAuth fixture covering state replay, permissions, encryption, CSRF, logout, ownership, provider failures, and refresh concurrency.
 - Updated npm and PM2 scripts, environment examples, README files, `todo.md`, `.gitignore`, and the dependency lockfile.
+- Clarified in `todo.md` and GitHub issue #11 that Microsoft OAuth/Graph support is pending; the implemented adapter remains available but is not advertised as a currently supported MVP provider path.
 - Archived the previous active task as `change/change-5.md`.
 
 ## Reason
@@ -49,6 +50,8 @@ git diff --check
 git add --all
 git commit -m "feat: implement module 1 authentication"
 git push -u origin module_1_login
+git commit -m "docs: mark Microsoft support pending"
+git push
 ```
 
 ## Validation
@@ -67,6 +70,7 @@ git push -u origin module_1_login
 
 ## Remaining Work
 
-- Real Google and Microsoft authorization, refresh, and revocation cannot be verified until sanitized test-app credentials and test accounts are available.
+- Real Google authorization, refresh, and revocation cannot be verified until sanitized test-app credentials and a test account are available.
+- Microsoft OAuth and Microsoft Graph release support is explicitly pending; no Microsoft provider setup or production validation is currently scheduled.
 - Microsoft disconnect removes local credentials because the selected Microsoft OAuth flow has no direct token-revocation endpoint.
 - Mailbox synchronization, email sending, and calendar writes remain outside Module 1 and are still simulated.
