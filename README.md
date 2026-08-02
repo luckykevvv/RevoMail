@@ -1,14 +1,14 @@
 # RevoMail
 
-RevoMail is an AI-assisted email client prototype for email summarization, reply drafting, voice commands, and task/calendar extraction.
+RevoMail is an AI-assisted email client for email summarization, reply drafting, voice commands, and task/calendar extraction.
 
-> **Current status:** the repository contains a working interactive frontend prototype. OAuth, mailbox access, LLM calls, Speech-to-Text, calendar writes, backend persistence, and monitoring are not yet connected to production services.
+> **Current status:** Module 1 includes provider-ready Google and Microsoft OAuth, PostgreSQL persistence, encrypted server-side credentials, secure sessions, and connected-account management. Real provider authorization has not been verified because test-app credentials are not currently available. Mailbox access, LLM calls, Speech-to-Text, and calendar writes remain simulated.
 
 ## Current Prototype
 
 The frontend currently demonstrates:
 
-- OAuth-style demo login.
+- Google and Microsoft sign-in states backed by the authentication API.
 - Searchable and filterable inbox.
 - Email reading with an AI summary and extracted information.
 - Editable and regeneratable AI reply drafts.
@@ -16,7 +16,7 @@ The frontend currently demonstrates:
 - Task and calendar extraction.
 - Light, dark, desktop, and mobile layouts.
 
-The prototype uses static demo data. Selecting an OAuth provider does not connect a real account, and no email or calendar action leaves the browser.
+Inbox and assistant features still use static demo data. OAuth buttons are enabled only when their server-side credentials are configured. No email or calendar action currently leaves the browser.
 
 ## Quick Start
 
@@ -24,27 +24,32 @@ Prerequisites:
 
 - A current Node.js LTS release.
 - npm.
+- PostgreSQL 16 or newer.
 
-Install the locked dependencies and start the development server:
-
-```powershell
-npm ci
-npm run dev
-```
-
-The terminal prints the local development URL.
-
-## Production Preview
-
-Create a local environment file, build the frontend, and run the production server:
+Copy the safe environment template, set the database and encryption key, install locked dependencies, apply migrations, build, and start the same-origin service:
 
 ```powershell
 Copy-Item .env.example .env
+# Replace TOKEN_ENCRYPTION_KEY with: node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
+npm ci
+npm run db:migrate
 npm run build
 npm run start
 ```
 
-The current `server.js` serves only the built frontend from `dist/`. It is not the future application API.
+OAuth buttons remain disabled until the relevant provider client ID and secret are set. Provider callback URLs must be registered as `${APP_BASE_URL}/api/v1/auth/google/callback` and `${APP_BASE_URL}/api/v1/auth/microsoft/callback`.
+
+## Production Preview
+
+Set `NODE_ENV=production`, use an HTTPS `APP_BASE_URL`, supply production PostgreSQL and encryption settings through `.env` or the deployment environment, then run:
+
+```powershell
+npm run build
+npm run db:migrate
+npm run start
+```
+
+`server.js` serves the built frontend and the versioned authentication API. Production startup rejects a non-HTTPS `APP_BASE_URL`.
 
 Supported runtime variables:
 
@@ -52,6 +57,14 @@ Supported runtime variables:
 | --- | --- | --- |
 | `HOST` | `0.0.0.0` | Address used by the production preview server |
 | `PORT` | `4173` | Port used by the production preview server |
+| `APP_BASE_URL` | `http://localhost:4173` | Public same-origin URL and OAuth callback base |
+| `DATABASE_URL` | Required | PostgreSQL connection URL |
+| `TOKEN_ENCRYPTION_KEY` | Required | Base64-encoded 32-byte AES key |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Empty | Google OAuth application credentials |
+| `GOOGLE_AUTH_URL`, `GOOGLE_TOKEN_URL`, `GOOGLE_USERINFO_URL`, `GOOGLE_REVOKE_URL` | Google endpoints | Overrideable Google OAuth endpoints, including test fixtures |
+| `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET` | Empty | Microsoft OAuth application credentials |
+| `MICROSOFT_TENANT` | `common` | Microsoft tenant selector |
+| `MICROSOFT_AUTH_URL`, `MICROSOFT_TOKEN_URL`, `MICROSOFT_USERINFO_URL` | Microsoft endpoints | Overrideable Microsoft endpoints, including test fixtures |
 
 The current server loads `.env` with `override: true`, so values in `.env` override inherited process variables. Real `.env` files are ignored and must never be committed.
 
@@ -62,6 +75,11 @@ The current server loads `.env` with `override: true`, so values in `.env` overr
 | `npm run dev` | Start the Vite development server |
 | `npm run build` | Build the frontend into `dist/` |
 | `npm run start` | Serve the production build with Node.js |
+| `npm test` | Run authentication unit and API integration tests |
+| `npm run test:db` | Run PostgreSQL repository integration tests using `TEST_DATABASE_URL` |
+| `npm run db:generate` | Generate the Prisma client |
+| `npm run db:migrate` | Apply committed PostgreSQL migrations |
+| `npm run db:migrate:dev` | Create and apply migrations during development |
 | `npm run pm2:start` | Build and start the production preview with PM2 |
 | `npm run pm2:logs` | View RevoMail PM2 logs |
 | `npm run pm2:restart` | Rebuild and restart the PM2 process |
@@ -82,7 +100,8 @@ RevoMail/
 |   |-- main.js                # Demo state, views, and interactions
 |   `-- style.css              # RevoMail design and responsive styles
 |-- public/                    # Static frontend assets
-|-- server.js                  # Current production-preview static server
+|-- server.js                  # Same-origin production frontend and API entry point
+|-- prisma/                    # PostgreSQL schema and committed migrations
 |-- backend/                   # Reserved backend application boundary
 |   |-- README.md              # Backend layering and implementation rules
 |   |-- src/
@@ -119,9 +138,9 @@ RevoMail/
 
 ## Architecture Boundaries
 
-The new directories are placeholders for team development; they do not contain a backend implementation yet.
+The authentication paths under `backend/src/` are implemented. Other provider and feature directories remain architectural placeholders.
 
-When backend work begins:
+Backend dependency rules:
 
 1. Routes and controllers handle HTTP concerns only.
 2. Services implement application use cases and the human-confirmation workflow.
@@ -130,7 +149,7 @@ When backend work begins:
 5. Repositories isolate persistence.
 6. Shared contracts define the frontend/backend boundary without importing provider SDKs.
 
-The backend technology stack must be agreed by the team before adding runtime scaffolding. Record the decision under `docs/architecture/` and update `todo.md`, npm scripts, `.env.example`, and this README together.
+The authentication stack decision is recorded in `docs/architecture/0001-authentication-stack.md`; the HTTP contract is documented in `docs/api/authentication.md`.
 
 ## Collaboration
 

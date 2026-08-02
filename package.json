@@ -7,18 +7,33 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "start": "node server.js",
+    "test": "vitest run",
+    "test:db": "vitest run backend/tests/integration/prisma-auth.test.js",
+    "test:watch": "vitest",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:migrate:dev": "prisma migrate dev",
+    "postinstall": "prisma generate",
     "pm2:start": "npm run build && pm2 start ecosystem.config.cjs",
-    "pm2:logs": "pm2 logs revomail-demo",
-    "pm2:restart": "npm run build && pm2 restart revomail-demo",
-    "pm2:stop": "pm2 stop revomail-demo",
-    "pm2:delete": "pm2 delete revomail-demo"
+    "pm2:logs": "pm2 logs revomail",
+    "pm2:restart": "npm run build && pm2 restart revomail",
+    "pm2:stop": "pm2 stop revomail",
+    "pm2:delete": "pm2 delete revomail"
   },
   "dependencies": {
+    "@prisma/adapter-pg": "^7.9.1",
+    "@prisma/client": "^7.9.1",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "lucide": "^0.468.0"
+    "helmet": "^8.3.0",
+    "lucide": "^0.468.0",
+    "pg": "^8.22.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "vite": "^6.1.0"
+    "prisma": "^7.9.1",
+    "supertest": "^7.2.2",
+    "vite": "^6.1.0",
+    "vitest": "^4.1.10"
   }
 }

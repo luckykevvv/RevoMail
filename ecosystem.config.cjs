@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: "revomail-demo",
+      name: "revomail",
       script: "server.js",
       cwd: __dirname,
       instances: 1,

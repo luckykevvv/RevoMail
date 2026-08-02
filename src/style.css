@@ -21,7 +21,7 @@
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--bg); color: var(--ink); }
+body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--ink); }
 button, input, textarea, select { font: inherit; }
 button { color: inherit; }
 button, [tabindex] { -webkit-tap-highlight-color: transparent; }
@@ -73,6 +73,10 @@ body[data-theme="dark"] {
 .oauth { height: 52px; display: grid; grid-template-columns: 32px 1fr 32px; align-items: center; border: 1px solid var(--line-strong); border-radius: 11px; background: var(--surface); cursor: pointer; font-weight: 600; transition: .2s ease; }
 .oauth::after { content: ""; }
 .oauth:hover { border-color: var(--blue); transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+.oauth:disabled { cursor: not-allowed; opacity: .52; transform: none; box-shadow: none; }
+.auth-alert { margin-bottom: 14px; padding: 12px 14px; border: 1px solid #f1b9b9; border-radius: 10px; background: #fff4f4; color: #8c1d1d; font-size: 13px; }
+.auth-alert .text-button { margin-left: 8px; color: inherit; }
+.provider-note { margin: 13px 0 0; color: var(--muted); font-size: 12px; text-align: center; }
 .provider { display: grid; place-items: center; width: 24px; height: 24px; justify-self: center; font-weight: 700; }
 .provider-google { color: #4285f4; }
 .provider-microsoft { color: #f35325; font-size: 22px; }
@@ -218,6 +222,25 @@ input.input-shell { padding: 0; }
 .saved-status { display: flex; align-items: center; gap: 7px; color: var(--green); font-size: 12px; }
 .saved-status svg { width: 16px; }
 .settings-stack { max-width: 1000px; margin: 0 auto; display: grid; gap: 16px; }
+.connected-account-list { display: grid; gap: 12px; padding: 18px; }
+.connected-account { display: grid; grid-template-columns: minmax(190px, 1fr) auto; gap: 12px 18px; align-items: center; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-soft); }
+.account-provider { display: flex; align-items: center; gap: 11px; }
+.account-provider > span:last-child { display: grid; gap: 2px; }
+.account-provider small { color: var(--muted); }
+.connection-status { padding: 5px 8px; border-radius: 999px; background: #e6f7ee; color: #176c3a; font-size: 10px; font-weight: 800; text-transform: uppercase; }
+.connection-status.reauthorization_required, .connection-status.revocation_failed { background: #fff1df; color: #8a4b00; }
+.connected-account details { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
+.connected-account summary { cursor: pointer; font-weight: 700; }
+.connected-account ul { margin-bottom: 0; overflow-wrap: anywhere; }
+.account-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; }
+.danger-button { min-height: 38px; padding: 0 14px; border: 1px solid #d97373; border-radius: 9px; background: transparent; color: #a32222; cursor: pointer; font-weight: 700; }
+.danger-button:disabled, .secondary-button:disabled { cursor: wait; opacity: .55; }
+.empty-account { padding: 18px; color: var(--muted); text-align: center; }
+.empty-account p { margin: 4px 0; }
+.session-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 4px 2px; border-top: 1px solid var(--line); }
+.session-actions > span { display: grid; gap: 2px; }
+.session-actions small { color: var(--muted); }
+.loading-page { min-height: 100vh; display: grid; place-content: center; justify-items: center; gap: 14px; color: var(--muted); }
 .setting-group { overflow: hidden; }
 .setting-group > h2 { height: 52px; display: flex; align-items: center; gap: 10px; margin: 0; padding: 0 20px; border-bottom: 1px solid var(--line); font: 700 15px/1 "Manrope", sans-serif; }
 .setting-group > h2 svg { color: var(--blue); }
@@ -288,6 +311,11 @@ input.input-shell { padding: 0; }
 }
 
 @media (max-width: 720px) {
+  .connected-account { grid-template-columns: 1fr; }
+  .connection-status { justify-self: start; }
+  .account-actions { justify-content: stretch; }
+  .account-actions button { flex: 1; }
+  .session-actions { align-items: stretch; flex-direction: column; }
   .app-shell { display: block; padding-bottom: 70px; }
   .sidebar { position: fixed; inset: auto 0 0; width: 100%; height: 66px; display: block; padding: 7px 8px; border-top: 1px solid var(--line); border-right: 0; }
   .sidebar-top, .account-card { display: none; }

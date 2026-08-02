@@ -126,7 +126,13 @@ const emails = [
 ];
 
 const state = {
-  authenticated: false,
+  authenticated: null,
+  user: null,
+  csrfToken: "",
+  providers: { google: false, microsoft: false },
+  accounts: [],
+  authError: "",
+  accountBusy: "",
   view: "inbox",
   selectedEmail: emails[0],
   category: "All",
@@ -140,6 +146,23 @@ const state = {
   assignmentAdded: false,
   toast: ""
 };
+
+function escapeHtml(value = "") {
+  return String(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[character]));
+}
+
+async function api(path, options = {}) {
+  const headers = { accept: "application/json", ...(options.body ? { "content-type": "application/json" } : {}), ...(state.csrfToken ? { "x-csrf-token": state.csrfToken } : {}), ...options.headers };
+  const response = await fetch(path, { credentials: "same-origin", ...options, headers });
+  const payload = response.status === 204 ? null : await response.json().catch(() => null);
+  if (!response.ok) {
+    const error = new Error(payload?.error?.message || "The request could not be completed.");
+    error.code = payload?.error?.code;
+    error.status = response.status;
+    throw error;
+  }
+  return payload;
+}
 
 const navItems = [
   ["inbox", "Inbox", "inbox"],
@@ -187,12 +210,12 @@ function renderLogin() {
       <div class="login-card">
         ${logo()}
         <div class="login-heading"><p>Welcome to your calmer inbox</p><h2>Continue to RevoMail</h2></div>
+        ${state.authError ? `<div class="auth-alert" role="alert">${escapeHtml(state.authError)} <button class="text-button" data-clear-auth-error>Dismiss</button></div>` : ""}
         <div class="oauth-stack">
-          <button class="oauth google" data-login><span class="provider provider-google">G</span>Continue with Google</button>
-          <button class="oauth microsoft" data-login><span class="provider provider-microsoft">⊞</span>Continue with Microsoft</button>
-          <button class="oauth apple" data-login><span class="provider">●</span>Continue with Apple</button>
-          <button class="oauth facebook" data-login><span class="provider provider-facebook">f</span>Continue with Facebook</button>
+          <button class="oauth google" data-login="google" ${state.providers.google ? "" : "disabled"}><span class="provider provider-google">G</span>Continue with Google</button>
+          <button class="oauth microsoft" data-login="microsoft" ${state.providers.microsoft ? "" : "disabled"}><span class="provider provider-microsoft">⊞</span>Continue with Microsoft</button>
         </div>
+        ${!state.providers.google && !state.providers.microsoft ? '<p class="provider-note">Sign-in providers are not configured on this environment.</p>' : ""}
         <p class="secure-note">${icon("shield-check")} OAuth 2.0 · RevoMail never sees your password</p>
         <p class="legal">By continuing, you agree to the Terms and Privacy Policy.</p>
       </div>
@@ -201,15 +224,18 @@ function renderLogin() {
 }
 
 function sidebar() {
+  const name = escapeHtml(state.user?.displayName || "RevoMail User");
+  const email = escapeHtml(state.user?.email || "");
+  const initials = name.split(/\s/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
   return `<aside class="sidebar">
     <div class="sidebar-top">${logo()}</div>
     <nav class="nav-list" aria-label="Mailbox navigation">
-      ${navItems.map(([view, label, navIcon]) => `<button class="nav-item ${state.view === view ? "active" : ""}" data-nav="${view}">${icon(navIcon)}<span>${label}</span>${view === "inbox" ? '<b class="nav-count">3</b>' : ""}</button>`).join("")}
+      ${navItems.map(([view, label, navIcon]) => `<button class="nav-item ${state.view === view ? "active" : ""}" data-nav="${view}" aria-label="${label}">${icon(navIcon)}<span>${label}</span>${view === "inbox" ? '<b class="nav-count">3</b>' : ""}</button>`).join("")}
     </nav>
     <div class="account-card">
-      <span class="avatar">AU</span>
-      <span class="account-copy"><strong>Anon User</strong><small>anon.user@example.com</small></span>
-      <button class="icon-button" data-logout title="Sign out">${icon("log-out")}</button>
+      <span class="avatar">${initials}</span>
+      <span class="account-copy"><strong>${name}</strong><small>${email}</small></span>
+      <button class="icon-button" data-logout title="Sign out" aria-label="Sign out">${icon("log-out")}</button>
     </div>
   </aside>`;
 }
@@ -219,13 +245,14 @@ function shell(content) {
 }
 
 function inboxView() {
+  const firstName = escapeHtml(state.user?.displayName?.split(/\s+/)[0] || "there");
   const visible = emails.filter((email) => {
     const matchesCategory = state.category === "All" || email.category === state.category;
     const haystack = `${email.sender} ${email.subject} ${email.preview}`.toLowerCase();
     return matchesCategory && haystack.includes(state.search.toLowerCase());
   });
   return shell(`<header class="page-header">
-    <div><span class="eyebrow">Good morning, Anon</span><h1>Inbox</h1><p>AI has highlighted what needs your attention.</p></div>
+    <div><span class="eyebrow">Good morning, ${firstName}</span><h1>Inbox</h1><p>AI has highlighted what needs your attention.</p></div>
     <button class="primary-button compose-button" data-compose>${icon("square-pen")} Compose</button>
   </header>
   <section class="inbox-toolbar">
@@ -310,6 +337,7 @@ function tasksView(calendarOnly = false) {
 function settingsView() {
   return shell(`<header class="page-header"><div><span class="eyebrow">Personal workspace</span><h1>Settings</h1><p>Customise your RevoMail assistant experience.</p></div><span class="saved-status">${icon("circle-check")} Changes save automatically</span></header>
   <section class="settings-stack">
+    ${connectedAccountsGroup()}
     ${settingGroup("General", "settings", `
       ${selectSetting("Language", "languages", ["English", "简体中文", "Español"])}
       <div class="setting-row"><div class="setting-name">${icon("sun-moon")}<span><strong>Theme</strong><small>Choose your preferred appearance</small></span></div><div class="segmented"><button class="${state.theme === "light" ? "active" : ""}" data-theme="light">${icon("sun")} Light</button><button class="${state.theme === "dark" ? "active" : ""}" data-theme="dark">${icon("moon")} Dark</button></div></div>`)}
@@ -322,6 +350,20 @@ function settingsView() {
       <div class="setting-row"><div class="setting-name">${icon("audio-waveform")}<span><strong>Voice input</strong><small>Enable spoken inbox commands</small></span></div><button class="toggle active" role="switch" aria-checked="true"><span></span></button></div>`)}
     <section class="about-card"><div>${logo()}<p>AI-powered email that helps you write, manage and organise more efficiently.</p></div><span>Prototype v0.1</span></section>
   </section>`);
+}
+
+function connectedAccountsGroup() {
+  const content = state.accounts.length ? state.accounts.map((account) => {
+    const provider = account.provider === "google" ? "Google" : "Microsoft";
+    const busy = state.accountBusy === account.id;
+    return `<article class="connected-account">
+      <div class="account-provider"><span class="provider ${account.provider === "google" ? "provider-google" : "provider-microsoft"}">${account.provider === "google" ? "G" : "⊞"}</span><span><strong>${provider}</strong><small>${escapeHtml(account.email)}</small></span></div>
+      <span class="connection-status ${account.status.toLowerCase()}">${escapeHtml(account.status.replaceAll("_", " "))}</span>
+      <details><summary>Granted permissions</summary><ul>${account.scopes.map((scope) => `<li>${escapeHtml(scope)}</li>`).join("")}</ul></details>
+      <div class="account-actions"><button class="secondary-button" data-reauthorize="${account.id}" ${busy ? "disabled" : ""}>Reconnect</button><button class="danger-button" data-disconnect="${account.id}" data-provider-name="${provider}" data-account-email="${escapeHtml(account.email)}" ${busy ? "disabled" : ""}>Disconnect</button></div>
+    </article>`;
+  }).join("") : '<div class="empty-account"><p>No connected accounts.</p><p>Sign out, then connect Google or Microsoft from the sign-in page.</p></div>';
+  return settingGroup("Connected accounts", "shield-check", `<div class="connected-account-list">${content}<div class="session-actions"><span><strong>RevoMail session</strong><small>Signing out keeps provider access connected until you disconnect it above.</small></span><button class="secondary-button" data-logout>${icon("log-out")} Sign out of RevoMail</button></div></div>`);
 }
 
 function settingGroup(title, groupIcon, content) {
@@ -360,7 +402,9 @@ function toast() {
 
 function render() {
   document.body.dataset.theme = state.theme;
-  if (!state.authenticated) {
+  if (state.authenticated === null) {
+    app.innerHTML = `<main class="loading-page" aria-live="polite"><div class="brand-mark">${icon("mail")}</div><p>Checking your secure session…</p></main>`;
+  } else if (!state.authenticated) {
     app.innerHTML = renderLogin() + toast();
   } else {
     let content;
@@ -404,8 +448,16 @@ function openVoice() {
 }
 
 function bindEvents() {
-  document.querySelectorAll("[data-login]").forEach((button) => button.addEventListener("click", () => { state.authenticated = true; state.view = "inbox"; showToast("Securely connected to your demo inbox"); }));
-  document.querySelector("[data-logout]")?.addEventListener("click", () => { state.authenticated = false; state.view = "inbox"; render(); });
+  document.querySelectorAll("[data-login]").forEach((button) => button.addEventListener("click", () => {
+    button.disabled = true;
+    button.lastChild.textContent = " Redirecting…";
+    window.location.assign(`/api/v1/auth/${button.dataset.login}/start?returnTo=${encodeURIComponent(window.location.pathname)}`);
+  }));
+  document.querySelector("[data-clear-auth-error]")?.addEventListener("click", () => { state.authError = ""; render(); });
+  document.querySelectorAll("[data-logout]").forEach((button) => button.addEventListener("click", async () => {
+    try { await api("/api/v1/auth/logout", { method: "POST" }); } catch (error) { showToast(error.message); return; }
+    state.authenticated = false; state.user = null; state.csrfToken = ""; state.accounts = []; state.view = "inbox"; render();
+  }));
   document.querySelectorAll("[data-nav]").forEach((button) => button.addEventListener("click", () => { state.view = button.dataset.nav; render(); }));
   document.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => { state.view = button.dataset.view; render(); }));
   document.querySelectorAll("[data-email]").forEach((row) => row.addEventListener("click", (event) => {
@@ -430,6 +482,18 @@ function bindEvents() {
   document.querySelector("[data-add-assignment]")?.addEventListener("click", () => { state.assignmentAdded = true; showToast("Assignment deadline added to calendar"); });
   document.querySelectorAll("[data-theme]").forEach((button) => button.addEventListener("click", () => { state.theme = button.dataset.theme; render(); }));
   document.querySelectorAll(".toggle").forEach((button) => button.addEventListener("click", () => { button.classList.toggle("active"); button.setAttribute("aria-checked", button.classList.contains("active")); }));
+  document.querySelectorAll("[data-disconnect]").forEach((button) => button.addEventListener("click", async () => {
+    const confirmed = window.confirm(`Disconnect ${button.dataset.providerName} account ${button.dataset.accountEmail}? RevoMail will revoke provider access where supported and permanently remove its stored credentials and active connection.`);
+    if (!confirmed) return;
+    state.accountBusy = button.dataset.disconnect; render();
+    try { await api(`/api/v1/accounts/${button.dataset.disconnect}`, { method: "DELETE" }); await loadAccounts(); showToast("Account disconnected and local credentials removed"); }
+    catch (error) { state.accountBusy = ""; showToast(error.message); }
+  }));
+  document.querySelectorAll("[data-reauthorize]").forEach((button) => button.addEventListener("click", async () => {
+    state.accountBusy = button.dataset.reauthorize; render();
+    try { const result = await api(`/api/v1/accounts/${button.dataset.reauthorize}/reauthorize`, { method: "POST" }); window.location.assign(result.authorizationUrl); }
+    catch (error) { state.accountBusy = ""; showToast(error.message); }
+  }));
   document.querySelectorAll("[data-voice]").forEach((button) => button.addEventListener("click", openVoice));
   document.querySelector("[data-close-voice]")?.addEventListener("click", () => { state.voiceOpen = false; clearTimeout(voiceTimer); render(); });
   document.querySelector(".modal-backdrop")?.addEventListener("click", (event) => { if (event.target.classList.contains("modal-backdrop")) { state.voiceOpen = false; clearTimeout(voiceTimer); render(); } });
@@ -438,4 +502,41 @@ function bindEvents() {
   document.querySelector("[data-run-command]")?.addEventListener("click", () => { state.voiceOpen = false; state.view = state.transcript.toLowerCase().includes("task") ? "tasks" : "reading"; showToast("Voice command completed"); });
 }
 
+async function loadAccounts() {
+  const payload = await api("/api/v1/accounts");
+  state.accounts = payload.accounts;
+  state.accountBusy = "";
+  render();
+}
+
+async function bootstrap() {
+  const params = new URLSearchParams(window.location.search);
+  const errorMessages = {
+    AUTHORIZATION_DENIED: "Authorization was cancelled. You can try again.",
+    INVALID_OAUTH_STATE: "The sign-in request expired or could not be verified. Please try again.",
+    INSUFFICIENT_PERMISSIONS: "The required mailbox or calendar permissions were not granted.",
+    AUTHORIZATION_FAILED: "Sign-in could not be completed. Please try again."
+  };
+  if (params.has("authError")) state.authError = errorMessages[params.get("authError")] || "Sign-in could not be completed. Please try again.";
+  const requestedView = params.get("view");
+  history.replaceState({}, "", window.location.pathname);
+  try {
+    const session = await api("/api/v1/auth/session");
+    state.providers = session.providers;
+    state.authenticated = session.authenticated;
+    if (session.authenticated) {
+      state.user = session.user;
+      state.csrfToken = session.csrfToken;
+      if (requestedView === "settings") state.view = "settings";
+      const accounts = await api("/api/v1/accounts");
+      state.accounts = accounts.accounts;
+    }
+  } catch (error) {
+    state.authenticated = false;
+    state.authError ||= "RevoMail could not check provider availability.";
+  }
+  render();
+}
+
 render();
+bootstrap();

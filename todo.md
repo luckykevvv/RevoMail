@@ -29,11 +29,13 @@ Target users:
 - [x] Built prototype interfaces for voice commands, tasks, calendar events, and settings.
 - [x] Added light, dark, and mobile layouts.
 - [x] Added Vite build scripts, an Express production entry point, and PM2 configuration.
-- [x] Reserved backend, shared-contract, architecture, API documentation, and automation directories without selecting a backend stack.
+- [x] Reserved backend, shared-contract, architecture, API documentation, and automation directories; Module 1 subsequently selected the authentication stack.
+- [x] Implemented the Module 1 authentication foundation: PostgreSQL models and migrations, encrypted provider credentials, server-side sessions, Google/Microsoft OAuth adapters, and connected-account UI/API states.
 
 ### Not Yet Completed
 
 - [ ] Integrate real OAuth, email, LLM, speech recognition, and calendar APIs.
+- [ ] Verify Google and Microsoft OAuth authorization, refresh, and revocation end to end with provider test applications and test accounts.
 - [ ] Implement the backend service, database, task queue, and user sessions.
 - [ ] Add automated tests, security review, monitoring, and production deployment.
 
@@ -189,11 +191,11 @@ Acceptance criteria:
 
 ### P0: Foundation
 
-- [ ] Select the backend technology stack and define the API contract.
+- [x] Select the backend technology stack and define the initial authentication API contract.
 - [ ] Establish development, test, and production environment configuration.
-- [ ] Add a backend health check and a standard API error response.
-- [ ] Define data models for users, mailbox connections, settings, tasks, and audit records.
-- [ ] Add database migrations.
+- [x] Add a backend health check and a standard API error response.
+- [ ] Define data models for users, mailbox connections, settings, tasks, and audit records. (User, mailbox connection, credential, OAuth transaction, and session models are complete.)
+- [x] Add the initial authentication database migration.
 - [ ] Establish CI for installation, linting, tests, and production builds.
 
 ### P0: External Services

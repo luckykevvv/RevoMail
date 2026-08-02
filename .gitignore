@@ -6,3 +6,5 @@ dist/
 !**/.env.example
 *.log
 .pm2/
+backend/generated/
+.playwright-cli/

@@ -1,8 +1,8 @@
 # Backend Workspace
 
-This directory reserves the backend application boundary for RevoMail. It is intentionally structure-only: no backend framework, runtime, database, or provider SDK has been selected or implemented.
+This directory contains the implemented Module 1 authentication boundary plus reserved locations for later RevoMail modules. The selected foundation is Node.js, Express, PostgreSQL, Prisma, Zod, and provider-neutral OAuth adapters.
 
-Do not report the existence of these directories as a working backend.
+Google and Microsoft OAuth code is provider-ready and covered by local automated tests, but real provider flows remain unverified until test-app credentials are available. Do not describe mailbox, AI, calendar, or speech placeholder directories as implemented integrations.
 
 ## Proposed Layers
 
@@ -33,11 +33,11 @@ Do not report the existence of these directories as a working backend.
 - Domain code must not import HTTP frameworks, databases, or provider SDKs.
 - Shared frontend/backend contracts belong in `../shared/`, not inside a provider implementation.
 
-## Before Adding Backend Code
+## Before Adding Another Backend Module
 
-1. Agree on the backend framework, runtime, persistence, queue, and API style.
-2. Record the architecture decision in `../docs/architecture/`.
-3. Define the initial API contract under `../shared/contracts/` or `../docs/api/`.
+1. Preserve the accepted runtime and persistence decision unless a replacement ADR is approved.
+2. Record new architectural decisions in `../docs/architecture/`.
+3. Define API contracts under `../shared/contracts/` or `../docs/api/`.
 4. Add a sanitized environment example without secrets.
 5. Add health-check, error-response, validation, and logging conventions.
 6. Add unit and integration test commands.

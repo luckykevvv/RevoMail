@@ -1,0 +1,75 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id          String              @id @default(cuid())
+  email       String              @unique
+  displayName String
+  avatarUrl   String?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  connections MailboxConnection[]
+  sessions    Session[]
+}
+
+model MailboxConnection {
+  id                String          @id @default(cuid())
+  userId            String
+  provider          String
+  providerAccountId String
+  email             String
+  displayName       String?
+  scopes            String[]
+  status            String          @default("CONNECTED")
+  lastErrorCode     String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  credential        OAuthCredential?
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model OAuthCredential {
+  id                    String            @id @default(cuid())
+  connectionId          String            @unique
+  accessTokenEncrypted  String
+  refreshTokenEncrypted String?
+  tokenType             String            @default("Bearer")
+  expiresAt             DateTime?
+  refreshLeaseUntil     DateTime?
+  version               Int               @default(0)
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  connection            MailboxConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  userId     String
+  tokenHash  String   @unique
+  csrfHash   String?
+  expiresAt  DateTime
+  idleAt     DateTime
+  lastSeenAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model OAuthTransaction {
+  id                String   @id @default(cuid())
+  stateHash         String   @unique
+  provider          String
+  verifierEncrypted String
+  returnTo          String
+  expiresAt         DateTime
+  createdAt         DateTime @default(now())
+}
