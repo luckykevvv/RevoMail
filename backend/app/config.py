@@ -22,8 +22,9 @@ class Settings(BaseSettings):
     google_client_secret: str = ""
     google_redirect_uri: str = "http://localhost:8000/api/auth/google/callback"
 
-    # LLM (set whichever provider you use)
+    # LLM
     openai_api_key: str = ""
+    openai_model: str = "gpt-4o"   # override in .env if you want a different model
     anthropic_api_key: str = ""
 
     # Database (SQLite for local dev; swap for postgres:// in prod)

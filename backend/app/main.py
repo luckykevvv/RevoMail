@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import settings
-from app.routers import health, auth, emails
+from app.routers import health, auth, emails, ai
 
 app = FastAPI(
     title="RevoMail API",
@@ -43,8 +43,8 @@ app.add_middleware(
 app.include_router(health.router, prefix="/api")
 app.include_router(auth.router,   prefix="/api/auth",   tags=["auth"])
 app.include_router(emails.router, prefix="/api/emails", tags=["emails"])
+app.include_router(ai.router,     prefix="/api/ai",     tags=["ai"])
 
-# Future routers (uncomment as you build each step):
-# from app.routers import ai, voice
-# app.include_router(ai.router,    prefix="/api/ai",    tags=["ai"])
+# Future routers:
+# from app.routers import voice
 # app.include_router(voice.router, prefix="/api/voice", tags=["voice"])

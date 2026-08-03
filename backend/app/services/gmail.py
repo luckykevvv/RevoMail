@@ -56,6 +56,14 @@ def _extract_parts(payload: dict) -> tuple[str, str]:
     """
     Recursively walk a Gmail message payload and return
     (plain_text, html_text) — either may be empty.
+
+    Handles nested structures like:
+      multipart/mixed
+        └── multipart/alternative
+              ├── text/plain
+              └── text/html
+    and concatenates all text/plain parts so long threaded emails
+    are not silently truncated.
     """
     mime = payload.get("mimeType", "")
     body_data = payload.get("body", {}).get("data", "")
@@ -65,12 +73,18 @@ def _extract_parts(payload: dict) -> tuple[str, str]:
     if mime == "text/html" and body_data:
         return "", _decode_body(body_data)
 
-    plain, html = "", ""
+    plain_parts: list[str] = []
+    html_parts: list[str] = []
+
     for part in payload.get("parts", []):
         p, h = _extract_parts(part)
-        plain = plain or p
-        html = html or h
-    return plain, html
+        if p:
+            plain_parts.append(p)
+        if h:
+            html_parts.append(h)
+
+    # Prefer the first HTML version found; concatenate all plain parts
+    return "\n\n".join(plain_parts), html_parts[0] if html_parts else ""
 
 
 def _header(headers: list[dict], name: str) -> str:

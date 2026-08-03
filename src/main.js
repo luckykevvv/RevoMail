@@ -134,11 +134,37 @@ const navItems = [
   ["settings", "Settings", "settings"]
 ];
 
-const replies = [
-  "Hi Prof. Smith,\n\nThank you for the reminder. I will attend the meeting tomorrow at 10:00 AM in Room 302.\n\nI will prepare the progress update and note down any blockers to discuss.\n\nBest regards,\nAnon User",
-  "Hello Prof. Smith,\n\nThanks for the reminder. I’ve confirmed the 10:00 AM meeting in Room 302 and will bring a concise progress update, including any current blockers.\n\nKind regards,\nAnon User",
-  "Hi Prof. Smith,\n\nConfirmed — I’ll be at Room 302 tomorrow at 10:00 AM with the progress update and blockers ready for discussion.\n\nBest,\nAnon User"
-];
+// AI state — cleared whenever a new email is opened
+const ai = {
+  summary: null,        // { summary, bullets } or null
+  summaryLoading: false,
+  extraction: null,     // { events, tasks } or null
+  extractLoading: false,
+  draft: "",            // current reply draft text
+  draftLoading: false,
+  draftTone: "professional",
+};
+
+function renderExtraction(data) {
+  const events = data.events || [];
+  const tasks = data.tasks || [];
+  if (!events.length && !tasks.length) return `<p class="ai-placeholder">No events or tasks found in this email.</p>`;
+  return `
+    ${events.map(e => `
+      <dl class="detail-list">
+        ${e.title ? `<div><dt>${icon("calendar-days")} Event</dt><dd>${e.title}</dd></div>` : ""}
+        ${e.date  ? `<div><dt>${icon("clock-3")} Date</dt><dd>${e.date}${e.time ? " · " + e.time : ""}</dd></div>` : ""}
+        ${e.location ? `<div><dt>${icon("map-pin")} Location</dt><dd>${e.location}</dd></div>` : ""}
+      </dl>
+      <button class="inline-action" data-add-event>${icon("calendar-plus")} Add to calendar</button>`).join("")}
+    ${tasks.map(t => `
+      <dl class="detail-list">
+        ${t.title    ? `<div><dt>${icon("square-check-big")} Task</dt><dd>${t.title}</dd></div>` : ""}
+        ${t.due_date ? `<div><dt>${icon("clock-3")} Due</dt><dd>${t.due_date}</dd></div>` : ""}
+      </dl>
+      <button class="inline-action" data-add-assignment>${icon("calendar-plus")} Add task</button>`).join("")}
+  `;
+}
 
 function icon(name, className = "") {
   return `<i data-lucide="${name}" class="${className}" aria-hidden="true"></i>`;
@@ -260,12 +286,32 @@ function readingView() {
   <div class="reading-grid">
     <article class="message-card">
       <div class="message-from"><span class="avatar">${(email.sender||"?").split(/\s|@/).slice(0,2).map(p=>p[0]).join("").toUpperCase()||"?"}</span><div><strong>${email.sender}</strong><small>${email.date || ""}</small></div><button class="star-button">${icon("star")}</button></div>
-      <div class="message-body">${email.body_html ? email.body_html : (email.body_plain || email.preview || "").split("\n").map(l=>`<p>${l}</p>`).join("")}</div>
+      <div class="message-body">${
+        email._loading
+          ? `<p class="ai-loading">Loading email…</p>`
+          : email.body_html
+            ? email.body_html
+            : (email.body_plain || email.preview || "").split("\n").map(l => l ? `<p>${l}</p>` : "").join("")
+      }</div>
       <div class="message-actions"><button class="secondary-button" data-reply>${icon("reply")} Reply</button><button class="secondary-button">${icon("reply-all")} Reply all</button><button class="secondary-button">${icon("forward")} Forward</button></div>
     </article>
     <aside class="ai-rail">
-      <section class="insight-card summary-card"><div class="insight-title"><span>${icon("sparkles")}</span><div><small>REVO AI</small><h2>Summary</h2></div><span class="confidence">High confidence</span></div><ul><li>Project meeting tomorrow at 10:00 AM</li><li>Location: Room 302</li><li>Prepare a progress update and blockers</li></ul></section>
-      <section class="insight-card"><div class="insight-title"><span>${icon("scan-text")}</span><div><small>EXTRACTED</small><h2>Key details</h2></div></div><dl class="detail-list"><div><dt>${icon("clock-3")} Time</dt><dd>Tomorrow, 10:00 AM</dd></div><div><dt>${icon("map-pin")} Location</dt><dd>Room 302</dd></div><div><dt>${icon("file-check-2")} Prepare</dt><dd>Progress update & blockers</dd></div></dl><button class="inline-action" data-add-event>${icon("calendar-plus")} Add to calendar</button></section>
+      <section class="insight-card summary-card">
+        <div class="insight-title"><span>${icon("sparkles")}</span><div><small>REVO AI</small><h2>Summary</h2></div>
+        ${ai.summary ? '' : `<button class="text-button" data-ai-summarise>${ai.summaryLoading ? icon("refresh-cw") + " Generating…" : icon("sparkles") + " Summarise"}</button>`}
+        </div>
+        ${ai.summaryLoading ? `<p class="ai-loading">Summarising…</p>` :
+          ai.summary ? `<p>${ai.summary.summary}</p><ul>${(ai.summary.bullets||[]).map(b=>`<li>${b}</li>`).join("")}</ul>` :
+          `<p class="ai-placeholder">Click Summarise to generate an AI summary of this email.</p>`}
+      </section>
+      <section class="insight-card">
+        <div class="insight-title"><span>${icon("scan-text")}</span><div><small>EXTRACTED</small><h2>Key details</h2></div>
+        ${ai.extraction ? '' : `<button class="text-button" data-ai-extract>${ai.extractLoading ? icon("refresh-cw") + " Extracting…" : icon("scan-text") + " Extract"}</button>`}
+        </div>
+        ${ai.extractLoading ? `<p class="ai-loading">Extracting details…</p>` :
+          ai.extraction ? renderExtraction(ai.extraction) :
+          `<p class="ai-placeholder">Click Extract to pull out dates, tasks, and events.</p>`}
+      </section>
     </aside>
   </div>
   <button class="floating-mic" data-voice title="Voice input">${icon("mic")}</button>`);
@@ -280,9 +326,15 @@ function replyView() {
   <section class="composer-card">
     <div class="field-row"><label>To</label><div class="input-shell"><span class="avatar avatar-xs">PS</span> Prof. Smith &lt;smith@university.edu&gt;</div></div>
     <div class="field-row"><label>Subject</label><div class="input-shell">Re: Project Meeting Tomorrow</div></div>
-    <div class="ai-draft-label"><span>${icon("sparkles")} AI generated reply</span><small>Version ${state.replyVersion + 1} of 3 · Edit as needed</small></div>
-    <textarea id="reply-text" class="reply-editor">${replies[state.replyVersion]}</textarea>
-    <div class="tone-row"><span>Quick tone</span><button class="tone-chip active">Professional</button><button class="tone-chip" data-tone="concise">Concise</button><button class="tone-chip" data-tone="friendly">Friendly</button></div>
+    <div class="ai-draft-label"><span>${icon("sparkles")} AI generated reply</span><small>Edit before sending</small></div>
+    ${ai.draftLoading
+      ? `<div class="reply-editor ai-loading">Generating draft…</div>`
+      : `<textarea id="reply-text" class="reply-editor">${ai.draft}</textarea>`}
+    <div class="tone-row"><span>Quick tone</span>
+      <button class="tone-chip ${ai.draftTone==="professional"?"active":""}" data-tone="professional">Professional</button>
+      <button class="tone-chip ${ai.draftTone==="concise"?"active":""}" data-tone="concise">Concise</button>
+      <button class="tone-chip ${ai.draftTone==="friendly"?"active":""}" data-tone="friendly">Friendly</button>
+    </div>
     <div class="composer-footer"><div class="compose-tools"><button class="icon-button">${icon("paperclip")}</button><button class="icon-button">${icon("smile")}</button><button class="icon-button">${icon("image")}</button><button class="icon-button" data-voice>${icon("mic")}</button></div><div><button class="secondary-button" data-discard>Discard</button><button class="primary-button" data-send>${icon("send")} Send reply</button></div></div>
   </section>`);
 }
@@ -407,23 +459,45 @@ function bindEvents() {
   });
   document.querySelectorAll("[data-nav]").forEach((button) => button.addEventListener("click", () => { state.view = button.dataset.nav; render(); }));
   document.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => { state.view = button.dataset.view; render(); }));
-  document.querySelectorAll("[data-email]").forEach((row) => row.addEventListener("click", (event) => {
+  document.querySelectorAll("[data-email]").forEach((row) => row.addEventListener("click", async (event) => {
     if (event.target.closest("button")) return;
-    state.selectedEmail = emails.find((email) => email.id === row.dataset.email);
-    if (state.selectedEmail) {
-      state.selectedEmail.unread = false;
-      state.view = "reading";
-      render();
+    const meta = emails.find((email) => email.id === row.dataset.email);
+    if (!meta) return;
+    // Clear AI state for the new email
+    ai.summary = null; ai.summaryLoading = false;
+    ai.extraction = null; ai.extractLoading = false;
+    ai.draft = ""; ai.draftLoading = false;
+    // Show reading view immediately with metadata while full body loads
+    state.selectedEmail = { ...meta, body_html: null, body_plain: null, _loading: true };
+    meta.unread = false;
+    state.view = "reading";
+    render();
+    // Fetch full message body
+    try {
+      const res = await fetch(`${API}/emails/${meta.id}`, { credentials: "include" });
+      if (res.ok) {
+        const full = await res.json();
+        state.selectedEmail = full;
+        render();
+      }
+    } catch (err) {
+      showToast("Could not load email body — " + err.message);
     }
   }));
   document.querySelector("[data-load-more]")?.addEventListener("click", () => fetchEmails(nextPageToken));
+  document.querySelector("[data-ai-summarise]")?.addEventListener("click", aiSummarise);
+  document.querySelector("[data-ai-extract]")?.addEventListener("click", aiExtract);
   document.querySelectorAll("[data-star]").forEach((button) => button.addEventListener("click", (event) => { event.stopPropagation(); const email = emails.find((item) => item.id === Number(button.dataset.star)); email.starred = !email.starred; render(); }));
   document.querySelectorAll("[data-category]").forEach((button) => button.addEventListener("click", () => { state.category = button.dataset.category; render(); }));
   document.querySelector("#search")?.addEventListener("input", (event) => { state.search = event.target.value; render(); document.querySelector("#search")?.focus(); });
   document.querySelector("[data-compose]")?.addEventListener("click", () => { state.view = "compose"; render(); });
-  document.querySelector("[data-reply]")?.addEventListener("click", () => { state.view = "reply"; render(); });
-  document.querySelector("[data-regenerate]")?.addEventListener("click", () => { state.replyVersion = (state.replyVersion + 1) % replies.length; render(); });
-  document.querySelectorAll("[data-tone]").forEach((button) => button.addEventListener("click", () => { state.replyVersion = button.dataset.tone === "concise" ? 2 : 1; render(); }));
+  document.querySelector("[data-reply]")?.addEventListener("click", () => {
+    state.view = "reply";
+    if (!ai.draft && !ai.draftLoading) aiDraftReply(ai.draftTone);
+    else render();
+  });
+  document.querySelector("[data-regenerate]")?.addEventListener("click", () => aiDraftReply(ai.draftTone));
+  document.querySelectorAll("[data-tone]").forEach((button) => button.addEventListener("click", () => aiDraftReply(button.dataset.tone)));
   document.querySelector("[data-discard]")?.addEventListener("click", () => { state.view = "reading"; render(); });
   document.querySelectorAll("[data-send]").forEach((button) => button.addEventListener("click", () => { state.view = "sent"; showToast("Message sent — human review complete"); }));
   document.querySelector("[data-ai-compose]")?.addEventListener("click", () => { const field = document.querySelector("#compose-body"); field.value = "Hi,\n\nI’m following up with a quick update on our project progress. The team has completed the initial planning and is now preparing the interactive prototype.\n\nBest regards,\nAnon User"; showToast("AI draft inserted — review before sending"); });
@@ -438,6 +512,55 @@ function bindEvents() {
   document.querySelector("[data-toggle-listening]")?.addEventListener("click", () => { state.voiceListening = !state.voiceListening; render(); });
   document.querySelectorAll("[data-command]").forEach((button) => button.addEventListener("click", () => { state.transcript = button.dataset.command; state.voiceListening = false; render(); }));
   document.querySelector("[data-run-command]")?.addEventListener("click", () => { state.voiceOpen = false; state.view = state.transcript.toLowerCase().includes("task") ? "tasks" : "reading"; showToast("Voice command completed"); });
+}
+
+// ---------------------------------------------------------------------------
+// AI helpers
+// ---------------------------------------------------------------------------
+async function aiSummarise() {
+  if (!state.selectedEmail) return;
+  ai.summaryLoading = true; render();
+  try {
+    const res = await fetch(`${API}/ai/summarise`, {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message_id: state.selectedEmail.id }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    ai.summary = await res.json();
+  } catch (err) { showToast("Summary failed — " + err.message); }
+  finally { ai.summaryLoading = false; render(); }
+}
+
+async function aiExtract() {
+  if (!state.selectedEmail) return;
+  ai.extractLoading = true; render();
+  try {
+    const res = await fetch(`${API}/ai/extract`, {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message_id: state.selectedEmail.id }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    ai.extraction = await res.json();
+  } catch (err) { showToast("Extraction failed — " + err.message); }
+  finally { ai.extractLoading = false; render(); }
+}
+
+async function aiDraftReply(tone = "professional") {
+  if (!state.selectedEmail) return;
+  ai.draftLoading = true; ai.draftTone = tone; render();
+  try {
+    const res = await fetch(`${API}/ai/draft-reply`, {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message_id: state.selectedEmail.id, tone }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    ai.draft = data.draft;
+  } catch (err) { showToast("Draft failed — " + err.message); ai.draft = ""; }
+  finally { ai.draftLoading = false; render(); }
 }
 
 // ---------------------------------------------------------------------------
