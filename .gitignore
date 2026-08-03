@@ -6,3 +6,14 @@ dist/
 !**/.env.example
 *.log
 .pm2/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.venv/
+venv/
+backend/revomail.db

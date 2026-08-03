@@ -100,33 +100,15 @@ const demoIcons = {
 
 const app = document.querySelector("#app");
 
-const emails = [
-  {
-    id: 1,
-    sender: "Prof. Smith",
-    address: "smith@university.edu",
-    subject: "Project Meeting Tomorrow",
-    preview: "Just a reminder that we will have our project meeting tomorrow…",
-    time: "10:30 AM",
-    category: "Primary",
-    unread: true,
-    starred: false,
-    body: [
-      "Hi team,",
-      "Just a reminder that we will have our project meeting tomorrow at 10:00 AM in Room 302.",
-      "Please prepare the progress update and any blockers you would like to discuss.",
-      "Best,\nProf. Smith"
-    ]
-  },
-  { id: 2, sender: "Marketing Team", address: "news@revomail.example", subject: "Weekly Newsletter", preview: "Here is this week’s update on campaigns and product launches…", time: "9:15 AM", category: "Promotions", unread: true, starred: false },
-  { id: 3, sender: "service@github.com", address: "service@github.com", subject: "Security alert", preview: "A new sign-in to your GitHub account was detected…", time: "Yesterday", category: "Primary", unread: false, starred: true },
-  { id: 4, sender: "Alice Chen", address: "alice.chen@example.com", subject: "Lunch Invitation", preview: "Would you like to join lunch this Friday? I found a great place…", time: "Yesterday", category: "Social", unread: false, starred: false },
-  { id: 5, sender: "no-reply@university.edu", address: "no-reply@university.edu", subject: "Course Update", preview: "The deadline for assignment 2 has been confirmed…", time: "May 12", category: "Primary", unread: false, starred: false },
-  { id: 6, sender: "HR Department", address: "careers@example.com", subject: "New Internship Opportunity", preview: "Please find attached the details of the winter internship…", time: "May 11", category: "Promotions", unread: false, starred: false }
-];
+// Emails are loaded from the API after login. Starts empty.
+let emails = [];
+let nextPageToken = null;
+
+const API = "http://localhost:8000/api";
 
 const state = {
   authenticated: false,
+  user: null,        // { email, name, picture } from /api/auth/me
   view: "inbox",
   selectedEmail: emails[0],
   category: "All",
@@ -138,6 +120,7 @@ const state = {
   replyVersion: 0,
   eventAdded: false,
   assignmentAdded: false,
+  emailsLoading: false,
   toast: ""
 };
 
@@ -188,10 +171,10 @@ function renderLogin() {
         ${logo()}
         <div class="login-heading"><p>Welcome to your calmer inbox</p><h2>Continue to RevoMail</h2></div>
         <div class="oauth-stack">
-          <button class="oauth google" data-login><span class="provider provider-google">G</span>Continue with Google</button>
-          <button class="oauth microsoft" data-login><span class="provider provider-microsoft">⊞</span>Continue with Microsoft</button>
-          <button class="oauth apple" data-login><span class="provider">●</span>Continue with Apple</button>
-          <button class="oauth facebook" data-login><span class="provider provider-facebook">f</span>Continue with Facebook</button>
+          <a class="oauth google" href="${API}/auth/google"><span class="provider provider-google">G</span>Continue with Google</a>
+          <button class="oauth microsoft" disabled title="Coming soon"><span class="provider provider-microsoft">⊞</span>Continue with Microsoft</button>
+          <button class="oauth apple" disabled title="Coming soon"><span class="provider">●</span>Continue with Apple</button>
+          <button class="oauth facebook" disabled title="Coming soon"><span class="provider provider-facebook">f</span>Continue with Facebook</button>
         </div>
         <p class="secure-note">${icon("shield-check")} OAuth 2.0 · RevoMail never sees your password</p>
         <p class="legal">By continuing, you agree to the Terms and Privacy Policy.</p>
@@ -204,11 +187,11 @@ function sidebar() {
   return `<aside class="sidebar">
     <div class="sidebar-top">${logo()}</div>
     <nav class="nav-list" aria-label="Mailbox navigation">
-      ${navItems.map(([view, label, navIcon]) => `<button class="nav-item ${state.view === view ? "active" : ""}" data-nav="${view}">${icon(navIcon)}<span>${label}</span>${view === "inbox" ? '<b class="nav-count">3</b>' : ""}</button>`).join("")}
+      ${navItems.map(([view, label, navIcon]) => { const unread = emails.filter(e => e.unread).length; return `<button class="nav-item ${state.view === view ? "active" : ""}" data-nav="${view}">${icon(navIcon)}<span>${label}</span>${view === "inbox" && unread > 0 ? `<b class="nav-count">${unread}</b>` : ""}</button>`; }).join("")}
     </nav>
     <div class="account-card">
-      <span class="avatar">AU</span>
-      <span class="account-copy"><strong>Anon User</strong><small>anon.user@example.com</small></span>
+      <span class="avatar">${state.user ? state.user.name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0,2) : "?"}</span>
+      <span class="account-copy"><strong>${state.user?.name || "..."}</strong><small>${state.user?.email || ""}</small></span>
       <button class="icon-button" data-logout title="Sign out">${icon("log-out")}</button>
     </div>
   </aside>`;
@@ -224,8 +207,10 @@ function inboxView() {
     const haystack = `${email.sender} ${email.subject} ${email.preview}`.toLowerCase();
     return matchesCategory && haystack.includes(state.search.toLowerCase());
   });
+  const firstName = state.user?.name?.split(" ")[0] || "there";
+  const unreadCount = emails.filter(e => e.unread).length;
   return shell(`<header class="page-header">
-    <div><span class="eyebrow">Good morning, Anon</span><h1>Inbox</h1><p>AI has highlighted what needs your attention.</p></div>
+    <div><span class="eyebrow">Good morning, ${firstName}</span><h1>Inbox</h1><p>AI has highlighted what needs your attention.</p></div>
     <button class="primary-button compose-button" data-compose>${icon("square-pen")} Compose</button>
   </header>
   <section class="inbox-toolbar">
@@ -238,20 +223,29 @@ function inboxView() {
   <section class="mail-panel">
     <div class="mail-panel-heading"><span>${visible.length} conversations</span><button class="text-button" data-summarize-all>${icon("sparkles")} Summarise inbox</button></div>
     <div class="email-list">
-      ${visible.length ? visible.map(emailRow).join("") : `<div class="empty-state">${icon("search-x")}<h3>No emails found</h3><p>Try a different search or category.</p></div>`}
+      ${state.emailsLoading
+        ? `<div class="empty-state">${icon("refresh-cw")} <h3>Loading emails…</h3></div>`
+        : visible.length
+          ? visible.map(emailRow).join("") + (nextPageToken ? `<button class="text-button load-more" data-load-more>Load more</button>` : "")
+          : `<div class="empty-state">${icon("search-x")}<h3>No emails found</h3><p>Try a different search or category.</p></div>`
+      }
     </div>
   </section>
   <button class="floating-mic" data-voice title="Voice input">${icon("mic")}</button>`);
 }
 
 function emailRow(email) {
+  // sender field from Gmail API is "Name <email@example.com>" — extract just the name part
+  const senderName = email.sender.replace(/<.*>/, "").trim() || email.sender;
+  const initials = senderName.split(/\s|@/).slice(0, 2).map(p => p[0]).join("").toUpperCase() || "?";
+  const displayDate = email.date ? new Date(email.date).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "";
   return `<article class="email-row ${email.unread ? "unread" : ""}" data-email="${email.id}" tabindex="0">
     <button class="check-button" aria-label="Select email"><span></span></button>
     <button class="star-button ${email.starred ? "starred" : ""}" data-star="${email.id}" aria-label="Star email">${icon("star")}</button>
-    <span class="avatar avatar-sm avatar-soft">${email.sender.split(/\s|@/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</span>
-    <div class="email-sender">${email.sender}</div>
+    <span class="avatar avatar-sm avatar-soft">${initials}</span>
+    <div class="email-sender">${senderName}</div>
     <div class="email-content"><strong>${email.subject}</strong><span>${email.preview}</span></div>
-    <time>${email.time}</time>
+    <time>${displayDate}</time>
     ${email.unread ? '<span class="unread-dot" aria-label="Unread"></span>' : ""}
   </article>`;
 }
@@ -265,8 +259,8 @@ function readingView() {
   </header>
   <div class="reading-grid">
     <article class="message-card">
-      <div class="message-from"><span class="avatar">PS</span><div><strong>${email.sender}</strong><small>&lt;${email.address}&gt; · to me</small></div><time>${email.time} · 2 hours ago</time><button class="star-button">${icon("star")}</button></div>
-      <div class="message-body">${(email.body || ["Hi Anon,", email.preview, "Regards,", email.sender]).map((part) => `<p>${part.replace("\n", "<br />")}</p>`).join("")}</div>
+      <div class="message-from"><span class="avatar">${(email.sender||"?").split(/\s|@/).slice(0,2).map(p=>p[0]).join("").toUpperCase()||"?"}</span><div><strong>${email.sender}</strong><small>${email.date || ""}</small></div><button class="star-button">${icon("star")}</button></div>
+      <div class="message-body">${email.body_html ? email.body_html : (email.body_plain || email.preview || "").split("\n").map(l=>`<p>${l}</p>`).join("")}</div>
       <div class="message-actions"><button class="secondary-button" data-reply>${icon("reply")} Reply</button><button class="secondary-button">${icon("reply-all")} Reply all</button><button class="secondary-button">${icon("forward")} Forward</button></div>
     </article>
     <aside class="ai-rail">
@@ -404,17 +398,25 @@ function openVoice() {
 }
 
 function bindEvents() {
-  document.querySelectorAll("[data-login]").forEach((button) => button.addEventListener("click", () => { state.authenticated = true; state.view = "inbox"; showToast("Securely connected to your demo inbox"); }));
-  document.querySelector("[data-logout]")?.addEventListener("click", () => { state.authenticated = false; state.view = "inbox"; render(); });
+  document.querySelector("[data-logout]")?.addEventListener("click", async () => {
+    await fetch(`${API}/auth/logout`, { method: "POST", credentials: "include" });
+    state.authenticated = false;
+    state.user = null;
+    state.view = "inbox";
+    render();
+  });
   document.querySelectorAll("[data-nav]").forEach((button) => button.addEventListener("click", () => { state.view = button.dataset.nav; render(); }));
   document.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => { state.view = button.dataset.view; render(); }));
   document.querySelectorAll("[data-email]").forEach((row) => row.addEventListener("click", (event) => {
     if (event.target.closest("button")) return;
-    state.selectedEmail = emails.find((email) => email.id === Number(row.dataset.email));
-    state.selectedEmail.unread = false;
-    state.view = "reading";
-    render();
+    state.selectedEmail = emails.find((email) => email.id === row.dataset.email);
+    if (state.selectedEmail) {
+      state.selectedEmail.unread = false;
+      state.view = "reading";
+      render();
+    }
   }));
+  document.querySelector("[data-load-more]")?.addEventListener("click", () => fetchEmails(nextPageToken));
   document.querySelectorAll("[data-star]").forEach((button) => button.addEventListener("click", (event) => { event.stopPropagation(); const email = emails.find((item) => item.id === Number(button.dataset.star)); email.starred = !email.starred; render(); }));
   document.querySelectorAll("[data-category]").forEach((button) => button.addEventListener("click", () => { state.category = button.dataset.category; render(); }));
   document.querySelector("#search")?.addEventListener("input", (event) => { state.search = event.target.value; render(); document.querySelector("#search")?.focus(); });
@@ -438,4 +440,57 @@ function bindEvents() {
   document.querySelector("[data-run-command]")?.addEventListener("click", () => { state.voiceOpen = false; state.view = state.transcript.toLowerCase().includes("task") ? "tasks" : "reading"; showToast("Voice command completed"); });
 }
 
-render();
+// ---------------------------------------------------------------------------
+// Fetch emails from the API and update state.
+// ---------------------------------------------------------------------------
+async function fetchEmails(pageToken = null) {
+  state.emailsLoading = true;
+  render();
+  try {
+    const url = `${API}/emails?max_results=20${pageToken ? `&page_token=${pageToken}` : ""}`;
+    const res = await fetch(url, { credentials: "include" });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    emails = pageToken ? [...emails, ...data.messages] : data.messages;
+    nextPageToken = data.next_page_token || null;
+  } catch (err) {
+    showToast("Could not load emails — " + err.message);
+  } finally {
+    state.emailsLoading = false;
+    render();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Startup — check if the user already has a valid session, or if they just
+// returned from the Google OAuth callback (?auth=success).
+// ---------------------------------------------------------------------------
+async function init() {
+  const params = new URLSearchParams(window.location.search);
+
+  if (params.get("auth_error")) {
+    showToast("Sign-in failed: " + params.get("auth_error"));
+    window.history.replaceState({}, "", "/");
+  }
+
+  try {
+    const res = await fetch(`${API}/auth/me`, { credentials: "include" });
+    if (res.ok) {
+      state.user = await res.json();
+      state.authenticated = true;
+      if (params.get("auth") === "success") {
+        window.history.replaceState({}, "", "/");
+        showToast(`Welcome back, ${state.user.name.split(" ")[0]}!`);
+      }
+      // Load real emails immediately after session is confirmed
+      await fetchEmails();
+      return; // render() already called inside fetchEmails
+    }
+  } catch {
+    // Backend not running or network error — stay on login screen
+  }
+
+  render();
+}
+
+init();
