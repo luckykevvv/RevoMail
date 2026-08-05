@@ -6,11 +6,34 @@ All functions are synchronous (run in a thread pool via FastAPI's
 run_in_threadpool) so the async event loop is never blocked.
 """
 
+import json
+import re
+
 from openai import OpenAI
 from app.config import settings
 
 _client = OpenAI(api_key=settings.openai_api_key)
 _MODEL = settings.openai_model
+
+
+def _parse_json(raw: str) -> dict:
+    """Parse JSON from model output, stripping markdown code fences if present."""
+    # Strip ```json ... ``` or ``` ... ``` wrappers the model sometimes adds
+    cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s*```$", "", cleaned.strip())
+    return json.loads(cleaned)
+
+
+def _clean_body(body: str) -> str:
+    """
+    Strip residual HTML tags and collapse whitespace so the model
+    receives clean readable text rather than markup noise.
+    """
+    # Remove any remaining tags (e.g. from HTML fallback path)
+    text = re.sub(r"<[^>]+>", " ", body)
+    # Collapse runs of whitespace / newlines into single spaces
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
 
 
 def _chat(system: str, user: str, max_tokens: int = 512) -> str:
@@ -44,13 +67,11 @@ Rules:
 
 def summarise(subject: str, sender: str, body: str) -> dict:
     """Return { summary, bullets } for a single email."""
-    import json
-    user = f"Subject: {subject}\nFrom: {sender}\n\n{body[:15000]}"
+    user = f"Subject: {subject}\nFrom: {sender}\n\n{_clean_body(body)[:15000]}"
     raw = _chat(SUMMARISE_SYSTEM, user, max_tokens=400)
     try:
-        return json.loads(raw)
+        return _parse_json(raw)
     except Exception:
-        # Fallback if the model doesn't return clean JSON
         return {"summary": raw, "bullets": []}
 
 
@@ -77,7 +98,7 @@ def draft_reply(subject: str, sender: str, body: str, tone: str = "professional"
     """Return a plain-text reply draft."""
     tone_note = TONE_INSTRUCTIONS.get(tone, TONE_INSTRUCTIONS["professional"])
     system = f"{DRAFT_SYSTEM}\n\nTone instruction: {tone_note}"
-    user = f"Original email\nSubject: {subject}\nFrom: {sender}\n\n{body[:15000]}"
+    user = f"Original email\nSubject: {subject}\nFrom: {sender}\n\n{_clean_body(body)[:15000]}"
     return _chat(system, user, max_tokens=600)
 
 
@@ -101,10 +122,9 @@ Rules:
 
 def extract(subject: str, sender: str, body: str) -> dict:
     """Return { events: [...], tasks: [...] } extracted from the email."""
-    import json
-    user = f"Subject: {subject}\nFrom: {sender}\n\n{body[:15000]}"
+    user = f"Subject: {subject}\nFrom: {sender}\n\n{_clean_body(body)[:15000]}"
     raw = _chat(EXTRACT_SYSTEM, user, max_tokens=600)
     try:
-        return json.loads(raw)
+        return _parse_json(raw)
     except Exception:
         return {"events": [], "tasks": [], "raw": raw}

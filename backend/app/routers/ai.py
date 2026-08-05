@@ -24,10 +24,11 @@ def _get_email_text(tokens: dict, message_id: str) -> dict:
     """Fetch a message and return its subject, sender, and plain body."""
     msg = gmail_service.get_message(tokens, message_id)
     body = msg.get("body_plain") or ""
-    # Fall back to stripping tags from HTML if no plain text
-    if not body and msg.get("body_html"):
+    # Fall back to the pre-sanitised HTML (CSS/scripts already stripped)
+    # so the model gets clean readable text, not raw markup
+    if not body and msg.get("body_html_clean"):
         import re
-        body = re.sub(r"<[^>]+>", " ", msg["body_html"])
+        body = re.sub(r"<[^>]+>", " ", msg["body_html_clean"])
     return {
         "subject": msg.get("subject", ""),
         "sender": msg.get("sender", ""),

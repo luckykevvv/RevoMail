@@ -10,6 +10,7 @@ Responsibilities:
 
 import base64
 import email as email_lib
+import re
 from typing import Any
 
 import bleach
@@ -98,10 +99,15 @@ def _header(headers: list[dict], name: str) -> str:
 
 def _sanitise_html(html: str) -> str:
     """Strip dangerous tags/attributes and block remote images."""
+    # Remove <style> and <script> blocks entirely (tag + content).
+    # bleach.clean with strip=True removes the tag but leaves the text
+    # content, which causes raw CSS to appear as visible text.
+    html = re.sub(r"<style[\s\S]*?</style>", "", html, flags=re.IGNORECASE)
+    html = re.sub(r"<script[\s\S]*?</script>", "", html, flags=re.IGNORECASE)
+
     clean = bleach.clean(html, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRS, strip=True)
-    # Block remote tracking images by replacing src with data-src
-    # (the frontend can decide whether to load them)
-    return clean.replace(' src="http', ' data-src="http').replace(" src='http", " data-src='http")
+
+    return clean
 
 
 # ---------------------------------------------------------------------------
@@ -188,7 +194,8 @@ def get_message(tokens: dict, message_id: str) -> dict:
         "starred": "STARRED" in label_ids,
         "category": _category(label_ids),
         "body_plain": plain,
-        "body_html": _sanitise_html(html) if html else None,
+        "body_html": html,                        # raw HTML for frontend display
+        "body_html_clean": _sanitise_html(html) if html else None,  # sanitised for AI
     }
 
 
