@@ -1,6 +1,6 @@
 # Backend Workspace
 
-This directory contains the implemented Module 1 authentication boundary plus reserved locations for later RevoMail modules. The selected foundation is Node.js, Express, PostgreSQL, Prisma, Zod, and provider-neutral OAuth adapters.
+This directory contains the implemented Module 1 authentication boundary plus reserved locations for later RevoMail modules. The selected foundation is Node.js, Express, the built-in `node:sqlite` API, Zod, and provider-neutral OAuth adapters.
 
 Google and Microsoft OAuth code is provider-ready and covered by local automated tests, but real provider flows remain unverified until test-app credentials are available. Do not describe mailbox, AI, calendar, or speech placeholder directories as implemented integrations.
 
@@ -35,7 +35,7 @@ Google and Microsoft OAuth code is provider-ready and covered by local automated
 
 ## Before Adding Another Backend Module
 
-1. Preserve the accepted runtime and persistence decision unless a replacement ADR is approved.
+1. Preserve the desktop-first SQLite persistence decision unless a replacement ADR is approved.
 2. Record new architectural decisions in `../docs/architecture/`.
 3. Define API contracts under `../shared/contracts/` or `../docs/api/`.
 4. Add a sanitized environment example without secrets.

@@ -1,39 +1,82 @@
 {
   "name": "revomail-frontend-demo",
   "version": "0.1.0",
+  "description": "AI-assisted email client and cross-platform desktop launcher",
+  "author": "RevoMail Contributors",
   "private": true,
   "type": "module",
+  "main": "desktop/main.js",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "start": "node server.js",
     "test": "vitest run",
-    "test:db": "vitest run backend/tests/integration/prisma-auth.test.js",
+    "test:db": "vitest run backend/tests/integration/sqlite-auth.test.js",
     "test:watch": "vitest",
-    "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate deploy",
-    "db:migrate:dev": "prisma migrate dev",
-    "postinstall": "prisma generate",
+    "db:migrate": "node scripts/migrate.js",
+    "db:migrate:dev": "node scripts/migrate.js",
     "pm2:start": "npm run build && pm2 start ecosystem.config.cjs",
     "pm2:logs": "pm2 logs revomail",
     "pm2:restart": "npm run build && pm2 restart revomail",
     "pm2:stop": "pm2 stop revomail",
-    "pm2:delete": "pm2 delete revomail"
+    "pm2:delete": "pm2 delete revomail",
+    "desktop": "npm run build && electron .",
+    "desktop:dev": "electron .",
+    "desktop:pack": "npm run build && electron-builder --dir",
+    "desktop:dist": "npm run build && electron-builder"
   },
   "dependencies": {
-    "@prisma/adapter-pg": "^7.9.1",
-    "@prisma/client": "^7.9.1",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "helmet": "^8.3.0",
     "lucide": "^0.468.0",
-    "pg": "^8.22.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "prisma": "^7.9.1",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
     "supertest": "^7.2.2",
     "vite": "^6.1.0",
     "vitest": "^4.1.10"
+  },
+  "build": {
+    "appId": "com.revomail.desktop",
+    "productName": "RevoMail",
+    "asar": true,
+    "asarUnpack": [
+      "server.js",
+      "backend/**/*",
+      "database/**/*",
+      "dist/**/*",
+      "node_modules/**/*"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "desktop/**/*",
+      "backend/**/*",
+      "database/**/*",
+      "dist/**/*",
+      "server.js",
+      "package.json",
+      "!desktop/tests/**/*",
+      "!backend/tests/**/*"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.productivity"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Office"
+    },
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
   }
 }

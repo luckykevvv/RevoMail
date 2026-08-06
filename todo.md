@@ -1,6 +1,6 @@
 # RevoMail Project Requirements and TODO
 
-Last updated: 2026-07-31
+Last updated: 2026-08-03
 
 ## 1. Project Objectives
 
@@ -30,7 +30,8 @@ Target users:
 - [x] Added light, dark, and mobile layouts.
 - [x] Added Vite build scripts, an Express production entry point, and PM2 configuration.
 - [x] Reserved backend, shared-contract, architecture, API documentation, and automation directories; Module 1 subsequently selected the authentication stack.
-- [x] Implemented the Module 1 authentication foundation: PostgreSQL models and migrations, encrypted provider credentials, server-side sessions, Google OAuth support, a pending Microsoft OAuth adapter, and connected-account UI/API states.
+- [x] Implemented the Module 1 authentication foundation: local SQLite models and migrations, encrypted provider credentials, server-side sessions, Google OAuth support, a pending Microsoft OAuth adapter, and connected-account UI/API states.
+- [x] Added an Electron desktop launcher MVP with one-click service controls, health-based status, persisted local settings, secure preload/IPC boundaries, and Windows packaging configuration.
 
 ### Not Yet Completed
 
@@ -39,6 +40,7 @@ Target users:
 - [ ] Microsoft OAuth and Microsoft Graph support is pending and is not part of the currently supported MVP provider path.
 - [ ] Implement the backend service, database, task queue, and user sessions.
 - [ ] Add automated tests, security review, monitoring, and production deployment.
+- [ ] Verify signed and installed desktop releases on macOS and Linux; code signing, notarization, and auto-update remain future work.
 
 ## 3. MVP Functional Requirements (P0)
 
@@ -225,6 +227,19 @@ Acceptance criteria:
 - [ ] Use test accounts and never use real personal mailbox data for testing.
 
 ### P1: Product Enhancements
+
+#### Desktop application
+
+- [x] Establish separate Electron main, preload, and renderer boundaries without duplicating the RevoMail Web UI.
+- [x] Add start, stop, restart, duplicate-start protection, and health-based readiness for the managed service.
+- [x] Add a desktop control room with explicit stopped, starting, running, stopping, and failed states.
+- [x] Validate and persist loopback host, port, startup, shutdown, theme, language, and reduced-motion preferences.
+- [x] Restrict renderer privileges, navigation, new windows, permissions, and IPC operations.
+- [x] Add desktop settings and service lifecycle unit tests.
+- [x] Make the desktop application create, migrate, and use its own per-user SQLite database without PostgreSQL or Docker.
+- [ ] Verify the installed Windows package end to end with real OAuth test-app credentials.
+- [ ] Verify macOS and Linux build artifacts in CI or on native hosts.
+- [ ] Add release signing, macOS notarization, and a reviewed automatic-update channel.
 
 - [ ] Add Apple account sign-in.
 - [ ] Improve priority detection and automatic email classification.

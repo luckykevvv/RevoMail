@@ -1,5 +1,6 @@
 node_modules/
 dist/
+release/
 .env
 .env.*
 !.env.example
@@ -7,4 +8,12 @@ dist/
 *.log
 .pm2/
 backend/generated/
+/data/
+prisma/data/
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
 .playwright-cli/

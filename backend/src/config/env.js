@@ -7,7 +7,7 @@ const schema = z.object({
   HOST: z.string().default("0.0.0.0"),
   PORT: z.coerce.number().int().min(1).max(65535).default(4173),
   APP_BASE_URL: z.string().url().default("http://localhost:4173"),
-  DATABASE_URL: z.string().min(1),
+  DATABASE_URL: z.string().startsWith("file:").default("file:./data/revomail.db"),
   TOKEN_ENCRYPTION_KEY: z.string().regex(/^[A-Za-z0-9+/]{43}=$/, "must be a base64-encoded 32-byte key"),
   GOOGLE_CLIENT_ID: z.string().optional().default(""),
   GOOGLE_CLIENT_SECRET: z.string().optional().default(""),

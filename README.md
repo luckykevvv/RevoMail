@@ -2,7 +2,7 @@
 
 RevoMail is an AI-assisted email client for email summarization, reply drafting, voice commands, and task/calendar extraction.
 
-> **Current status:** Module 1 includes provider-ready Google and Microsoft OAuth, PostgreSQL persistence, encrypted server-side credentials, secure sessions, and connected-account management. Real provider authorization has not been verified because test-app credentials are not currently available. Mailbox access, LLM calls, Speech-to-Text, and calendar writes remain simulated.
+> **Current status:** Module 1 includes provider-ready Google and Microsoft OAuth, local SQLite persistence, encrypted provider credentials, secure sessions, and connected-account management. RevoMail also includes an Electron desktop launcher that creates and migrates its own per-user database. Real provider authorization has not been verified because test-app credentials are not currently available. Mailbox access, LLM calls, Speech-to-Text, and calendar writes remain simulated.
 
 ## Current Prototype
 
@@ -24,32 +24,40 @@ Prerequisites:
 
 - A current Node.js LTS release.
 - npm.
-- PostgreSQL 16 or newer.
 
-Copy the safe environment template, set the database and encryption key, install locked dependencies, apply migrations, build, and start the same-origin service:
+For the desktop application, install locked dependencies and launch it. No PostgreSQL, Docker, database setup, migration command, or manually generated encryption key is required:
 
 ```powershell
-Copy-Item .env.example .env
-# Replace TOKEN_ENCRYPTION_KEY with: node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
 npm ci
-npm run db:migrate
-npm run build
-npm run start
+npm run desktop
 ```
 
-OAuth buttons remain disabled until the relevant provider client ID and secret are set. Provider callback URLs must be registered as `${APP_BASE_URL}/api/v1/auth/google/callback` and `${APP_BASE_URL}/api/v1/auth/microsoft/callback`.
+The application stores its SQLite database and generated encryption key in Electron's private per-user application-data directory. OAuth buttons remain disabled until the relevant provider client ID and secret are supplied through the local environment. Provider callback URLs must be registered as `${APP_BASE_URL}/api/v1/auth/google/callback` and `${APP_BASE_URL}/api/v1/auth/microsoft/callback`.
 
-## Production Preview
+## Desktop Application
 
-Set `NODE_ENV=production`, use an HTTPS `APP_BASE_URL`, supply production PostgreSQL and encryption settings through `.env` or the deployment environment, then run:
+Launch the desktop control room with:
+
+```powershell
+npm run desktop
+```
+
+The Electron launcher can start, stop, restart, and health-check the RevoMail service without further terminal commands. When the service becomes healthy, it opens the existing RevoMail interface in a separate secured window. Desktop settings persist under Electron's per-user application-data directory and include loopback host, port, automatic startup, open-on-ready, stop-on-exit, theme, preferred language, and reduced motion.
+
+The desktop main process selects the per-user SQLite path, applies migrations, and creates a persistent encryption key automatically. The database and key are unavailable to renderer code. Optional OAuth client credentials remain environment-only and are deliberately excluded from desktop settings.
+
+For launcher-only development after a current frontend build, use `npm run desktop:dev`. Create an unpacked application for the current host with `npm run desktop:pack`, or a distributable artifact with `npm run desktop:dist`. Windows packaging is configured; macOS and Linux require native or CI verification, and release signing, notarization, and automatic updates are not yet implemented.
+
+## Local Node Preview
+
+For a local Node.js preview without Electron, copy `.env.example`, replace `TOKEN_ENCRYPTION_KEY` with a base64-encoded 32-byte key, then run:
 
 ```powershell
 npm run build
-npm run db:migrate
 npm run start
 ```
 
-`server.js` serves the built frontend and the versioned authentication API. Production startup rejects a non-HTTPS `APP_BASE_URL`.
+`server.js` creates and migrates the configured SQLite file, then serves the built frontend and versioned authentication API. If `NODE_ENV=production` is selected explicitly, startup still requires an HTTPS `APP_BASE_URL`.
 
 Supported runtime variables:
 
@@ -58,7 +66,7 @@ Supported runtime variables:
 | `HOST` | `0.0.0.0` | Address used by the production preview server |
 | `PORT` | `4173` | Port used by the production preview server |
 | `APP_BASE_URL` | `http://localhost:4173` | Public same-origin URL and OAuth callback base |
-| `DATABASE_URL` | Required | PostgreSQL connection URL |
+| `DATABASE_URL` | `file:./data/revomail.db` | Local SQLite file URL |
 | `TOKEN_ENCRYPTION_KEY` | Required | Base64-encoded 32-byte AES key |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Empty | Google OAuth application credentials |
 | `GOOGLE_AUTH_URL`, `GOOGLE_TOKEN_URL`, `GOOGLE_USERINFO_URL`, `GOOGLE_REVOKE_URL` | Google endpoints | Overrideable Google OAuth endpoints, including test fixtures |
@@ -66,7 +74,7 @@ Supported runtime variables:
 | `MICROSOFT_TENANT` | `common` | Microsoft tenant selector |
 | `MICROSOFT_AUTH_URL`, `MICROSOFT_TOKEN_URL`, `MICROSOFT_USERINFO_URL` | Microsoft endpoints | Overrideable Microsoft endpoints, including test fixtures |
 
-The current server loads `.env` with `override: true`, so values in `.env` override inherited process variables. Real `.env` files are ignored and must never be committed.
+Normal server and PM2 starts load `.env` with `override: true`, so values in `.env` override inherited process variables. The Electron-managed process is the documented exception: it preserves its validated loopback host, port, and base URL by setting the internal `REVOMAIL_DESKTOP=1` launch marker. Real `.env` files are ignored and must never be committed.
 
 ## npm Scripts
 
@@ -76,15 +84,18 @@ The current server loads `.env` with `override: true`, so values in `.env` overr
 | `npm run build` | Build the frontend into `dist/` |
 | `npm run start` | Serve the production build with Node.js |
 | `npm test` | Run authentication unit and API integration tests |
-| `npm run test:db` | Run PostgreSQL repository integration tests using `TEST_DATABASE_URL` |
-| `npm run db:generate` | Generate the Prisma client |
-| `npm run db:migrate` | Apply committed PostgreSQL migrations |
-| `npm run db:migrate:dev` | Create and apply migrations during development |
+| `npm run test:db` | Run isolated SQLite repository integration tests |
+| `npm run db:migrate` | Apply committed SQLite migrations to the configured local database |
+| `npm run db:migrate:dev` | Apply committed SQLite migrations during development |
 | `npm run pm2:start` | Build and start the production preview with PM2 |
 | `npm run pm2:logs` | View RevoMail PM2 logs |
 | `npm run pm2:restart` | Rebuild and restart the PM2 process |
 | `npm run pm2:stop` | Stop the PM2 process |
 | `npm run pm2:delete` | Remove the PM2 process |
+| `npm run desktop` | Build and open the Electron desktop control room |
+| `npm run desktop:dev` | Open Electron using the current frontend build |
+| `npm run desktop:pack` | Build an unpacked desktop application for the current platform |
+| `npm run desktop:dist` | Build a desktop installer or distributable artifact |
 
 ## Repository Structure
 
@@ -100,8 +111,10 @@ RevoMail/
 |   |-- main.js                # Demo state, views, and interactions
 |   `-- style.css              # RevoMail design and responsive styles
 |-- public/                    # Static frontend assets
+|-- desktop/                   # Electron main, preload, launcher renderer, and tests
 |-- server.js                  # Same-origin production frontend and API entry point
-|-- prisma/                    # PostgreSQL schema and committed migrations
+|-- database/                  # Ordered SQLite migrations
+|-- data/                      # Ignored local SQLite database files
 |-- backend/                   # Reserved backend application boundary
 |   |-- README.md              # Backend layering and implementation rules
 |   |-- src/
@@ -149,7 +162,7 @@ Backend dependency rules:
 5. Repositories isolate persistence.
 6. Shared contracts define the frontend/backend boundary without importing provider SDKs.
 
-The authentication stack decision is recorded in `docs/architecture/0001-authentication-stack.md`; the HTTP contract is documented in `docs/api/authentication.md`.
+The authentication stack decision is recorded in `docs/architecture/0001-authentication-stack.md`; desktop-first SQLite persistence is recorded in `docs/architecture/0002-desktop-sqlite-persistence.md`; the HTTP contract is documented in `docs/api/authentication.md`.
 
 ## Collaboration
 

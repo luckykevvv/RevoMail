@@ -6,7 +6,7 @@ These instructions apply to the entire repository. They are intended for AI codi
 
 RevoMail is an AI-assisted email client with summarization, reply drafting, voice commands, and task/calendar extraction.
 
-The current repository contains a verified interactive frontend prototype. OAuth, mailbox access, LLM calls, speech recognition, calendar writes, backend persistence, and production monitoring are still simulated or not implemented.
+The current repository contains a verified interactive frontend prototype, a provider-ready authentication backend with local SQLite persistence, and an Electron desktop launcher MVP. Real provider authorization has not been verified, and mailbox access, LLM calls, speech recognition, calendar writes, and production monitoring are still simulated or not implemented.
 
 Do not describe a mocked interaction as a real integration. Verify the actual code path and runtime behavior before reporting that a requirement is complete.
 
@@ -141,6 +141,10 @@ npm run pm2:logs
 npm run pm2:restart
 npm run pm2:stop
 npm run pm2:delete
+npm run desktop
+npm run desktop:dev
+npm run desktop:pack
+npm run desktop:dist
 ```
 
 Dependency rules:
@@ -155,7 +159,11 @@ Environment rules:
 - Keep environment-dependent values out of source code.
 - Add new supported variables to `.env.example` with safe placeholder values.
 - Keep the real `.env` ignored.
-- The current server intentionally loads `.env` with `override: true`, so `.env` values override inherited process variables. If this precedence changes, update the implementation, tests, README, and this instruction file together.
+- Normal server and PM2 starts intentionally load `.env` with `override: true`, so `.env` values override inherited process variables.
+- The Electron-managed child process sets `REVOMAIL_DESKTOP=1`; only in that explicit mode do validated desktop launch values and inherited process variables take precedence over `.env`. Keep this exception internal to the desktop process boundary and update its tests, README, and this instruction file if it changes.
+- SQLite through the Node.js built-in `node:sqlite` module is the only supported persistence engine. The normal default is `file:./data/revomail.db`; Electron overrides it with a database under its per-user `userData` directory.
+- The service applies committed SQLite migrations automatically before listening. Keep migrations ordered, transactional, and compatible with both new and existing local databases.
+- Keep `/data/`, `*.db`, `*.db-journal`, `*.db-shm`, and `*.db-wal` ignored. Never commit a local database or copy one into a desktop package.
 - `ecosystem.config.cjs` should contain process-management settings only. Keep business configuration, service URLs, database URLs, storage paths, and secrets in environment variables.
 
 Production verification:
@@ -200,6 +208,18 @@ Production verification:
 - Prefer semantic HTML and reusable UI helpers.
 - Do not add a new framework or state library without a concrete requirement and contributor agreement.
 
+### Desktop application
+
+- Keep Electron main-process, preload, and renderer responsibilities separate.
+- Renderer processes must use context isolation, must not enable Node.js integration, and may access system capabilities only through a minimal validated preload API.
+- Bind desktop-managed services to a loopback host by default. Do not expose a desktop service on the LAN through a renderer-controlled setting.
+- Determine readiness through `/api/v1/health`; a child process identifier alone is not proof that the service is usable.
+- Prevent duplicate service processes and define explicit start, stop, restart, unexpected-exit, single-instance, and application-exit behavior.
+- Store ordinary desktop preferences under Electron `userData`. Keep tokens, the generated encryption key, mailbox content, and other secrets out of renderer-accessible settings.
+- Store the Electron SQLite database and generated encryption key under `userData`; generate the key in the main process and never expose its value over IPC.
+- Preserve the independent Web and PM2 workflows. Desktop integration must not make Electron a server or deployment prerequisite.
+- Keep generated installers and unpacked applications under ignored `release/`; never commit packaged environment files or credentials.
+
 ## 9. Validation Matrix
 
 Choose checks proportional to the change.
@@ -229,6 +249,15 @@ For interactive changes, also test the affected flow in a real browser at deskto
 - Start with `npm run start`.
 - Verify a real HTTP response on the configured host and port.
 - Confirm that production start does not invoke Vite development mode or another development tool.
+- Verify that a clean SQLite database is created, migrated, and reachable without PostgreSQL or Docker.
+
+### Electron desktop changes
+
+- Run `npm test` and `npm run build`.
+- Exercise start, duplicate start, health-ready, stop, restart, invalid configuration, and unexpected-exit behavior.
+- Inspect the real Electron launcher for preload or renderer console errors and keyboard-accessible controls.
+- Run `npm run desktop:pack` for the current platform when packaging behavior changes.
+- Record macOS or Linux checks as unverified when they cannot be run on the current host; configuration alone is not cross-platform verification.
 
 ### Integration changes
 

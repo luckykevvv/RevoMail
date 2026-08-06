@@ -1,24 +1,30 @@
-import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "@prisma/client";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { PrismaAuthRepository } from "../../src/repositories/prisma-auth-repository.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { initializeSqliteDatabase, openSqliteDatabase } from "../../src/config/sqlite.js";
+import { SqliteAuthRepository } from "../../src/repositories/sqlite-auth-repository.js";
 
-const databaseUrl = process.env.TEST_DATABASE_URL;
-const databaseSuite = describe.runIf(Boolean(databaseUrl));
+const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "revomail-sqlite-test-"));
+const databaseUrl = `file:${path.join(temporaryDirectory, "auth.db").replaceAll("\\", "/")}`;
+let database;
+let repository;
 
-databaseSuite("Prisma authentication repository", () => {
-  const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
-  const repository = new PrismaAuthRepository(prisma);
-
-  beforeEach(async () => {
-    await prisma.session.deleteMany();
-    await prisma.oAuthCredential.deleteMany();
-    await prisma.mailboxConnection.deleteMany();
-    await prisma.user.deleteMany();
-    await prisma.oAuthTransaction.deleteMany();
+describe("SQLite authentication repository", () => {
+  beforeAll(() => {
+    initializeSqliteDatabase({ databaseUrl, migrationsPath: path.resolve("database/migrations") });
+    database = openSqliteDatabase(databaseUrl);
+    repository = new SqliteAuthRepository(database);
   });
 
-  afterAll(() => prisma.$disconnect());
+  beforeEach(async () => {
+    database.exec(`DELETE FROM "Session"; DELETE FROM "OAuthCredential"; DELETE FROM "MailboxConnection"; DELETE FROM "User"; DELETE FROM "OAuthTransaction";`);
+  });
+
+  afterAll(async () => {
+    database.close();
+    fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+  });
 
   it("atomically consumes a one-time OAuth transaction", async () => {
     const now = new Date();
