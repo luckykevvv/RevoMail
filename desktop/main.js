@@ -6,7 +6,9 @@ import { ZodError } from "zod";
 import { ensureEncryptionKey } from "./secret-store.js";
 import { DesktopSettingsStore } from "./settings-store.js";
 import { ServiceController } from "./service-controller.js";
-import { resolvePythonCommand } from "../scripts/python-runtime.mjs";
+import { resolveBackendLaunch } from "./backend-launch.js";
+import { loadDesktopEnvironment } from "./runtime-environment.js";
+import { isAllowedNavigation } from "./navigation-policy.js";
 
 const desktopDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = app.isPackaged ? path.join(process.resourcesPath, "app.asar.unpacked") : app.getAppPath();
@@ -45,13 +47,14 @@ function secureWindowOptions(overrides = {}) {
   };
 }
 
-function protectNavigation(window, allowAppOrigin = false) {
+function protectNavigation(window, { allowAppOrigin = false, allowProviderAuth = false } = {}) {
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith("https://")) void shell.openExternal(url);
     return { action: "deny" };
   });
   window.webContents.on("will-navigate", (event, url) => {
-    if (allowAppOrigin && isAllowedWebUrl(url)) return;
+    const appOrigin = allowAppOrigin ? serviceController?.snapshot().url : null;
+    if (isAllowedNavigation(url, { appOrigin, allowProviderAuth })) return;
     if (url === window.webContents.getURL()) return;
     event.preventDefault();
   });
@@ -88,7 +91,7 @@ async function openMailWindow() {
     title: "RevoMail",
     webPreferences: { partition: "persist:revomail" }
   }));
-  protectNavigation(mailWindow, true);
+  protectNavigation(mailWindow, { allowAppOrigin: true, allowProviderAuth: true });
   mailWindow.once("ready-to-show", () => mailWindow.show());
   mailWindow.on("closed", () => { mailWindow = null; });
   await mailWindow.loadURL(snapshot.url);
@@ -142,13 +145,23 @@ app.on("second-instance", () => {
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
   const userDataPath = app.getPath("userData");
+  loadDesktopEnvironment({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    projectRoot,
+    userDataPath
+  });
   process.env.DATABASE_URL = `file:${path.join(userDataPath, "revomail.db").replaceAll("\\", "/")}`;
   process.env.TOKEN_ENCRYPTION_KEY ||= ensureEncryptionKey(path.join(userDataPath, "server.key"));
   settingsStore = new DesktopSettingsStore(path.join(userDataPath, "desktop-settings.json"));
+  const backendLaunch = resolveBackendLaunch({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    projectRoot
+  });
   serviceController = new ServiceController({
     spawn,
-    command: resolvePythonCommand(projectRoot),
-    commandArgs: ["-m", "backend.run"],
+    ...backendLaunch,
     projectRoot
   });
   serviceController.on("state", async (state) => {

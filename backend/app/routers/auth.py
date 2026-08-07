@@ -4,6 +4,7 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 
 from backend.app.config import settings
+from backend.app.services.oauth_transactions import oauth_transactions
 
 
 router = APIRouter()
@@ -50,8 +51,8 @@ def _authorization(request: Request, return_to: str = "/") -> str:
         include_granted_scopes="true",
         prompt="consent",
     )
-    request.session["oauth_state"] = state
-    request.session["return_to"] = return_to if return_to.startswith("/") else "/"
+    safe_return_to = return_to if return_to.startswith("/") and not return_to.startswith("//") else "/"
+    oauth_transactions.put(state, safe_return_to)
     return authorization_url
 
 
@@ -75,9 +76,10 @@ async def provider_start(provider: str, request: Request, returnTo: str = "/"):
 
 @router.get("/google/callback")
 async def google_callback(request: Request, code: str = "", state: str = "", error: str = ""):
+    transaction = oauth_transactions.consume(state)
     if error:
         return RedirectResponse(f"/?authError=AUTHORIZATION_DENIED")
-    if not code or request.session.get("oauth_state") != state:
+    if not code or transaction is None:
         return RedirectResponse("/?authError=INVALID_OAUTH_STATE")
 
     try:
@@ -111,9 +113,7 @@ async def google_callback(request: Request, code: str = "", state: str = "", err
         "status": "CONNECTED",
         "scopes": request.session["tokens"]["scopes"],
     }
-    return_to = request.session.pop("return_to", "/")
-    request.session.pop("oauth_state", None)
-    return RedirectResponse(return_to)
+    return RedirectResponse(transaction.return_to)
 
 
 @router.post("/logout", status_code=204)

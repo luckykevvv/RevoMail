@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from backend.app.main import create_app
 from backend.app.routers import auth
+from backend.app.services.oauth_transactions import OAuthTransactionStore, oauth_transactions
 
 
 class FakeFlow:
@@ -45,6 +46,7 @@ class FakeOAuthService:
 
 @pytest.fixture()
 def client(monkeypatch):
+    oauth_transactions.clear()
     monkeypatch.setattr(auth, "_providers", lambda: {"google": True, "microsoft": False})
     monkeypatch.setattr(auth, "_build_flow", FakeFlow)
     monkeypatch.setattr(auth, "build", lambda *_args, **_kwargs: FakeOAuthService())
@@ -130,3 +132,63 @@ def test_invalid_state_returns_retryable_frontend_status(client):
         follow_redirects=False,
     )
     assert response.headers["location"] == "/?authError=INVALID_OAUTH_STATE"
+
+
+def test_google_callback_survives_loopback_cookie_host_change(client):
+    client.get("/api/v1/auth/google/start", follow_redirects=False)
+    client.cookies.clear()
+    response = client.get(
+        "/api/v1/auth/google/callback?code=valid-code&state=test-state",
+        follow_redirects=False,
+    )
+    assert response.status_code == 307
+    assert client.get("/api/v1/auth/session").json()["authenticated"] is True
+
+
+def test_server_side_oauth_state_expires_and_cannot_be_replayed():
+    now = [100.0]
+    store = OAuthTransactionStore(ttl_seconds=10, clock=lambda: now[0])
+    store.put("state", "/inbox")
+    assert store.consume("state").return_to == "/inbox"
+    assert store.consume("state") is None
+
+    store.put("expired", "/")
+    now[0] = 111.0
+    assert store.consume("expired") is None
+
+
+def test_callback_rejects_expired_and_replayed_server_state(client, monkeypatch):
+    now = [100.0]
+    store = OAuthTransactionStore(ttl_seconds=10, clock=lambda: now[0])
+    monkeypatch.setattr(auth, "oauth_transactions", store)
+
+    client.get("/api/v1/auth/google/start", follow_redirects=False)
+    now[0] = 111.0
+    expired = client.get(
+        "/api/v1/auth/google/callback?code=valid-code&state=test-state",
+        follow_redirects=False,
+    )
+    assert expired.headers["location"] == "/?authError=INVALID_OAUTH_STATE"
+
+    now[0] = 112.0
+    client.get("/api/v1/auth/google/start", follow_redirects=False)
+    accepted = client.get(
+        "/api/v1/auth/google/callback?code=valid-code&state=test-state",
+        follow_redirects=False,
+    )
+    assert accepted.status_code == 307
+    replayed = client.get(
+        "/api/v1/auth/google/callback?code=valid-code&state=test-state",
+        follow_redirects=False,
+    )
+    assert replayed.headers["location"] == "/?authError=INVALID_OAUTH_STATE"
+
+
+def test_oauth_start_rejects_scheme_relative_return_path(client):
+    client.get("/api/v1/auth/google/start?returnTo=//example.test", follow_redirects=False)
+    client.cookies.clear()
+    response = client.get(
+        "/api/v1/auth/google/callback?code=valid-code&state=test-state",
+        follow_redirects=False,
+    )
+    assert response.headers["location"] == "/"

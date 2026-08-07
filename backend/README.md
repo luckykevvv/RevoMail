@@ -2,7 +2,7 @@
 
 FastAPI is RevoMail's active HTTP backend. It serves the built Vite frontend and exposes the same-origin `/api/v1` contract used by the retained Module 1 account UI.
 
-Implemented Python paths include Google OAuth, session bootstrap, connected-account actions, Gmail inbox/message reads, and OpenAI-backed summary, extraction, and reply-draft endpoints. Microsoft remains pending. Real Google and OpenAI calls have not yet been verified with test credentials; automated tests use local fakes.
+Implemented Python paths include Google OAuth, session bootstrap, connected-account actions, Gmail inbox/message reads, and OpenAI-backed summary, extraction, and reply-draft endpoints. Microsoft remains pending. Real Google authorization initiation has been verified, while callback exchange, Gmail, refresh, revocation, and OpenAI calls have not yet completed test-account verification; automated tests use local fakes.
 
 ## Layout
 
@@ -30,6 +30,6 @@ npm run build
 npm run start
 ```
 
-On macOS or Linux, install with `.venv/bin/python -m pip install -r backend/requirements.txt`. The shared runtime helper selects a bundled runtime first, then the repository `.venv`, then the platform Python command.
+On macOS or Linux, install with `.venv/bin/python -m pip install -r backend/requirements.txt`. Development commands select the repository `.venv` and then the platform Python command. `npm run backend:pack` produces the standalone backend used by packaged Electron builds.
 
 Keep real Google and OpenAI credentials in the ignored root `.env`. Do not commit tokens, mailbox content, or test-account data.

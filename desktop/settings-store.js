@@ -14,7 +14,7 @@ export const desktopSettingsSchema = z.object({
 }).strict();
 
 export const DEFAULT_DESKTOP_SETTINGS = Object.freeze({
-  host: "127.0.0.1",
+  host: "localhost",
   port: 4173,
   autoStart: false,
   launchOnReady: true,

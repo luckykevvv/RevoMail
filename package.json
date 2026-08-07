@@ -24,8 +24,12 @@
     "pm2:delete": "pm2 delete revomail",
     "desktop": "npm run build && electron .",
     "desktop:dev": "electron .",
-    "desktop:pack": "npm run build && electron-builder --dir",
-    "desktop:dist": "npm run build && electron-builder"
+    "backend:pack": "node scripts/build-python-backend.mjs",
+    "backend:smoke": "node scripts/smoke-python-backend.mjs",
+    "desktop:smoke": "node scripts/smoke-desktop-service.mjs",
+    "desktop:ui-smoke": "node scripts/smoke-electron-ui.mjs",
+    "desktop:pack": "npm run build && npm run backend:pack && electron-builder --dir",
+    "desktop:dist": "npm run build && npm run backend:pack && electron-builder"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
@@ -56,11 +60,18 @@
     "directories": {
       "output": "release"
     },
+    "extraResources": [
+      {
+        "from": "build/python/revomail-backend",
+        "to": "python-backend"
+      }
+    ],
     "files": [
       "desktop/**/*",
       "backend/**/*",
       "database/**/*",
       "dist/**/*",
+      "scripts/python-runtime.mjs",
       "server.js",
       "pytest.ini",
       "package.json",

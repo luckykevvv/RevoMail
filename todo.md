@@ -237,7 +237,8 @@ Acceptance criteria:
 - [x] Validate and persist loopback host, port, startup, shutdown, theme, language, and reduced-motion preferences.
 - [x] Restrict renderer privileges, navigation, new windows, permissions, and IPC operations.
 - [x] Add desktop settings and service lifecycle unit tests.
-- [ ] Migrate desktop per-user persistence to FastAPI and bundle a Python runtime for one-click packaged starts. (The earlier Node/SQLite implementation remains in history and migration-reference code.)
+- [x] Bundle the FastAPI backend and Python runtime for one-click packaged starts on Windows.
+- [ ] Migrate desktop per-user persistence to FastAPI. (The earlier Node/SQLite implementation remains in history and migration-reference code.)
 - [ ] Verify the installed Windows package end to end with real OAuth test-app credentials.
 - [ ] Verify macOS and Linux build artifacts in CI or on native hosts.
 - [ ] Add release signing, macOS notarization, and a reviewed automatic-update channel.

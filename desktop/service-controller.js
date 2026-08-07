@@ -14,6 +14,13 @@ function safeMessage(error) {
   return error?.message || "The service could not be started.";
 }
 
+function safeBackendDetail(output) {
+  const lines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const detail = lines.at(-1);
+  if (!detail) return null;
+  return detail.replace(/https?:\/\/\S+/gi, "[url]").slice(0, 300);
+}
+
 export class ServiceController extends EventEmitter {
   constructor({ spawn, command, commandArgs = [], projectRoot, fetchImpl = globalThis.fetch, startTimeoutMs = DEFAULT_START_TIMEOUT_MS, stopTimeoutMs = DEFAULT_STOP_TIMEOUT_MS }) {
     super();
@@ -26,6 +33,7 @@ export class ServiceController extends EventEmitter {
     this.stopTimeoutMs = stopTimeoutMs;
     this.child = null;
     this.intentionalStop = false;
+    this.backendOutput = "";
     this.state = { phase: "stopped", pid: null, url: null, startedAt: null, error: null };
   }
 
@@ -37,6 +45,7 @@ export class ServiceController extends EventEmitter {
     if (ACTIVE_PHASES.has(this.state.phase)) return this.snapshot();
     const url = `http://${publicHost(settings.host)}:${settings.port}`;
     this.intentionalStop = false;
+    this.backendOutput = "";
     this.#setState({ phase: "starting", pid: null, url, startedAt: null, error: null });
 
     const child = this.spawn(this.command, this.commandArgs, {
@@ -44,6 +53,7 @@ export class ServiceController extends EventEmitter {
       env: {
         ...process.env,
         REVOMAIL_DESKTOP: "1",
+        REVOMAIL_PROJECT_ROOT: this.projectRoot,
         HOST: settings.host,
         PORT: String(settings.port),
         APP_BASE_URL: url
@@ -54,6 +64,12 @@ export class ServiceController extends EventEmitter {
     this.child = child;
     this.#setState({ pid: child.pid ?? null });
 
+    const captureOutput = (chunk) => {
+      this.backendOutput = `${this.backendOutput}${String(chunk)}`.slice(-4_000);
+    };
+    child.stdout?.on("data", captureOutput);
+    child.stderr?.on("data", captureOutput);
+
     child.once("error", (error) => {
       if (this.child !== child) return;
       this.child = null;
@@ -63,11 +79,12 @@ export class ServiceController extends EventEmitter {
       if (this.child !== child) return;
       this.child = null;
       const stoppedNormally = this.intentionalStop || this.state.phase === "stopping";
+      const detail = safeBackendDetail(this.backendOutput);
       this.#setState({
         phase: stoppedNormally ? "stopped" : "failed",
         pid: null,
         startedAt: null,
-        error: stoppedNormally ? null : `The service exited before it became healthy (${signal || `code ${code ?? "unknown"}`}). Check local file access and any configured OAuth values, then try again.`
+        error: stoppedNormally ? null : `The service exited before it became healthy (${signal || `code ${code ?? "unknown"}`}).${detail ? ` Backend error: ${detail}` : " Check local file access, then try again."}`
       });
     });
 

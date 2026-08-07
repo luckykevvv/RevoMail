@@ -54,7 +54,8 @@ describe("ServiceController", () => {
     const child = childProcess();
     const controller = new ServiceController({ spawn: () => child, command: "python", commandArgs: ["-m", "backend.run"], projectRoot: "C:\\RevoMail", fetchImpl: vi.fn(async () => ({ ok: true })) });
     await controller.start(settings());
+    child.stderr.emit("data", Buffer.from("ModuleNotFoundError: No module named 'itsdangerous'\n"));
     child.emit("exit", 1, null);
-    expect(controller.snapshot()).toMatchObject({ phase: "failed", pid: null, error: expect.stringContaining("local file access") });
+    expect(controller.snapshot()).toMatchObject({ phase: "failed", pid: null, error: expect.stringContaining("itsdangerous") });
   });
 });

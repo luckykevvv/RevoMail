@@ -26,11 +26,11 @@ Returns `200` with provider availability and authentication state. An authentica
 
 ### `GET /api/v1/auth/:provider/start?returnTo=/`
 
-Google is implemented; Microsoft returns a pending-provider error. The endpoint records OAuth state and a local `returnTo` path before redirecting.
+Google is implemented; Microsoft returns a pending-provider error. The endpoint records a single-use OAuth state and local `returnTo` path for ten minutes before redirecting. The server-side transaction also preserves validation when a loopback callback changes between `127.0.0.1` and `localhost` and the browser cannot send the original host cookie.
 
 ### `GET /api/v1/auth/:provider/callback`
 
-Validates state, exchanges the code, loads the Google profile, creates the signed application session, and redirects to a clean frontend URL. Provider failures redirect with a safe `authError` code.
+Atomically consumes and validates state, exchanges the code, loads the Google profile, creates the signed application session, and redirects to a clean frontend URL. Expired or replayed states and provider failures redirect with a safe `authError` code.
 
 ### `POST /api/v1/auth/logout`
 

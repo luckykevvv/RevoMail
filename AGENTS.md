@@ -6,7 +6,7 @@ These instructions apply to the entire repository. They are intended for AI codi
 
 RevoMail is an AI-assisted email client with summarization, reply drafting, voice commands, and task/calendar extraction.
 
-The current repository contains a verified interactive frontend, an active Python/FastAPI backend with provider-ready Google OAuth, Gmail and OpenAI API paths, the retained connected-account UI, and an Electron desktop launcher MVP. Provider calls are covered by local fakes but have not been verified with real credentials. Microsoft, speech recognition, sending, calendar writes, bundled-Python desktop distribution, and production monitoring remain pending.
+The current repository contains a verified interactive frontend, an active Python/FastAPI backend with provider-ready Google OAuth, Gmail and OpenAI API paths, the retained connected-account UI, and an Electron desktop launcher with a standalone Windows backend package. Provider calls are covered by local fakes but have not been verified with real credentials. Microsoft, speech recognition, sending, calendar writes, native macOS/Linux packaging verification, and production monitoring remain pending.
 
 Do not describe a mocked interaction as a real integration. Verify the actual code path and runtime behavior before reporting that a requirement is complete.
 
@@ -162,7 +162,7 @@ Environment rules:
 - Add new supported variables to `.env.example` with safe placeholder values.
 - Keep the real `.env` ignored.
 - FastAPI loads the ignored root `.env`; process and Electron-injected variables take precedence over file values.
-- npm, PM2, and Electron select Python internally: a bundled runtime first, then the repository `.venv`, then the platform Python command.
+- npm and PM2 select the repository `.venv` and then the platform Python command. Development Electron uses the same resolver; packaged Electron launches only its bundled standalone backend.
 - The earlier Node SQLite schema and migration remain committed while persistence is migrated to Python. Do not claim that the current FastAPI session path persists accounts in SQLite.
 - Keep `/data/`, `*.db`, `*.db-journal`, `*.db-shm`, and `*.db-wal` ignored. Never commit a local database or copy one into a desktop package.
 - `ecosystem.config.cjs` should contain process-management settings only. Keep business configuration, service URLs, database URLs, storage paths, and secrets in environment variables.

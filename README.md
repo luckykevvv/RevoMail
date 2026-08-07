@@ -2,7 +2,7 @@
 
 RevoMail is an AI-assisted email client for email summarization, reply drafting, voice commands, and task/calendar extraction.
 
-> **Current status:** RevoMail now uses Python/FastAPI for its active API, with Google OAuth, the existing connected-account UI, Gmail inbox/message endpoints, and OpenAI summary, extraction, and reply-draft endpoints. Automated tests use simulated providers; real Google and OpenAI calls remain unverified. Microsoft, Speech-to-Text, sending, calendar writes, and bundled-Python desktop distribution remain pending.
+> **Current status:** RevoMail now uses Python/FastAPI for its active API, with Google OAuth, the existing connected-account UI, Gmail inbox/message endpoints, and OpenAI summary, extraction, and reply-draft endpoints. The Windows desktop package includes a standalone backend and does not require a system Python installation. Automated tests use simulated providers; real Google and OpenAI calls remain unverified. Microsoft, Speech-to-Text, sending, and calendar writes remain pending.
 
 ## Current Prototype
 
@@ -35,7 +35,7 @@ python -m venv .venv
 npm run desktop
 ```
 
-On macOS or Linux, use `.venv/bin/python` for the install command. The launcher selects a bundled Python runtime when present, otherwise the repository `.venv`, then the platform Python command. Google and OpenAI buttons remain unavailable until the relevant server-side credentials are supplied. Register `${APP_BASE_URL}/api/v1/auth/google/callback` with Google.
+On macOS or Linux, use `.venv/bin/python` for the install command. Development commands select the repository `.venv` and then the platform Python command. Packaged desktop builds launch their bundled standalone backend. Google and OpenAI buttons remain unavailable until the relevant server-side credentials are supplied. Register `${APP_BASE_URL}/api/v1/auth/google/callback` with Google.
 
 ## Desktop Application
 
@@ -49,7 +49,9 @@ The Electron launcher can start, stop, restart, and health-check the RevoMail se
 
 The desktop main process controls the FastAPI child process and passes its validated loopback host, port, and base URL. OAuth and OpenAI credentials remain environment-only and are excluded from renderer settings.
 
-For launcher-only development after a current frontend build, use `npm run desktop:dev`. `npm run desktop:pack` packages the current files, but the unpacked application still needs a usable Python runtime; bundling Python, native macOS/Linux verification, signing, notarization, and automatic updates remain future work.
+The desktop main process loads private variables without exposing them to the renderer. Installed builds first check `.env` in Electron's private `userData` directory. Local unpacked builds also recognize the repository root `.env`, which keeps the development package aligned with `npm run start`. Existing process variables retain precedence over either file.
+
+For launcher-only development after a current frontend build, use `npm run desktop:dev`. `npm run desktop:pack` builds a PyInstaller standalone backend before assembling the application, so the Windows unpacked application does not depend on a system Python. Native macOS/Linux verification, signing, notarization, and automatic updates remain future work.
 
 ## Local FastAPI Preview
 
@@ -99,7 +101,11 @@ Process variables take precedence over the ignored root `.env`, followed by code
 | `npm run pm2:delete` | Remove the PM2 process |
 | `npm run desktop` | Build and open the Electron desktop control room |
 | `npm run desktop:dev` | Open Electron using the current frontend build |
+| `npm run backend:pack` | Build the standalone backend for the current platform |
+| `npm run backend:smoke` | Health-check the standalone backend build |
 | `npm run desktop:pack` | Build an unpacked desktop application for the current platform |
+| `npm run desktop:smoke` | Start and health-check the service from the Windows unpacked package |
+| `npm run desktop:ui-smoke` | Exercise the real unpacked Electron launcher and Google authorization entry |
 | `npm run desktop:dist` | Build a desktop installer or distributable artifact |
 
 ## Repository Structure
