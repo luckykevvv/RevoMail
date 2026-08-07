@@ -1,24 +1,98 @@
 {
   "name": "revomail-frontend-demo",
   "version": "0.1.0",
+  "description": "AI-assisted email client and cross-platform desktop launcher",
+  "author": "RevoMail Contributors",
   "private": true,
   "type": "module",
+  "main": "desktop/main.js",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
-    "start": "node server.js",
+    "start": "node scripts/python-runtime.mjs -m backend.run",
+    "test": "npm run test:js && npm run test:python",
+    "test:js": "vitest run",
+    "test:python": "node scripts/python-runtime.mjs -m pytest",
+    "test:db": "vitest run backend/tests/integration/sqlite-auth.test.js",
+    "test:watch": "vitest",
+    "db:migrate": "node scripts/migrate.js",
+    "db:migrate:dev": "node scripts/migrate.js",
     "pm2:start": "npm run build && pm2 start ecosystem.config.cjs",
-    "pm2:logs": "pm2 logs revomail-demo",
-    "pm2:restart": "npm run build && pm2 restart revomail-demo",
-    "pm2:stop": "pm2 stop revomail-demo",
-    "pm2:delete": "pm2 delete revomail-demo"
+    "pm2:logs": "pm2 logs revomail",
+    "pm2:restart": "npm run build && pm2 restart revomail",
+    "pm2:stop": "pm2 stop revomail",
+    "pm2:delete": "pm2 delete revomail",
+    "desktop": "npm run build && electron .",
+    "desktop:dev": "electron .",
+    "backend:pack": "node scripts/build-python-backend.mjs",
+    "backend:smoke": "node scripts/smoke-python-backend.mjs",
+    "desktop:smoke": "node scripts/smoke-desktop-service.mjs",
+    "desktop:ui-smoke": "node scripts/smoke-electron-ui.mjs",
+    "desktop:pack": "npm run build && npm run backend:pack && electron-builder --dir",
+    "desktop:dist": "npm run build && npm run backend:pack && electron-builder"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "lucide": "^0.468.0"
+    "helmet": "^8.3.0",
+    "lucide": "^0.468.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "vite": "^6.1.0"
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
+    "supertest": "^7.2.2",
+    "vite": "^6.1.0",
+    "vitest": "^4.1.10"
+  },
+  "build": {
+    "appId": "com.revomail.desktop",
+    "productName": "RevoMail",
+    "asar": true,
+    "asarUnpack": [
+      "server.js",
+      "backend/**/*",
+      "database/**/*",
+      "scripts/python-runtime.mjs",
+      "dist/**/*",
+      "node_modules/**/*"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "extraResources": [
+      {
+        "from": "build/python/revomail-backend",
+        "to": "python-backend"
+      }
+    ],
+    "files": [
+      "desktop/**/*",
+      "backend/**/*",
+      "database/**/*",
+      "dist/**/*",
+      "scripts/python-runtime.mjs",
+      "server.js",
+      "pytest.ini",
+      "package.json",
+      "!desktop/tests/**/*",
+      "!backend/tests/**/*",
+      "!backend/python_tests/**/*"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.productivity"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Office"
+    },
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
   }
 }

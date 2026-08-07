@@ -1,6 +1,6 @@
 # RevoMail Project Requirements and TODO
 
-Last updated: 2026-07-31
+Last updated: 2026-08-06
 
 ## 1. Project Objectives
 
@@ -28,21 +28,27 @@ Target users:
 - [x] Built prototype interfaces for AI summaries, information extraction, and reply drafts.
 - [x] Built prototype interfaces for voice commands, tasks, calendar events, and settings.
 - [x] Added light, dark, and mobile layouts.
-- [x] Added Vite build scripts, an Express production entry point, and PM2 configuration.
-- [x] Reserved backend, shared-contract, architecture, API documentation, and automation directories without selecting a backend stack.
+- [x] Added Vite build scripts, a FastAPI production entry point, and PM2 configuration.
+- [x] Reserved backend, shared-contract, architecture, API documentation, and automation directories; Module 1 subsequently selected the authentication stack.
+- [x] Preserved the Module 1 connected-account UI and `/api/v1` contract while adopting FastAPI for Google OAuth session, account, Gmail, and AI endpoints. Real-provider validation and Python persistence remain incomplete.
+- [x] Added simulated FastAPI integration tests for Google callback/session, account disconnect/logout, Gmail listing, and AI summary behavior.
+- [x] Added an Electron desktop launcher MVP with one-click service controls, health-based status, persisted local settings, secure preload/IPC boundaries, and Windows packaging configuration.
 
 ### Not Yet Completed
 
-- [ ] Integrate real OAuth, email, LLM, speech recognition, and calendar APIs.
-- [ ] Implement the backend service, database, task queue, and user sessions.
+- [ ] Verify the merged OAuth, Gmail, and OpenAI implementations with provider test credentials; speech recognition and calendar APIs are not implemented.
+- [ ] Verify Google OAuth authorization, refresh, and revocation end to end with a provider test application and test account.
+- [ ] Microsoft OAuth and Microsoft Graph support is pending and is not part of the currently supported MVP provider path.
+- [ ] Complete Python persistence, task queue, durable user sessions, and migration of the retained Node/SQLite authentication code.
 - [ ] Add automated tests, security review, monitoring, and production deployment.
+- [ ] Verify signed and installed desktop releases on macOS and Linux; code signing, notarization, and auto-update remain future work.
 
 ## 3. MVP Functional Requirements (P0)
 
 ### FR-01 Authentication and Authorization
 
 - [ ] Integrate Google OAuth 2.0.
-- [ ] Integrate Microsoft OAuth 2.0.
+- [ ] Integrate Microsoft OAuth 2.0. **Status: pending; retain the adapter but defer provider setup and release validation.**
 - [ ] Request only the email and calendar permissions required by enabled features.
 - [ ] Support secure sign-out, token refresh, token expiration, and authorization revocation.
 - [ ] Show understandable error messages and a retry option when authentication fails.
@@ -189,17 +195,17 @@ Acceptance criteria:
 
 ### P0: Foundation
 
-- [ ] Select the backend technology stack and define the API contract.
+- [x] Select the backend technology stack and define the initial authentication API contract.
 - [ ] Establish development, test, and production environment configuration.
-- [ ] Add a backend health check and a standard API error response.
-- [ ] Define data models for users, mailbox connections, settings, tasks, and audit records.
-- [ ] Add database migrations.
+- [x] Add a backend health check and a standard API error response.
+- [ ] Define data models for users, mailbox connections, settings, tasks, and audit records. (User, mailbox connection, credential, OAuth transaction, and session models are complete.)
+- [x] Add the initial authentication database migration.
 - [ ] Establish CI for installation, linting, tests, and production builds.
 
 ### P0: External Services
 
 - [ ] Implement a Google Gmail API adapter.
-- [ ] Implement a Microsoft Graph Mail adapter.
+- [ ] Implement a Microsoft Graph Mail adapter. **Status: pending.**
 - [ ] Implement Google Calendar and Microsoft Calendar adapters.
 - [ ] Define a replaceable LLM provider interface.
 - [ ] Define a Speech-to-Text provider interface.
@@ -222,6 +228,20 @@ Acceptance criteria:
 - [ ] Use test accounts and never use real personal mailbox data for testing.
 
 ### P1: Product Enhancements
+
+#### Desktop application
+
+- [x] Establish separate Electron main, preload, and renderer boundaries without duplicating the RevoMail Web UI.
+- [x] Add start, stop, restart, duplicate-start protection, and health-based readiness for the managed service.
+- [x] Add a desktop control room with explicit stopped, starting, running, stopping, and failed states.
+- [x] Validate and persist loopback host, port, startup, shutdown, theme, language, and reduced-motion preferences.
+- [x] Restrict renderer privileges, navigation, new windows, permissions, and IPC operations.
+- [x] Add desktop settings and service lifecycle unit tests.
+- [x] Bundle the FastAPI backend and Python runtime for one-click packaged starts on Windows.
+- [ ] Migrate desktop per-user persistence to FastAPI. (The earlier Node/SQLite implementation remains in history and migration-reference code.)
+- [ ] Verify the installed Windows package end to end with real OAuth test-app credentials.
+- [ ] Verify macOS and Linux build artifacts in CI or on native hosts.
+- [ ] Add release signing, macOS notarization, and a reviewed automatic-update channel.
 
 - [ ] Add Apple account sign-in.
 - [ ] Improve priority detection and automatic email classification.
