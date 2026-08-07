@@ -1,5 +1,4 @@
 import { EventEmitter } from "node:events";
-import path from "node:path";
 
 const ACTIVE_PHASES = new Set(["starting", "running", "stopping"]);
 const HEALTH_INTERVAL_MS = 350;
@@ -16,10 +15,11 @@ function safeMessage(error) {
 }
 
 export class ServiceController extends EventEmitter {
-  constructor({ spawn, command, projectRoot, fetchImpl = globalThis.fetch, startTimeoutMs = DEFAULT_START_TIMEOUT_MS, stopTimeoutMs = DEFAULT_STOP_TIMEOUT_MS }) {
+  constructor({ spawn, command, commandArgs = [], projectRoot, fetchImpl = globalThis.fetch, startTimeoutMs = DEFAULT_START_TIMEOUT_MS, stopTimeoutMs = DEFAULT_STOP_TIMEOUT_MS }) {
     super();
     this.spawn = spawn;
     this.command = command;
+    this.commandArgs = commandArgs;
     this.projectRoot = projectRoot;
     this.fetch = fetchImpl;
     this.startTimeoutMs = startTimeoutMs;
@@ -39,11 +39,10 @@ export class ServiceController extends EventEmitter {
     this.intentionalStop = false;
     this.#setState({ phase: "starting", pid: null, url, startedAt: null, error: null });
 
-    const child = this.spawn(this.command, [path.join(this.projectRoot, "server.js")], {
+    const child = this.spawn(this.command, this.commandArgs, {
       cwd: this.projectRoot,
       env: {
         ...process.env,
-        ELECTRON_RUN_AS_NODE: "1",
         REVOMAIL_DESKTOP: "1",
         HOST: settings.host,
         PORT: String(settings.port),

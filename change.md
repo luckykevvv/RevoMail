@@ -1,75 +1,61 @@
-# Implement the Electron desktop application with local SQLite
+# Merge the Python API application into Module 1
 
-Date: 2026-08-03
+Date: 2026-08-07
 
 ## Scope
 
-Implement GitHub Module #45 and its desktop sub-issue plan: provide a cross-platform Electron foundation, one-click local service lifecycle controls, persisted settings, secure IPC boundaries, packaging configuration, and a self-contained SQLite persistence layer that requires no PostgreSQL, Docker, external database, Prisma runtime, or manual migration step.
+Merge GitHub PR #53 (`API_application` into `module_1_login`), adopt Python/FastAPI for the API and future LLM integration, retain the existing connected-account UI and `/api/v1` frontend contract, integrate Gmail and OpenAI-backed features, and add automated tests.
 
 ## Changes
 
-- Archived the previous Module 1 task record as `change/change-6.md`.
-- Added an Electron main process, sandboxed preload bridge, single-instance behavior, restricted navigation and permissions, and separate launcher and RevoMail windows.
-- Added a managed-service controller with start, stop, restart, duplicate-start protection, health-based readiness, timeout, unexpected-exit, and application-exit handling.
-- Added validated desktop settings for loopback host, port, automatic startup, open-on-ready, stop-on-exit, theme, preferred language, and reduced motion.
-- Added a RevoMail-styled desktop control room with explicit service states, actionable errors, keyboard-accessible controls, settings validation, and restart-required feedback.
-- Replaced PostgreSQL and Prisma with SQLite through the Node.js built-in `node:sqlite` module, eliminating database services, driver adapters, native database rebuilds, and Visual Studio build requirements.
-- Added ordered transactional SQLite migrations that run automatically before the local service listens, plus an explicit `npm run db:migrate` command for local Node workflows.
-- Added a SQLite authentication repository that preserves the existing service/API contract, including JSON encoding and decoding for connected-account scopes.
-- Made SQLite integration tests isolated and always-on instead of conditional on an external test database.
-- Made Electron store `revomail.db`, desktop settings, and a generated encryption key under its per-user `userData` directory without exposing the database or key over IPC.
-- Added Electron and electron-builder scripts and cross-platform targets; generated output is ignored under `release/` and test sources are excluded from packages.
-- Added Vitest exclusions so ignored packaged output cannot duplicate or stale test discovery.
-- Removed PostgreSQL, Prisma, and `better-sqlite3` dependencies from the package and lockfile.
-- Updated `.env.example`, `.gitignore`, `AGENTS.md`, `todo.md`, README, backend documentation, and ADRs for the SQLite-only desktop architecture.
+- Merged the PR branch without committing and resolved `.gitignore` by retaining both desktop/SQLite and Python exclusions.
+- Kept the current Module 1 frontend as the conflict base so the connected-account permissions, reconnect, disconnect, and sign-out UI did not regress.
+- Added FastAPI routes for health, session bootstrap, Google OAuth, connected accounts, Gmail messages, AI summaries, extraction, and reply drafts under the existing same-origin `/api/v1` contract.
+- Integrated the PR's Gmail and LLM service code into the retained inbox, reading, summary, extraction, and reply UI states.
+- Made FastAPI serve the production Vite build and added a shared Python runtime resolver for npm, PM2, and Electron-managed starts.
+- Added Python API tests with simulated OAuth, Gmail, and AI providers while retaining the existing JavaScript authentication and desktop tests.
+- Added sanitized root and backend environment examples for Google OAuth, OpenAI, and FastAPI runtime configuration.
+- Removed the Python-runtime override field and made runtime selection internal; also namespaced the debug flag to avoid collisions with machine-level `DEBUG` values.
+- Archived the previous desktop/SQLite task record as `change/change-7.md`.
 
 ## Reason
 
-Make RevoMail a self-contained desktop application that starts with one click and does not require contributors or users to install, configure, or run PostgreSQL or Docker.
+Use Python for the backend boundary so later LLM and mailbox integrations can use the Python ecosystem, while preserving the account-management experience already implemented in Module 1.
 
 ## Key Commands
 
 ```powershell
 git status --short --branch
 git ls-files -v | Select-String '^S'
-rg --files -g '!node_modules' -g '!dist'
-Move-Item -LiteralPath 'change.md' -Destination 'change\change-6.md'
-npm install --save-dev electron electron-builder
-npm install
+git fetch origin API_application
+git merge --no-commit --no-ff origin/API_application
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
 npm ci
-npm run db:migrate
 npm test
-npm run test:db
 npm run build
+npm run start
+curl.exe -s -i http://127.0.0.1:4173/api/v1/health
+curl.exe -s -i http://127.0.0.1:4173/api/v1/auth/session
 npm run desktop:pack
-node --check desktop\main.js
-node --check desktop\service-controller.js
-node --check desktop\settings-store.js
-node --check desktop\renderer\app.js
-node --check desktop\preload.cjs
-curl.exe -s -o NUL -w 'health=%{http_code}' http://127.0.0.1:4173/api/v1/health
+rg -n 'Python runtime override' .env.example AGENTS.md README.md package.json ecosystem.config.cjs desktop scripts docs backend
 git diff --check
 ```
 
 ## Validation
 
-- Dependency installation completed from the updated package graph. The final `npm ci` verification reported one moderate-severity transitive dependency vulnerability; it remains open rather than applying an unreviewed dependency rewrite during publication.
-- `npm run db:migrate` created and migrated the ignored local SQLite database without PostgreSQL or Docker.
-- The current automated test suite and isolated SQLite repository suite pass without an external database or skipped database tests.
-- `npm run build` completes the Vite production build successfully.
-- A local Node service using SQLite returned HTTP 200 for the built frontend and `/api/v1/health`, and returned a safe signed-out session response.
-- `npm run desktop:pack` produced `release/win-unpacked/RevoMail.exe` with ASAR integrity and no native database rebuild requirement.
-- The packaged Windows application started from the stopped state with one click, created and migrated its per-user SQLite database, generated its encryption key, reached the running state, and opened the RevoMail workspace automatically.
-- The packaged workspace showed the expected safe provider-not-configured state because no OAuth test-app credentials were supplied.
-- Closing the desktop application stopped its managed child process and released port 4173.
-- The packaged application accessibility tree exposed the service controls, settings fields, switches, status region, and alert.
-- Dark-theme saving and persistence after application restart were verified in the real packaged UI.
-- Generated desktop output, local databases, SQLite sidecar files, environment files, and local keys remain ignored.
+- The existing and runtime-selection Vitest suites pass: 11 files and 34 tests.
+- The 6 new Pytest API and provider-fixture tests pass.
+- `npm run build` produces the Vite production frontend successfully.
+- `npm run start` selects Python internally and starts Uvicorn without a development reloader.
+- The real FastAPI `/api/v1/health`, signed-out session endpoint, and production frontend each returned HTTP 200.
+- `npm run desktop:pack` produced the Windows unpacked application successfully.
+- The Python runtime override field has been removed from code, examples, and documentation.
+- The local `.venv`, real environment files, generated builds, release output, and databases remain ignored.
+- The final `npm ci` completed from the lockfile and reported one moderate transitive dependency vulnerability; no unreviewed dependency rewrite was applied during the merge.
 
 ## Remaining Work
 
-- Real Google authorization, refresh, and revocation still require sanitized OAuth test-app credentials and a test account.
-- Microsoft OAuth and Microsoft Graph release support remain pending.
-- macOS and Linux artifacts have not been verified on native hosts or CI.
-- Release code signing, macOS notarization, automatic updates, and a production icon set are not implemented.
-- Mailbox synchronization, LLM calls, Speech-to-Text, email sending, and calendar writes remain simulated or outside this desktop module.
+- Real Google authorization, Gmail reads, OpenAI calls, refresh, and revocation require test credentials and remain unverified.
+- Microsoft OAuth and Microsoft Graph remain pending.
+- Python runtime selection is internal and has no environment field. The packaged Electron application currently falls back to an installed Python when no bundled runtime exists; adding that bundled runtime is future packaging work.

@@ -24,16 +24,18 @@ describe("ServiceController", () => {
   it("moves to running only after a successful health check", async () => {
     const child = childProcess();
     const spawn = vi.fn(() => child);
-    const controller = new ServiceController({ spawn, command: "electron", projectRoot: "C:\\RevoMail", fetchImpl: vi.fn(async () => ({ ok: true })) });
+    const controller = new ServiceController({ spawn, command: "python", commandArgs: ["-m", "backend.run"], projectRoot: "C:\\RevoMail", fetchImpl: vi.fn(async () => ({ ok: true })) });
     await controller.start(settings());
     expect(controller.snapshot()).toMatchObject({ phase: "running", pid: 1234, url: "http://127.0.0.1:4173", error: null });
     expect(spawn).toHaveBeenCalledOnce();
+    expect(spawn.mock.calls[0][0]).toBe("python");
+    expect(spawn.mock.calls[0][1]).toEqual(["-m", "backend.run"]);
   });
 
   it("does not create duplicate processes while active", async () => {
     const child = childProcess();
     const spawn = vi.fn(() => child);
-    const controller = new ServiceController({ spawn, command: "electron", projectRoot: "C:\\RevoMail", fetchImpl: vi.fn(async () => ({ ok: true })) });
+    const controller = new ServiceController({ spawn, command: "python", commandArgs: ["-m", "backend.run"], projectRoot: "C:\\RevoMail", fetchImpl: vi.fn(async () => ({ ok: true })) });
     await controller.start(settings());
     await controller.start(settings());
     expect(spawn).toHaveBeenCalledOnce();
@@ -41,7 +43,7 @@ describe("ServiceController", () => {
 
   it("stops the managed child and clears process state", async () => {
     const child = childProcess();
-    const controller = new ServiceController({ spawn: () => child, command: "electron", projectRoot: "C:\\RevoMail", fetchImpl: vi.fn(async () => ({ ok: true })) });
+    const controller = new ServiceController({ spawn: () => child, command: "python", commandArgs: ["-m", "backend.run"], projectRoot: "C:\\RevoMail", fetchImpl: vi.fn(async () => ({ ok: true })) });
     await controller.start(settings());
     await controller.stop();
     expect(child.kill).toHaveBeenCalledWith("SIGTERM");
@@ -50,7 +52,7 @@ describe("ServiceController", () => {
 
   it("reports an unexpected child exit", async () => {
     const child = childProcess();
-    const controller = new ServiceController({ spawn: () => child, command: "electron", projectRoot: "C:\\RevoMail", fetchImpl: vi.fn(async () => ({ ok: true })) });
+    const controller = new ServiceController({ spawn: () => child, command: "python", commandArgs: ["-m", "backend.run"], projectRoot: "C:\\RevoMail", fetchImpl: vi.fn(async () => ({ ok: true })) });
     await controller.start(settings());
     child.emit("exit", 1, null);
     expect(controller.snapshot()).toMatchObject({ phase: "failed", pid: null, error: expect.stringContaining("local file access") });

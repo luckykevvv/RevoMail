@@ -1,0 +1,29 @@
+# Web framework
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+
+# Configuration
+pydantic-settings==2.6.0
+python-dotenv==1.0.1
+
+# HTTP client (for calling external APIs)
+httpx==0.27.2
+
+# Google APIs (OAuth + Gmail + Calendar)
+google-auth==2.35.0
+google-auth-oauthlib==1.2.1
+google-api-python-client==2.151.0
+
+# Session management
+itsdangerous==2.2.0
+
+# LLM (add more as needed)
+openai==1.54.0
+anthropic==0.37.0
+
+# HTML sanitisation (for email bodies)
+bleach==6.1.0
+
+# Dev / testing
+pytest==8.3.3
+pytest-asyncio==0.24.0

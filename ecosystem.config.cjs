@@ -2,7 +2,8 @@ module.exports = {
   apps: [
     {
       name: "revomail",
-      script: "server.js",
+      script: "scripts/python-runtime.mjs",
+      args: "-m backend.run",
       cwd: __dirname,
       instances: 1,
       autorestart: true,

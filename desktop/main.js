@@ -6,6 +6,7 @@ import { ZodError } from "zod";
 import { ensureEncryptionKey } from "./secret-store.js";
 import { DesktopSettingsStore } from "./settings-store.js";
 import { ServiceController } from "./service-controller.js";
+import { resolvePythonCommand } from "../scripts/python-runtime.mjs";
 
 const desktopDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = app.isPackaged ? path.join(process.resourcesPath, "app.asar.unpacked") : app.getAppPath();
@@ -144,7 +145,12 @@ app.whenReady().then(async () => {
   process.env.DATABASE_URL = `file:${path.join(userDataPath, "revomail.db").replaceAll("\\", "/")}`;
   process.env.TOKEN_ENCRYPTION_KEY ||= ensureEncryptionKey(path.join(userDataPath, "server.key"));
   settingsStore = new DesktopSettingsStore(path.join(userDataPath, "desktop-settings.json"));
-  serviceController = new ServiceController({ spawn, command: process.execPath, projectRoot });
+  serviceController = new ServiceController({
+    spawn,
+    command: resolvePythonCommand(projectRoot),
+    commandArgs: ["-m", "backend.run"],
+    projectRoot
+  });
   serviceController.on("state", async (state) => {
     broadcastSnapshot();
     if (state.phase === "running" && settingsStore.get().launchOnReady) {

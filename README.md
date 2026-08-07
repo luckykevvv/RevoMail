@@ -2,7 +2,7 @@
 
 RevoMail is an AI-assisted email client for email summarization, reply drafting, voice commands, and task/calendar extraction.
 
-> **Current status:** Module 1 includes provider-ready Google and Microsoft OAuth, local SQLite persistence, encrypted provider credentials, secure sessions, and connected-account management. RevoMail also includes an Electron desktop launcher that creates and migrates its own per-user database. Real provider authorization has not been verified because test-app credentials are not currently available. Mailbox access, LLM calls, Speech-to-Text, and calendar writes remain simulated.
+> **Current status:** RevoMail now uses Python/FastAPI for its active API, with Google OAuth, the existing connected-account UI, Gmail inbox/message endpoints, and OpenAI summary, extraction, and reply-draft endpoints. Automated tests use simulated providers; real Google and OpenAI calls remain unverified. Microsoft, Speech-to-Text, sending, calendar writes, and bundled-Python desktop distribution remain pending.
 
 ## Current Prototype
 
@@ -16,23 +16,26 @@ The frontend currently demonstrates:
 - Task and calendar extraction.
 - Light, dark, desktop, and mobile layouts.
 
-Inbox and assistant features still use static demo data. OAuth buttons are enabled only when their server-side credentials are configured. No email or calendar action currently leaves the browser.
+The inbox keeps demo data while signed out or unconnected and loads Gmail data after a configured Google session. OAuth and OpenAI actions are enabled only when their server-side credentials are configured. Sending and calendar creation remain simulated.
 
 ## Quick Start
 
 Prerequisites:
 
 - A current Node.js LTS release.
+- Python 3.11 or newer.
 - npm.
 
-For the desktop application, install locked dependencies and launch it. No PostgreSQL, Docker, database setup, migration command, or manually generated encryption key is required:
+Install Node and isolated Python dependencies, then launch the desktop application:
 
 ```powershell
 npm ci
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
 npm run desktop
 ```
 
-The application stores its SQLite database and generated encryption key in Electron's private per-user application-data directory. OAuth buttons remain disabled until the relevant provider client ID and secret are supplied through the local environment. Provider callback URLs must be registered as `${APP_BASE_URL}/api/v1/auth/google/callback` and `${APP_BASE_URL}/api/v1/auth/microsoft/callback`.
+On macOS or Linux, use `.venv/bin/python` for the install command. The launcher selects a bundled Python runtime when present, otherwise the repository `.venv`, then the platform Python command. Google and OpenAI buttons remain unavailable until the relevant server-side credentials are supplied. Register `${APP_BASE_URL}/api/v1/auth/google/callback` with Google.
 
 ## Desktop Application
 
@@ -44,20 +47,20 @@ npm run desktop
 
 The Electron launcher can start, stop, restart, and health-check the RevoMail service without further terminal commands. When the service becomes healthy, it opens the existing RevoMail interface in a separate secured window. Desktop settings persist under Electron's per-user application-data directory and include loopback host, port, automatic startup, open-on-ready, stop-on-exit, theme, preferred language, and reduced motion.
 
-The desktop main process selects the per-user SQLite path, applies migrations, and creates a persistent encryption key automatically. The database and key are unavailable to renderer code. Optional OAuth client credentials remain environment-only and are deliberately excluded from desktop settings.
+The desktop main process controls the FastAPI child process and passes its validated loopback host, port, and base URL. OAuth and OpenAI credentials remain environment-only and are excluded from renderer settings.
 
-For launcher-only development after a current frontend build, use `npm run desktop:dev`. Create an unpacked application for the current host with `npm run desktop:pack`, or a distributable artifact with `npm run desktop:dist`. Windows packaging is configured; macOS and Linux require native or CI verification, and release signing, notarization, and automatic updates are not yet implemented.
+For launcher-only development after a current frontend build, use `npm run desktop:dev`. `npm run desktop:pack` packages the current files, but the unpacked application still needs a usable Python runtime; bundling Python, native macOS/Linux verification, signing, notarization, and automatic updates remain future work.
 
-## Local Node Preview
+## Local FastAPI Preview
 
-For a local Node.js preview without Electron, copy `.env.example`, replace `TOKEN_ENCRYPTION_KEY` with a base64-encoded 32-byte key, then run:
+For a local preview without Electron, copy `.env.example`, configure the credentials required for the features being tested, then run:
 
 ```powershell
 npm run build
 npm run start
 ```
 
-`server.js` creates and migrates the configured SQLite file, then serves the built frontend and versioned authentication API. If `NODE_ENV=production` is selected explicitly, startup still requires an HTTPS `APP_BASE_URL`.
+`npm run start` selects the repository virtual environment and starts FastAPI. FastAPI serves both the built frontend and `/api/v1`, so browser requests remain same-origin.
 
 Supported runtime variables:
 
@@ -66,15 +69,15 @@ Supported runtime variables:
 | `HOST` | `0.0.0.0` | Address used by the production preview server |
 | `PORT` | `4173` | Port used by the production preview server |
 | `APP_BASE_URL` | `http://localhost:4173` | Public same-origin URL and OAuth callback base |
-| `DATABASE_URL` | `file:./data/revomail.db` | Local SQLite file URL |
-| `TOKEN_ENCRYPTION_KEY` | Required | Base64-encoded 32-byte AES key |
+| `REVOMAIL_DEBUG` | `false` | Enables FastAPI development documentation |
+| `SECRET_KEY` | Local placeholder | FastAPI session signing key |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Empty | Google OAuth application credentials |
-| `GOOGLE_AUTH_URL`, `GOOGLE_TOKEN_URL`, `GOOGLE_USERINFO_URL`, `GOOGLE_REVOKE_URL` | Google endpoints | Overrideable Google OAuth endpoints, including test fixtures |
+| `GOOGLE_REDIRECT_URI` | `${APP_BASE_URL}/api/v1/auth/google/callback` | Registered Google callback override |
 | `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET` | Empty | Microsoft OAuth application credentials |
-| `MICROSOFT_TENANT` | `common` | Microsoft tenant selector |
-| `MICROSOFT_AUTH_URL`, `MICROSOFT_TOKEN_URL`, `MICROSOFT_USERINFO_URL` | Microsoft endpoints | Overrideable Microsoft endpoints, including test fixtures |
+| `OPENAI_API_KEY` | Empty | OpenAI server-side API key |
+| `OPENAI_MODEL` | `gpt-4o` | OpenAI model used by the merged AI service |
 
-Normal server and PM2 starts load `.env` with `override: true`, so values in `.env` override inherited process variables. The Electron-managed process is the documented exception: it preserves its validated loopback host, port, and base URL by setting the internal `REVOMAIL_DESKTOP=1` launch marker. Real `.env` files are ignored and must never be committed.
+Process variables take precedence over the ignored root `.env`, followed by code defaults. Electron uses this precedence to supply its validated loopback host, port, and base URL. Real `.env` files are ignored and must never be committed.
 
 ## npm Scripts
 
@@ -82,8 +85,10 @@ Normal server and PM2 starts load `.env` with `override: true`, so values in `.e
 | --- | --- |
 | `npm run dev` | Start the Vite development server |
 | `npm run build` | Build the frontend into `dist/` |
-| `npm run start` | Serve the production build with Node.js |
-| `npm test` | Run authentication unit and API integration tests |
+| `npm run start` | Serve the production build and `/api/v1` with FastAPI |
+| `npm test` | Run JavaScript and Python tests |
+| `npm run test:js` | Run the retained Node authentication and desktop tests |
+| `npm run test:python` | Run FastAPI, OAuth, Gmail, and AI tests |
 | `npm run test:db` | Run isolated SQLite repository integration tests |
 | `npm run db:migrate` | Apply committed SQLite migrations to the configured local database |
 | `npm run db:migrate:dev` | Apply committed SQLite migrations during development |
@@ -112,10 +117,10 @@ RevoMail/
 |   `-- style.css              # RevoMail design and responsive styles
 |-- public/                    # Static frontend assets
 |-- desktop/                   # Electron main, preload, launcher renderer, and tests
-|-- server.js                  # Same-origin production frontend and API entry point
+|-- server.js                  # Retained Node authentication migration reference
 |-- database/                  # Ordered SQLite migrations
 |-- data/                      # Ignored local SQLite database files
-|-- backend/                   # Reserved backend application boundary
+|-- backend/                   # Active Python/FastAPI backend plus retained Node modules
 |   |-- README.md              # Backend layering and implementation rules
 |   |-- src/
 |   |   |-- config/            # Environment loading and configuration validation
@@ -151,7 +156,7 @@ RevoMail/
 
 ## Architecture Boundaries
 
-The authentication paths under `backend/src/` are implemented. Other provider and feature directories remain architectural placeholders.
+The active runtime is under `backend/app/`. The earlier Node authentication paths under `backend/src/` remain temporarily for migration reference and automated regression coverage.
 
 Backend dependency rules:
 
@@ -162,7 +167,7 @@ Backend dependency rules:
 5. Repositories isolate persistence.
 6. Shared contracts define the frontend/backend boundary without importing provider SDKs.
 
-The authentication stack decision is recorded in `docs/architecture/0001-authentication-stack.md`; desktop-first SQLite persistence is recorded in `docs/architecture/0002-desktop-sqlite-persistence.md`; the HTTP contract is documented in `docs/api/authentication.md`.
+The authentication history is recorded in ADR 0001, desktop SQLite history in ADR 0002, and the active Python/FastAPI decision in ADR 0003. The HTTP contract is documented in `docs/api/authentication.md`.
 
 ## Collaboration
 

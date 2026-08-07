@@ -9,8 +9,10 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
-    "start": "node server.js",
-    "test": "vitest run",
+    "start": "node scripts/python-runtime.mjs -m backend.run",
+    "test": "npm run test:js && npm run test:python",
+    "test:js": "vitest run",
+    "test:python": "node scripts/python-runtime.mjs -m pytest",
     "test:db": "vitest run backend/tests/integration/sqlite-auth.test.js",
     "test:watch": "vitest",
     "db:migrate": "node scripts/migrate.js",
@@ -47,6 +49,7 @@
       "server.js",
       "backend/**/*",
       "database/**/*",
+      "scripts/python-runtime.mjs",
       "dist/**/*",
       "node_modules/**/*"
     ],
@@ -59,9 +62,11 @@
       "database/**/*",
       "dist/**/*",
       "server.js",
+      "pytest.ini",
       "package.json",
       "!desktop/tests/**/*",
-      "!backend/tests/**/*"
+      "!backend/tests/**/*",
+      "!backend/python_tests/**/*"
     ],
     "win": {
       "target": "nsis"

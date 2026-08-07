@@ -6,7 +6,7 @@ These instructions apply to the entire repository. They are intended for AI codi
 
 RevoMail is an AI-assisted email client with summarization, reply drafting, voice commands, and task/calendar extraction.
 
-The current repository contains a verified interactive frontend prototype, a provider-ready authentication backend with local SQLite persistence, and an Electron desktop launcher MVP. Real provider authorization has not been verified, and mailbox access, LLM calls, speech recognition, calendar writes, and production monitoring are still simulated or not implemented.
+The current repository contains a verified interactive frontend, an active Python/FastAPI backend with provider-ready Google OAuth, Gmail and OpenAI API paths, the retained connected-account UI, and an Electron desktop launcher MVP. Provider calls are covered by local fakes but have not been verified with real credentials. Microsoft, speech recognition, sending, calendar writes, bundled-Python desktop distribution, and production monitoring remain pending.
 
 Do not describe a mocked interaction as a real integration. Verify the actual code path and runtime behavior before reporting that a requirement is complete.
 
@@ -128,7 +128,7 @@ git check-ignore -v -- path/to/file
 - Before committing, review `git diff`, `git diff --cached`, and `git status`.
 - Use focused commit messages such as `feat:`, `fix:`, `docs:`, `test:`, or `chore:`.
 
-## 7. Node.js, Environment, and PM2 Contract
+## 7. Python, Node.js, Environment, and PM2 Contract
 
 Use the repository npm scripts instead of ad hoc commands:
 
@@ -153,16 +153,17 @@ Dependency rules:
 - Use `npm install` when intentionally changing dependencies.
 - Commit `package-lock.json` whenever dependency resolution changes.
 - Do not run a development server under PM2.
+- Install Python dependencies into the ignored repository `.venv` from `backend/requirements.txt`.
+- FastAPI under `backend/app/` is the active backend. The Node modules under `backend/src/` remain migration reference and regression coverage.
 
 Environment rules:
 
 - Keep environment-dependent values out of source code.
 - Add new supported variables to `.env.example` with safe placeholder values.
 - Keep the real `.env` ignored.
-- Normal server and PM2 starts intentionally load `.env` with `override: true`, so `.env` values override inherited process variables.
-- The Electron-managed child process sets `REVOMAIL_DESKTOP=1`; only in that explicit mode do validated desktop launch values and inherited process variables take precedence over `.env`. Keep this exception internal to the desktop process boundary and update its tests, README, and this instruction file if it changes.
-- SQLite through the Node.js built-in `node:sqlite` module is the only supported persistence engine. The normal default is `file:./data/revomail.db`; Electron overrides it with a database under its per-user `userData` directory.
-- The service applies committed SQLite migrations automatically before listening. Keep migrations ordered, transactional, and compatible with both new and existing local databases.
+- FastAPI loads the ignored root `.env`; process and Electron-injected variables take precedence over file values.
+- npm, PM2, and Electron select Python internally: a bundled runtime first, then the repository `.venv`, then the platform Python command.
+- The earlier Node SQLite schema and migration remain committed while persistence is migrated to Python. Do not claim that the current FastAPI session path persists accounts in SQLite.
 - Keep `/data/`, `*.db`, `*.db-journal`, `*.db-shm`, and `*.db-wal` ignored. Never commit a local database or copy one into a desktop package.
 - `ecosystem.config.cjs` should contain process-management settings only. Keep business configuration, service URLs, database URLs, storage paths, and secrets in environment variables.
 
@@ -216,7 +217,7 @@ Production verification:
 - Determine readiness through `/api/v1/health`; a child process identifier alone is not proof that the service is usable.
 - Prevent duplicate service processes and define explicit start, stop, restart, unexpected-exit, single-instance, and application-exit behavior.
 - Store ordinary desktop preferences under Electron `userData`. Keep tokens, the generated encryption key, mailbox content, and other secrets out of renderer-accessible settings.
-- Store the Electron SQLite database and generated encryption key under `userData`; generate the key in the main process and never expose its value over IPC.
+- Keep Python runtime selection, OAuth values, and LLM keys outside renderer-accessible settings and IPC.
 - Preserve the independent Web and PM2 workflows. Desktop integration must not make Electron a server or deployment prerequisite.
 - Keep generated installers and unpacked applications under ignored `release/`; never commit packaged environment files or credentials.
 
@@ -249,7 +250,7 @@ For interactive changes, also test the affected flow in a real browser at deskto
 - Start with `npm run start`.
 - Verify a real HTTP response on the configured host and port.
 - Confirm that production start does not invoke Vite development mode or another development tool.
-- Verify that a clean SQLite database is created, migrated, and reachable without PostgreSQL or Docker.
+- Verify that FastAPI serves both `/api/v1/health` and the built frontend without requiring PostgreSQL or Docker.
 
 ### Electron desktop changes
 

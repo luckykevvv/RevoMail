@@ -8,7 +8,7 @@ Superseded by ADR 0002 for persistence. The authentication, encryption, session,
 
 ## Decision
 
-RevoMail originally selected the existing Node.js and Express runtime with PostgreSQL persistence. ADR 0002 replaces PostgreSQL and Prisma with local SQLite through Node.js while retaining Zod and provider-specific OAuth adapters.
+RevoMail originally selected the existing Node.js and Express runtime with PostgreSQL persistence. ADR 0002 replaced PostgreSQL and Prisma with local SQLite. ADR 0003 now supersedes the HTTP runtime decision with Python and FastAPI for Gmail and LLM ecosystem compatibility.
 
 OAuth uses the authorization code flow with PKCE and one-time, expiring server-side state records. The browser receives only an opaque session cookie. Provider access and refresh tokens are encrypted with AES-256-GCM before persistent storage and never form part of a frontend contract.
 
@@ -18,7 +18,7 @@ Token refresh uses a short database lease plus a credential version check. Only 
 
 ## Consequences
 
-- ADR 0002 replaces the original PostgreSQL requirement with local SQLite and automatic desktop key generation.
+- ADR 0002 records the earlier local SQLite implementation; ADR 0003 defines the active Python/FastAPI runtime and its staged persistence migration.
 - Google and Microsoft credentials remain environment-only configuration.
 - Mailbox and calendar modules can reuse provider credentials through `AuthService.validAccessToken` without exposing tokens to clients.
 - Microsoft does not expose a direct OAuth token revocation endpoint for this flow; disconnect deletes RevoMail's local credential. Google disconnect also calls its revocation endpoint.

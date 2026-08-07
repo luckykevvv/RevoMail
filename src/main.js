@@ -100,7 +100,7 @@ const demoIcons = {
 
 const app = document.querySelector("#app");
 
-const emails = [
+let emails = [
   {
     id: 1,
     sender: "Prof. Smith",
@@ -144,7 +144,16 @@ const state = {
   replyVersion: 0,
   eventAdded: false,
   assignmentAdded: false,
-  toast: ""
+  toast: "",
+  emailsLoading: false,
+  nextPageToken: null,
+  aiSummary: null,
+  aiSummaryLoading: false,
+  aiExtraction: null,
+  aiExtractionLoading: false,
+  aiDraft: "",
+  aiDraftLoading: false,
+  aiDraftTone: "professional"
 };
 
 function escapeHtml(value = "") {
@@ -265,8 +274,9 @@ function inboxView() {
   <section class="mail-panel">
     <div class="mail-panel-heading"><span>${visible.length} conversations</span><button class="text-button" data-summarize-all>${icon("sparkles")} Summarise inbox</button></div>
     <div class="email-list">
-      ${visible.length ? visible.map(emailRow).join("") : `<div class="empty-state">${icon("search-x")}<h3>No emails found</h3><p>Try a different search or category.</p></div>`}
+      ${state.emailsLoading && !emails.length ? '<div class="empty-state"><h3>Loading inbox…</h3></div>' : visible.length ? visible.map(emailRow).join("") : `<div class="empty-state">${icon("search-x")}<h3>No emails found</h3><p>Try a different search or category.</p></div>`}
     </div>
+    ${state.nextPageToken ? `<div class="mail-panel-heading"><button class="text-button" data-load-more ${state.emailsLoading ? "disabled" : ""}>${state.emailsLoading ? "Loading…" : "Load more"}</button></div>` : ""}
   </section>
   <button class="floating-mic" data-voice title="Voice input">${icon("mic")}</button>`);
 }
@@ -278,13 +288,17 @@ function emailRow(email) {
     <span class="avatar avatar-sm avatar-soft">${email.sender.split(/\s|@/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</span>
     <div class="email-sender">${email.sender}</div>
     <div class="email-content"><strong>${email.subject}</strong><span>${email.preview}</span></div>
-    <time>${email.time}</time>
+    <time>${escapeHtml(email.time || email.date || "")}</time>
     ${email.unread ? '<span class="unread-dot" aria-label="Unread"></span>' : ""}
   </article>`;
 }
 
 function readingView() {
   const email = state.selectedEmail;
+  const plainBody = escapeHtml(email.body_plain || email.preview || "").replaceAll("\n", "<br />");
+  const messageBody = email._loading ? "<p>Loading email…</p>" : email.body_html || `<p>${plainBody}</p>`;
+  const summary = state.aiSummary;
+  const extraction = state.aiExtraction;
   return shell(`<header class="compact-header">
     <button class="back-button" data-nav="inbox">${icon("arrow-left")}</button>
     <div><span class="eyebrow">Inbox / Primary</span><h1>${email.subject}</h1></div>
@@ -292,19 +306,27 @@ function readingView() {
   </header>
   <div class="reading-grid">
     <article class="message-card">
-      <div class="message-from"><span class="avatar">PS</span><div><strong>${email.sender}</strong><small>&lt;${email.address}&gt; · to me</small></div><time>${email.time} · 2 hours ago</time><button class="star-button">${icon("star")}</button></div>
-      <div class="message-body">${(email.body || ["Hi Anon,", email.preview, "Regards,", email.sender]).map((part) => `<p>${part.replace("\n", "<br />")}</p>`).join("")}</div>
+      <div class="message-from"><span class="avatar">PS</span><div><strong>${escapeHtml(email.sender)}</strong><small>${escapeHtml(email.to || email.address || "")}</small></div><time>${escapeHtml(email.time || email.date || "")}</time><button class="star-button">${icon("star")}</button></div>
+      <div class="message-body">${messageBody}</div>
       <div class="message-actions"><button class="secondary-button" data-reply>${icon("reply")} Reply</button><button class="secondary-button">${icon("reply-all")} Reply all</button><button class="secondary-button">${icon("forward")} Forward</button></div>
     </article>
     <aside class="ai-rail">
-      <section class="insight-card summary-card"><div class="insight-title"><span>${icon("sparkles")}</span><div><small>REVO AI</small><h2>Summary</h2></div><span class="confidence">High confidence</span></div><ul><li>Project meeting tomorrow at 10:00 AM</li><li>Location: Room 302</li><li>Prepare a progress update and blockers</li></ul></section>
-      <section class="insight-card"><div class="insight-title"><span>${icon("scan-text")}</span><div><small>EXTRACTED</small><h2>Key details</h2></div></div><dl class="detail-list"><div><dt>${icon("clock-3")} Time</dt><dd>Tomorrow, 10:00 AM</dd></div><div><dt>${icon("map-pin")} Location</dt><dd>Room 302</dd></div><div><dt>${icon("file-check-2")} Prepare</dt><dd>Progress update & blockers</dd></div></dl><button class="inline-action" data-add-event>${icon("calendar-plus")} Add to calendar</button></section>
+      <section class="insight-card summary-card"><div class="insight-title"><span>${icon("sparkles")}</span><div><small>REVO AI</small><h2>Summary</h2></div>${summary ? "" : `<button class="text-button" data-ai-summarise ${state.aiSummaryLoading ? "disabled" : ""}>${state.aiSummaryLoading ? "Generating…" : "Summarise"}</button>`}</div>${summary ? `<p>${escapeHtml(summary.summary)}</p><ul>${(summary.bullets || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : `<p>${state.aiSummaryLoading ? "Summarising…" : "Generate a summary for this email."}</p>`}</section>
+      <section class="insight-card"><div class="insight-title"><span>${icon("scan-text")}</span><div><small>EXTRACTED</small><h2>Key details</h2></div>${extraction ? "" : `<button class="text-button" data-ai-extract ${state.aiExtractionLoading ? "disabled" : ""}>${state.aiExtractionLoading ? "Extracting…" : "Extract"}</button>`}</div>${extraction ? renderExtraction(extraction) : `<p>${state.aiExtractionLoading ? "Extracting details…" : "Extract tasks and events from this email."}</p>`}</section>
     </aside>
   </div>
   <button class="floating-mic" data-voice title="Voice input">${icon("mic")}</button>`);
 }
 
+function renderExtraction(extraction) {
+  const events = (extraction.events || []).map((event) => `<li><strong>${escapeHtml(event.title || "Event")}</strong> ${escapeHtml([event.date, event.time, event.location].filter(Boolean).join(" · "))}</li>`);
+  const tasks = (extraction.tasks || []).map((task) => `<li><strong>${escapeHtml(task.title || "Task")}</strong> ${escapeHtml(task.due_date || "")}</li>`);
+  const items = [...events, ...tasks];
+  return items.length ? `<ul>${items.join("")}</ul>` : "<p>No explicit tasks or events were found.</p>";
+}
+
 function replyView() {
+  const draft = state.aiDraft || replies[state.replyVersion];
   return shell(`<header class="compact-header">
     <button class="back-button" data-view="reading">${icon("arrow-left")}</button>
     <div><span class="eyebrow">AI generated · review before sending</span><h1>Reply draft</h1></div>
@@ -314,8 +336,8 @@ function replyView() {
     <div class="field-row"><label>To</label><div class="input-shell"><span class="avatar avatar-xs">PS</span> Prof. Smith &lt;smith@university.edu&gt;</div></div>
     <div class="field-row"><label>Subject</label><div class="input-shell">Re: Project Meeting Tomorrow</div></div>
     <div class="ai-draft-label"><span>${icon("sparkles")} AI generated reply</span><small>Version ${state.replyVersion + 1} of 3 · Edit as needed</small></div>
-    <textarea id="reply-text" class="reply-editor">${replies[state.replyVersion]}</textarea>
-    <div class="tone-row"><span>Quick tone</span><button class="tone-chip active">Professional</button><button class="tone-chip" data-tone="concise">Concise</button><button class="tone-chip" data-tone="friendly">Friendly</button></div>
+    ${state.aiDraftLoading ? '<div class="reply-editor">Generating draft…</div>' : `<textarea id="reply-text" class="reply-editor">${escapeHtml(draft)}</textarea>`}
+    <div class="tone-row"><span>Quick tone</span>${["professional", "concise", "friendly"].map((tone) => `<button class="tone-chip ${state.aiDraftTone === tone ? "active" : ""}" data-tone="${tone}">${tone[0].toUpperCase() + tone.slice(1)}</button>`).join("")}</div>
     <div class="composer-footer"><div class="compose-tools"><button class="icon-button">${icon("paperclip")}</button><button class="icon-button">${icon("smile")}</button><button class="icon-button">${icon("image")}</button><button class="icon-button" data-voice>${icon("mic")}</button></div><div><button class="secondary-button" data-discard>Discard</button><button class="primary-button" data-send>${icon("send")} Send reply</button></div></div>
   </section>`);
 }
@@ -460,24 +482,40 @@ function bindEvents() {
   }));
   document.querySelectorAll("[data-nav]").forEach((button) => button.addEventListener("click", () => { state.view = button.dataset.nav; render(); }));
   document.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => { state.view = button.dataset.view; render(); }));
-  document.querySelectorAll("[data-email]").forEach((row) => row.addEventListener("click", (event) => {
+  document.querySelectorAll("[data-email]").forEach((row) => row.addEventListener("click", async (event) => {
     if (event.target.closest("button")) return;
-    state.selectedEmail = emails.find((email) => email.id === Number(row.dataset.email));
+    const selected = emails.find((email) => String(email.id) === row.dataset.email);
+    if (!selected) return;
+    state.aiSummary = null;
+    state.aiExtraction = null;
+    state.aiDraft = "";
+    state.selectedEmail = { ...selected, _loading: !selected.body_plain && !selected.body_html };
     state.selectedEmail.unread = false;
     state.view = "reading";
     render();
+    if (!state.selectedEmail._loading) return;
+    try {
+      state.selectedEmail = await api(`/api/v1/emails/${encodeURIComponent(selected.id)}`);
+      render();
+    } catch (error) {
+      state.selectedEmail._loading = false;
+      showToast(error.message);
+    }
   }));
-  document.querySelectorAll("[data-star]").forEach((button) => button.addEventListener("click", (event) => { event.stopPropagation(); const email = emails.find((item) => item.id === Number(button.dataset.star)); email.starred = !email.starred; render(); }));
+  document.querySelectorAll("[data-star]").forEach((button) => button.addEventListener("click", (event) => { event.stopPropagation(); const email = emails.find((item) => String(item.id) === button.dataset.star); if (email) email.starred = !email.starred; render(); }));
   document.querySelectorAll("[data-category]").forEach((button) => button.addEventListener("click", () => { state.category = button.dataset.category; render(); }));
   document.querySelector("#search")?.addEventListener("input", (event) => { state.search = event.target.value; render(); document.querySelector("#search")?.focus(); });
   document.querySelector("[data-compose]")?.addEventListener("click", () => { state.view = "compose"; render(); });
-  document.querySelector("[data-reply]")?.addEventListener("click", () => { state.view = "reply"; render(); });
-  document.querySelector("[data-regenerate]")?.addEventListener("click", () => { state.replyVersion = (state.replyVersion + 1) % replies.length; render(); });
-  document.querySelectorAll("[data-tone]").forEach((button) => button.addEventListener("click", () => { state.replyVersion = button.dataset.tone === "concise" ? 2 : 1; render(); }));
+  document.querySelector("[data-reply]")?.addEventListener("click", () => { state.view = "reply"; if (!state.aiDraft) void aiDraftReply(state.aiDraftTone); else render(); });
+  document.querySelector("[data-regenerate]")?.addEventListener("click", () => void aiDraftReply(state.aiDraftTone));
+  document.querySelectorAll("[data-tone]").forEach((button) => button.addEventListener("click", () => void aiDraftReply(button.dataset.tone)));
   document.querySelector("[data-discard]")?.addEventListener("click", () => { state.view = "reading"; render(); });
   document.querySelectorAll("[data-send]").forEach((button) => button.addEventListener("click", () => { state.view = "sent"; showToast("Message sent — human review complete"); }));
   document.querySelector("[data-ai-compose]")?.addEventListener("click", () => { const field = document.querySelector("#compose-body"); field.value = "Hi,\n\nI’m following up with a quick update on our project progress. The team has completed the initial planning and is now preparing the interactive prototype.\n\nBest regards,\nAnon User"; showToast("AI draft inserted — review before sending"); });
   document.querySelector("[data-summarize-all]")?.addEventListener("click", () => showToast("6 emails summarised: 2 need attention today"));
+  document.querySelector("[data-load-more]")?.addEventListener("click", () => void fetchEmails(state.nextPageToken));
+  document.querySelector("[data-ai-summarise]")?.addEventListener("click", () => void aiSummarise());
+  document.querySelector("[data-ai-extract]")?.addEventListener("click", () => void aiExtract());
   document.querySelectorAll("[data-add-event]").forEach((button) => button.addEventListener("click", () => { state.eventAdded = true; showToast("Project Meeting added to calendar"); }));
   document.querySelector("[data-add-assignment]")?.addEventListener("click", () => { state.assignmentAdded = true; showToast("Assignment deadline added to calendar"); });
   document.querySelectorAll("[data-theme]").forEach((button) => button.addEventListener("click", () => { state.theme = button.dataset.theme; render(); }));
@@ -500,6 +538,68 @@ function bindEvents() {
   document.querySelector("[data-toggle-listening]")?.addEventListener("click", () => { state.voiceListening = !state.voiceListening; render(); });
   document.querySelectorAll("[data-command]").forEach((button) => button.addEventListener("click", () => { state.transcript = button.dataset.command; state.voiceListening = false; render(); }));
   document.querySelector("[data-run-command]")?.addEventListener("click", () => { state.voiceOpen = false; state.view = state.transcript.toLowerCase().includes("task") ? "tasks" : "reading"; showToast("Voice command completed"); });
+}
+
+async function fetchEmails(pageToken = null) {
+  state.emailsLoading = true;
+  render();
+  try {
+    const query = new URLSearchParams({ max_results: "20" });
+    if (pageToken) query.set("page_token", pageToken);
+    const payload = await api(`/api/v1/emails?${query}`);
+    emails = pageToken ? [...emails, ...payload.messages] : payload.messages;
+    state.nextPageToken = payload.next_page_token || null;
+    if (!pageToken && emails.length) state.selectedEmail = emails[0];
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    state.emailsLoading = false;
+    render();
+  }
+}
+
+async function aiSummarise() {
+  if (!state.selectedEmail) return;
+  state.aiSummaryLoading = true;
+  render();
+  try {
+    state.aiSummary = await api("/api/v1/ai/summarise", { method: "POST", body: JSON.stringify({ message_id: String(state.selectedEmail.id) }) });
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    state.aiSummaryLoading = false;
+    render();
+  }
+}
+
+async function aiExtract() {
+  if (!state.selectedEmail) return;
+  state.aiExtractionLoading = true;
+  render();
+  try {
+    state.aiExtraction = await api("/api/v1/ai/extract", { method: "POST", body: JSON.stringify({ message_id: String(state.selectedEmail.id) }) });
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    state.aiExtractionLoading = false;
+    render();
+  }
+}
+
+async function aiDraftReply(tone) {
+  if (!state.selectedEmail) return;
+  state.aiDraftTone = tone;
+  state.aiDraftLoading = true;
+  render();
+  try {
+    const payload = await api("/api/v1/ai/draft-reply", { method: "POST", body: JSON.stringify({ message_id: String(state.selectedEmail.id), tone }) });
+    state.aiDraft = payload.draft;
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    state.aiDraftLoading = false;
+    render();
+  }
 }
 
 async function loadAccounts() {
@@ -530,6 +630,7 @@ async function bootstrap() {
       if (requestedView === "settings") state.view = "settings";
       const accounts = await api("/api/v1/accounts");
       state.accounts = accounts.accounts;
+      if (state.accounts.length) await fetchEmails();
     }
   } catch (error) {
     state.authenticated = false;

@@ -17,3 +17,14 @@ prisma/data/
 *.sqlite
 *.sqlite3
 .playwright-cli/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.venv/
+venv/
+backend/revomail.db

@@ -7,8 +7,7 @@ All routes are same-origin under `/api/v1`. JSON errors use:
   "error": {
     "code": "STABLE_CODE",
     "message": "Safe user-facing message",
-    "retryable": false,
-    "correlationId": "request identifier"
+    "retryable": false
   }
 }
 ```
@@ -19,34 +18,42 @@ Provider tokens and secrets are never response fields.
 
 ### `GET /api/v1/health`
 
-Checks the HTTP service and database. Returns `200 { "status": "ok" }` or a retryable `DATABASE_UNAVAILABLE` error.
+Checks the FastAPI service. Returns `200` with status, service, and timestamp fields.
 
 ### `GET /api/v1/auth/session`
 
-Returns `200` with `authenticated: false` and provider availability when signed out. An authenticated response contains safe user fields, provider availability, and a short-lived in-memory CSRF token. Send that value in `X-CSRF-Token` for mutations.
+Returns `200` with provider availability and authentication state. An authenticated response contains user display fields and the value expected by the retained account UI.
 
 ### `GET /api/v1/auth/:provider/start?returnTo=/`
 
-Supports `google` and `microsoft`. Creates expiring state and PKCE records, then redirects to the provider. `returnTo` must be a local path.
+Google is implemented; Microsoft returns a pending-provider error. The endpoint records OAuth state and a local `returnTo` path before redirecting.
 
 ### `GET /api/v1/auth/:provider/callback`
 
-Validates and consumes state, exchanges the code, validates granted scopes, stores encrypted credentials, creates the application session, and redirects to a clean frontend URL. Provider failures redirect with a safe `authError` code.
+Validates state, exchanges the code, loads the Google profile, creates the signed application session, and redirects to a clean frontend URL. Provider failures redirect with a safe `authError` code.
 
 ### `POST /api/v1/auth/logout`
 
-Requires the session Cookie and `X-CSRF-Token`. Invalidates the server-side session and clears the Cookie. Returns `204`.
+Clears the signed application session and returns `204`.
 
 ## Connected accounts
 
 ### `GET /api/v1/accounts`
 
-Returns only accounts owned by the session user, including provider, email, display name, status, granted scopes, and timestamps.
+Returns the current session's connected Google account with provider, email, display name, status, and granted scopes.
 
 ### `POST /api/v1/accounts/:id/reauthorize`
 
-Requires authentication and CSRF. Returns a fresh consent URL for an account owned by the session user.
+Requires authentication and returns a fresh Google consent URL.
 
 ### `DELETE /api/v1/accounts/:id`
 
-Requires authentication and CSRF. Google access is revoked before local deletion. Microsoft credentials are deleted locally because this OAuth flow has no direct token revocation endpoint. A provider revocation failure preserves the local record as `REVOCATION_FAILED` so the user can retry safely.
+Requires authentication and removes the Google credential and account from the current application session. Provider-side revocation is not yet implemented in the Python path.
+
+## Gmail and AI
+
+- `GET /api/v1/emails` lists Gmail inbox metadata and accepts `max_results` and `page_token`.
+- `GET /api/v1/emails/:messageId` returns message metadata, text, and cleaned HTML.
+- `POST /api/v1/ai/summarise` returns a summary and bullet points for a message.
+- `POST /api/v1/ai/extract` returns explicit tasks and events.
+- `POST /api/v1/ai/draft-reply` returns a human-reviewable reply draft and accepts a tone.
