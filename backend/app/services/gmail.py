@@ -30,7 +30,6 @@ ALLOWED_ATTRS = {
     **bleach.sanitizer.ALLOWED_ATTRIBUTES,
     "a": ["href", "title"],
     "img": ["src", "alt", "width", "height"],
-    "*": ["style"],
 }
 
 
@@ -194,8 +193,8 @@ def get_message(tokens: dict, message_id: str) -> dict:
         "starred": "STARRED" in label_ids,
         "category": _category(label_ids),
         "body_plain": plain,
-        "body_html": html,                        # raw HTML for frontend display
-        "body_html_clean": _sanitise_html(html) if html else None,  # sanitised for AI
+        "body_html": _sanitise_html(html) if html else None,
+        "body_html_clean": _sanitise_html(html) if html else None,
     }
 
 

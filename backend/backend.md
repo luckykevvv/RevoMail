@@ -1,7 +1,5 @@
-cd backend
-cp .env.example .env
+# Backend quick reference
 
-Then Fill in SECRET_KEY (generate one with: python -c "import secrets; print(secrets.token_hex(32))")
+Run backend commands from the repository root. Create the ignored `.venv`, install `backend/requirements.txt`, build the frontend, and use `npm run start`. The shared launcher selects Python internally and starts `backend.run` without a development reloader.
 
-pip install -r requirements.txt
-uvicorn app.main:app --reload
+See `backend/README.md` and the root `README.md` for complete setup and environment configuration.

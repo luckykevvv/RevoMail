@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from app.services import gmail as gmail_service
+from fastapi.concurrency import run_in_threadpool
+
+from backend.app.services import gmail as gmail_service
 
 router = APIRouter()
 
@@ -23,7 +25,7 @@ async def list_emails(
     page_token: str | None = Query(default=None),
 ):
     try:
-        return gmail_service.list_messages(tokens, max_results=max_results, page_token=page_token)
+        return await run_in_threadpool(gmail_service.list_messages, tokens, max_results, page_token)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Gmail API error: {exc}")
 
@@ -38,6 +40,6 @@ async def get_email(
     tokens: dict = Depends(_require_tokens),
 ):
     try:
-        return gmail_service.get_message(tokens, message_id)
+        return await run_in_threadpool(gmail_service.get_message, tokens, message_id)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Gmail API error: {exc}")

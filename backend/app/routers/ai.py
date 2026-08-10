@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
-from app.services import ai as ai_service
-from app.services import gmail as gmail_service
+from backend.app.services import ai as ai_service
+from backend.app.services import gmail as gmail_service
 
 router = APIRouter()
 

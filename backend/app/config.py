@@ -1,34 +1,43 @@
+import os
+from pathlib import Path
+
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+PROJECT_ROOT = Path(os.environ.get("REVOMAIL_PROJECT_ROOT", Path(__file__).resolve().parents[2])).resolve()
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=PROJECT_ROOT / ".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",
     )
 
-    # Server
     host: str = "0.0.0.0"
-    port: int = 8000
-    debug: bool = False
+    port: int = 4173
+    debug: bool = Field(default=False, validation_alias="REVOMAIL_DEBUG")
+    app_base_url: str = "http://localhost:4173"
+    secret_key: str = Field(
+        default="revomail-local-session-key",
+        validation_alias=AliasChoices("SECRET_KEY", "TOKEN_ENCRYPTION_KEY"),
+    )
 
-    # Security
-    secret_key: str  # used for signing session cookies — must be set in .env
-    allowed_origins: list[str] = ["http://localhost:5173", "http://localhost:4173"]
-
-    # Google OAuth
     google_client_id: str = ""
     google_client_secret: str = ""
-    google_redirect_uri: str = "http://localhost:8000/api/auth/google/callback"
+    google_redirect_uri: str = ""
 
-    # LLM
+    microsoft_client_id: str = ""
+    microsoft_client_secret: str = ""
+
     openai_api_key: str = ""
-    openai_model: str = "gpt-4o"   # override in .env if you want a different model
-    anthropic_api_key: str = ""
+    openai_model: str = "gpt-4o"
 
-    # Database (SQLite for local dev; swap for postgres:// in prod)
-    database_url: str = "sqlite:///./revomail.db"
+    @property
+    def effective_google_redirect_uri(self) -> str:
+        return self.google_redirect_uri or f"{self.app_base_url}/api/v1/auth/google/callback"
 
 
 settings = Settings()

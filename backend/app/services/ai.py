@@ -10,9 +10,8 @@ import json
 import re
 
 from openai import OpenAI
-from app.config import settings
+from backend.app.config import settings
 
-_client = OpenAI(api_key=settings.openai_api_key)
 _MODEL = settings.openai_model
 
 
@@ -38,7 +37,9 @@ def _clean_body(body: str) -> str:
 
 def _chat(system: str, user: str, max_tokens: int = 512) -> str:
     """Send a single-turn chat request and return the text response."""
-    response = _client.chat.completions.create(
+    if not settings.openai_api_key:
+        raise RuntimeError("OpenAI is not configured.")
+    response = OpenAI(api_key=settings.openai_api_key).chat.completions.create(
         model=_MODEL,
         messages=[
             {"role": "system", "content": system},

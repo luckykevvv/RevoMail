@@ -1,17 +1,14 @@
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
-import google.oauth2.credentials
 
-from app.config import settings
+from backend.app.config import settings
+from backend.app.services.oauth_transactions import oauth_transactions
+
 
 router = APIRouter()
 
-# Scopes we request from Google.
-# gmail.readonly  — read emails
-# gmail.send      — send replies
-# calendar        — create calendar events
 SCOPES = [
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
@@ -22,8 +19,16 @@ SCOPES = [
 ]
 
 
+def _providers() -> dict[str, bool]:
+    return {
+        "google": bool(settings.google_client_id and settings.google_client_secret),
+        "microsoft": False,
+    }
+
+
 def _build_flow() -> Flow:
-    """Create a Google OAuth flow from config settings."""
+    if not _providers()["google"]:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured.")
     return Flow.from_client_config(
         client_config={
             "web": {
@@ -31,92 +36,86 @@ def _build_flow() -> Flow:
                 "client_secret": settings.google_client_secret,
                 "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                 "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": [settings.google_redirect_uri],
+                "redirect_uris": [settings.effective_google_redirect_uri],
             }
         },
         scopes=SCOPES,
-        redirect_uri=settings.google_redirect_uri,
+        redirect_uri=settings.effective_google_redirect_uri,
     )
 
 
-# ---------------------------------------------------------------------------
-# GET /api/auth/google
-# Redirect the user to Google's consent screen.
-# ---------------------------------------------------------------------------
-@router.get("/google")
-async def google_login(request: Request):
+def _authorization(request: Request, return_to: str = "/") -> str:
     flow = _build_flow()
-    auth_url, state = flow.authorization_url(
-        access_type="offline",   # get a refresh token so we can act later
+    authorization_url, state = flow.authorization_url(
+        access_type="offline",
         include_granted_scopes="true",
-        prompt="consent",        # always show consent so we always get a refresh token
+        prompt="consent",
     )
-    # Store the CSRF state in the session for validation on callback
-    request.session["oauth_state"] = state
-    return RedirectResponse(auth_url)
+    safe_return_to = return_to if return_to.startswith("/") and not return_to.startswith("//") else "/"
+    oauth_transactions.put(state, safe_return_to)
+    return authorization_url
 
 
-# ---------------------------------------------------------------------------
-# GET /api/auth/google/callback
-# Google redirects here after the user approves (or denies) access.
-# ---------------------------------------------------------------------------
+@router.get("/session")
+async def session(request: Request):
+    user = request.session.get("user")
+    return {
+        "authenticated": bool(user),
+        "user": user,
+        "csrfToken": request.session.setdefault("csrf_token", "internal-project"),
+        "providers": _providers(),
+    }
+
+
+@router.get("/{provider}/start")
+async def provider_start(provider: str, request: Request, returnTo: str = "/"):
+    if provider != "google":
+        raise HTTPException(status_code=503, detail=f"{provider.title()} sign-in is pending.")
+    return RedirectResponse(_authorization(request, returnTo))
+
+
 @router.get("/google/callback")
 async def google_callback(request: Request, code: str = "", state: str = "", error: str = ""):
-    # User denied access
+    transaction = oauth_transactions.consume(state)
     if error:
-        return RedirectResponse(f"{settings.allowed_origins[0]}?auth_error={error}")
+        return RedirectResponse(f"/?authError=AUTHORIZATION_DENIED")
+    if not code or transaction is None:
+        return RedirectResponse("/?authError=INVALID_OAUTH_STATE")
 
-    # CSRF check
-    stored_state = request.session.get("oauth_state")
-    if not stored_state or stored_state != state:
-        raise HTTPException(status_code=400, detail="OAuth state mismatch — possible CSRF attack.")
+    try:
+        flow = _build_flow()
+        flow.fetch_token(code=code)
+        credentials = flow.credentials
+        profile = build("oauth2", "v2", credentials=credentials).userinfo().get().execute()
+    except Exception:
+        return RedirectResponse("/?authError=AUTHORIZATION_FAILED")
 
-    # Exchange the authorisation code for tokens
-    flow = _build_flow()
-    flow.fetch_token(code=code)
-    credentials = flow.credentials
-
-    # Fetch basic profile info using the access token
-    oauth2_service = build("oauth2", "v2", credentials=credentials)
-    user_info = oauth2_service.userinfo().get().execute()
-
-    # Store everything we need in the signed session cookie
-    request.session["user"] = {
-        "email": user_info.get("email"),
-        "name": user_info.get("name"),
-        "picture": user_info.get("picture"),
+    user = {
+        "id": profile.get("id") or profile.get("email"),
+        "email": profile.get("email", ""),
+        "displayName": profile.get("name") or profile.get("email", "RevoMail User"),
+        "avatarUrl": profile.get("picture"),
     }
+    request.session["user"] = user
     request.session["tokens"] = {
         "token": credentials.token,
         "refresh_token": credentials.refresh_token,
         "token_uri": credentials.token_uri,
         "client_id": credentials.client_id,
         "client_secret": credentials.client_secret,
-        "scopes": list(credentials.scopes or []),
+        "scopes": list(credentials.scopes or SCOPES),
     }
-
-    # Redirect back to the frontend — it will call /api/auth/me to get user info
-    return RedirectResponse(f"{settings.allowed_origins[0]}?auth=success")
-
-
-# ---------------------------------------------------------------------------
-# GET /api/auth/me
-# Returns the logged-in user's profile, or 401 if not authenticated.
-# Called by the frontend on page load to check session state.
-# ---------------------------------------------------------------------------
-@router.get("/me")
-async def get_me(request: Request):
-    user = request.session.get("user")
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    return user
+    request.session["account"] = {
+        "id": "google",
+        "provider": "google",
+        "email": user["email"],
+        "displayName": user["displayName"],
+        "status": "CONNECTED",
+        "scopes": request.session["tokens"]["scopes"],
+    }
+    return RedirectResponse(transaction.return_to)
 
 
-# ---------------------------------------------------------------------------
-# POST /api/auth/logout
-# Clears the session.
-# ---------------------------------------------------------------------------
-@router.post("/logout")
+@router.post("/logout", status_code=204)
 async def logout(request: Request):
     request.session.clear()
-    return {"status": "logged out"}

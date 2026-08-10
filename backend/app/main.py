@@ -1,50 +1,65 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.config import settings
-from app.routers import health, auth, emails, ai
+from backend.app.config import PROJECT_ROOT, settings
+from backend.app.routers import accounts, ai, auth, emails, health
 
-app = FastAPI(
-    title="RevoMail API",
-    version="0.1.0",
-    # Hide docs in production
-    docs_url="/api/docs" if settings.debug else None,
-    redoc_url="/api/redoc" if settings.debug else None,
-)
 
-# ---------------------------------------------------------------------------
-# Session middleware — must be added before CORS
-# Signs the session cookie with SECRET_KEY so it cannot be tampered with.
-# ---------------------------------------------------------------------------
-app.add_middleware(
-    SessionMiddleware,
-    secret_key=settings.secret_key,
-    session_cookie="revomail_session",
-    max_age=60 * 60 * 24 * 7,  # 7 days
-    https_only=False,           # set to True in production (HTTPS only)
-    same_site="lax",
-)
+def _error(code: str, message: str, status_code: int, retryable: bool = False) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={"error": {"code": code, "message": message, "retryable": retryable}},
+    )
 
-# ---------------------------------------------------------------------------
-# CORS — allow the Vite dev server and the built preview server
-# ---------------------------------------------------------------------------
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.allowed_origins,
-    allow_credentials=True,  # needed for session cookies
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
-# ---------------------------------------------------------------------------
-# Routers
-# ---------------------------------------------------------------------------
-app.include_router(health.router, prefix="/api")
-app.include_router(auth.router,   prefix="/api/auth",   tags=["auth"])
-app.include_router(emails.router, prefix="/api/emails", tags=["emails"])
-app.include_router(ai.router,     prefix="/api/ai",     tags=["ai"])
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title="RevoMail API",
+        version="0.2.0",
+        docs_url="/api/docs" if settings.debug else None,
+        redoc_url="/api/redoc" if settings.debug else None,
+    )
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=settings.secret_key,
+        session_cookie="revomail_session",
+        max_age=60 * 60 * 24 * 7,
+        https_only=settings.app_base_url.startswith("https://"),
+        same_site="lax",
+    )
 
-# Future routers:
-# from app.routers import voice
-# app.include_router(voice.router, prefix="/api/voice", tags=["voice"])
+    @app.exception_handler(HTTPException)
+    async def http_error(_request: Request, exc: HTTPException):
+        detail = exc.detail if isinstance(exc.detail, str) else "The request could not be completed."
+        return _error("REQUEST_FAILED", detail, exc.status_code, exc.status_code >= 500)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(_request: Request, _exc: RequestValidationError):
+        return _error("INVALID_REQUEST", "The request was invalid.", 422)
+
+    app.include_router(health.router, prefix="/api/v1")
+    app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
+    app.include_router(accounts.router, prefix="/api/v1/accounts", tags=["accounts"])
+    app.include_router(emails.router, prefix="/api/v1/emails", tags=["emails"])
+    app.include_router(ai.router, prefix="/api/v1/ai", tags=["ai"])
+
+    dist_path = PROJECT_ROOT / "dist"
+
+    @app.get("/{path:path}", include_in_schema=False)
+    async def frontend(path: str):
+        candidate = (dist_path / path).resolve()
+        if path and candidate.is_relative_to(dist_path.resolve()) and candidate.is_file():
+            return FileResponse(candidate)
+        index = dist_path / "index.html"
+        if index.is_file():
+            return FileResponse(index)
+        return _error("FRONTEND_NOT_BUILT", "Run npm run build before starting RevoMail.", 503)
+
+    return app
+
+
+app = create_app()
