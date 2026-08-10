@@ -468,20 +468,26 @@ function bindEvents() {
     ai.extraction = null; ai.extractLoading = false;
     ai.draft = ""; ai.draftLoading = false;
     // Show reading view immediately with metadata while full body loads
+    const loadingId = meta.id;
     state.selectedEmail = { ...meta, body_html: null, body_plain: null, _loading: true };
     meta.unread = false;
     state.view = "reading";
     render();
-    // Fetch full message body
+    // Fetch full message body — but only apply the result if the user
+    // is still in the reading view for this specific email
     try {
       const res = await fetch(`${API}/emails/${meta.id}`, { credentials: "include" });
       if (res.ok) {
         const full = await res.json();
-        state.selectedEmail = full;
-        render();
+        if (state.view === "reading" && state.selectedEmail?.id === loadingId) {
+          state.selectedEmail = full;
+          render();
+        }
       }
     } catch (err) {
-      showToast("Could not load email body — " + err.message);
+      if (state.view === "reading" && state.selectedEmail?.id === loadingId) {
+        showToast("Could not load email body — " + err.message);
+      }
     }
   }));
   document.querySelector("[data-load-more]")?.addEventListener("click", () => fetchEmails(nextPageToken));
