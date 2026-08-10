@@ -274,11 +274,24 @@ function inboxView() {
   <section class="mail-panel">
     <div class="mail-panel-heading"><span>${visible.length} conversations</span><button class="text-button" data-summarize-all>${icon("sparkles")} Summarise inbox</button></div>
     <div class="email-list">
-      ${state.emailsLoading && !emails.length ? '<div class="empty-state"><h3>Loading inbox…</h3></div>' : visible.length ? visible.map(emailRow).join("") : `<div class="empty-state">${icon("search-x")}<h3>No emails found</h3><p>Try a different search or category.</p></div>`}
+      ${state.emailsLoading && !emails.length ? skeletonRows(8) : visible.length ? visible.map(emailRow).join("") : `<div class="empty-state">${icon("search-x")}<h3>No emails found</h3><p>Try a different search or category.</p></div>`}
     </div>
     ${state.nextPageToken ? `<div class="mail-panel-heading"><button class="text-button" data-load-more ${state.emailsLoading ? "disabled" : ""}>${state.emailsLoading ? "Loading…" : "Load more"}</button></div>` : ""}
   </section>
   <button class="floating-mic" data-voice title="Voice input">${icon("mic")}</button>`);
+}
+
+function skeletonRows(count = 8) {
+  return Array.from({ length: count }, (_, i) => `
+    <article class="email-row skeleton-row" aria-hidden="true">
+      <span class="skeleton skeleton-avatar"></span>
+      <div class="skeleton skeleton-sender" style="width:${90 + (i % 3) * 20}px"></div>
+      <div class="email-content">
+        <div class="skeleton skeleton-subject" style="width:${140 + (i % 4) * 30}px"></div>
+        <div class="skeleton skeleton-preview" style="width:${200 + (i % 5) * 25}px"></div>
+      </div>
+      <div class="skeleton skeleton-time"></div>
+    </article>`).join("");
 }
 
 function emailRow(email) {

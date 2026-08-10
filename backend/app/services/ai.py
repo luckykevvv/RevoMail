@@ -10,7 +10,7 @@ import json
 import re
 
 from openai import OpenAI
-from backend.app.config import settings
+from app.config import settings
 
 _MODEL = settings.openai_model
 

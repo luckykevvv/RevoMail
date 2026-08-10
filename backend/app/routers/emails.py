@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
 
-from backend.app.services import gmail as gmail_service
+from app.services import gmail as gmail_service
 
 router = APIRouter()
 

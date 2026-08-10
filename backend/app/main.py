@@ -2,11 +2,12 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 
-from backend.app.config import PROJECT_ROOT, settings
-from backend.app.routers import accounts, ai, auth, emails, health
+from app.config import PROJECT_ROOT, settings
+from app.routers import accounts, ai, auth, emails, health
 
 
 def _error(code: str, message: str, status_code: int, retryable: bool = False) -> JSONResponse:
@@ -30,6 +31,13 @@ def create_app() -> FastAPI:
         max_age=60 * 60 * 24 * 7,
         https_only=settings.app_base_url.startswith("https://"),
         same_site="lax",
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.allowed_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     @app.exception_handler(HTTPException)

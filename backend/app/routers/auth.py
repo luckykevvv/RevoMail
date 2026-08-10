@@ -3,8 +3,8 @@ from fastapi.responses import RedirectResponse
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 
-from backend.app.config import settings
-from backend.app.services.oauth_transactions import oauth_transactions
+from app.config import settings
+from app.services.oauth_transactions import oauth_transactions
 
 
 router = APIRouter()
@@ -76,11 +76,12 @@ async def provider_start(provider: str, request: Request, returnTo: str = "/"):
 
 @router.get("/google/callback")
 async def google_callback(request: Request, code: str = "", state: str = "", error: str = ""):
+    frontend = settings.app_base_url.rstrip("/")
     transaction = oauth_transactions.consume(state)
     if error:
-        return RedirectResponse(f"/?authError=AUTHORIZATION_DENIED")
+        return RedirectResponse(f"{frontend}/?authError=AUTHORIZATION_DENIED")
     if not code or transaction is None:
-        return RedirectResponse("/?authError=INVALID_OAUTH_STATE")
+        return RedirectResponse(f"{frontend}/?authError=INVALID_OAUTH_STATE")
 
     try:
         flow = _build_flow()
@@ -113,7 +114,7 @@ async def google_callback(request: Request, code: str = "", state: str = "", err
         "status": "CONNECTED",
         "scopes": request.session["tokens"]["scopes"],
     }
-    return RedirectResponse(transaction.return_to)
+    return RedirectResponse(f"{frontend}{transaction.return_to}")
 
 
 @router.post("/logout", status_code=204)

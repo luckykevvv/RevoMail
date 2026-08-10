@@ -39,5 +39,16 @@ class Settings(BaseSettings):
     def effective_google_redirect_uri(self) -> str:
         return self.google_redirect_uri or f"{self.app_base_url}/api/v1/auth/google/callback"
 
+    @property
+    def allowed_origins(self) -> list[str]:
+        origins = [self.app_base_url]
+        # Always allow both common dev ports so Vite hot-reload works
+        for port in ("5173", "4173"):
+            for host in ("localhost", "127.0.0.1"):
+                origin = f"http://{host}:{port}"
+                if origin not in origins:
+                    origins.append(origin)
+        return origins
+
 
 settings = Settings()
