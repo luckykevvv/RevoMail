@@ -230,3 +230,45 @@ def test_oauth_start_rejects_scheme_relative_return_path(client):
         follow_redirects=False,
     )
     assert response.headers["location"] == "/"
+
+
+def test_lost_encryption_key_returns_401_not_500(tmp_path, monkeypatch):
+    from backend.app.routers import auth as auth_module
+
+    oauth_transactions.clear()
+    monkeypatch.setattr(auth_module, "_providers", lambda: {"google": True, "microsoft": False})
+    monkeypatch.setattr(auth_module, "_build_flow", FakeFlow)
+    monkeypatch.setattr(auth_module, "build", lambda *_args, **_kwargs: FakeOAuthService())
+    database_url = f"file:{(tmp_path / 'lost-key.db').as_posix()}"
+    shared_secret = "test-session-secret-that-is-long-enough"
+
+    first_key = Fernet.generate_key().decode("ascii")
+    first_settings = Settings(
+        _env_file=None,
+        environment="test",
+        database_url=database_url,
+        secret_key=shared_secret,
+        token_encryption_key=first_key,
+    )
+    with TestClient(create_app(first_settings)) as first_client:
+        first_client.get("/api/v1/auth/google/start", follow_redirects=False)
+        callback = first_client.get(
+            "/api/v1/auth/google/callback?code=valid-code&state=test-state",
+            follow_redirects=False,
+        )
+        assert callback.status_code == 307
+        session_cookie = first_client.cookies.get("revomail_session")
+        assert session_cookie
+
+    lost_key_settings = Settings(
+        _env_file=None,
+        environment="test",
+        database_url=database_url,
+        secret_key=shared_secret,
+        token_encryption_key=Fernet.generate_key().decode("ascii"),
+    )
+    with TestClient(create_app(lost_key_settings)) as lost_client:
+        lost_client.cookies.set("revomail_session", session_cookie)
+        response = lost_client.get("/api/v1/emails")
+        assert response.status_code == 401
+        assert response.json()["error"]["code"] == "NOT_AUTHENTICATED"

@@ -198,7 +198,14 @@ class AuthRepository:
                 'SELECT c."accessTokenEncrypted" FROM "OAuthCredential" c JOIN "MailboxConnection" m ON m."id"=c."connectionId" WHERE m."userId"=? AND m."status"=? ORDER BY m."createdAt" LIMIT 1',
                 (user_id, "CONNECTED"),
             ).fetchone()
-        return self.protector.unprotect(row["accessTokenEncrypted"]) if row else None
+        if not row:
+            return None
+        try:
+            return self.protector.unprotect(row["accessTokenEncrypted"])
+        except RuntimeError:
+            # The encryption key changed or was lost (e.g. data/revomail-server.key was deleted).
+            # Treat the stored credential as absent so the user re-authorizes instead of seeing a 500.
+            return None
 
     def disconnect(self, user_id: str, connection_id: str) -> bool:
         with self.database.connect() as connection:

@@ -1,40 +1,32 @@
-# Inline the auto-install launcher into RevoMail.cmd
+# Treat a lost encryption key as missing credentials, not a server error
 
 Date: 2026-08-17
 
 ## Task Scope
 
-Replace the root `RevoMail.cmd` thin wrapper (which delegated to `scripts/launch-desktop.mjs`) with a self-contained one-click launcher that checks prerequisites, installs missing or stale Node dependencies, prepares the Python environment, builds the frontend, and starts Electron.
+Make the auto-generated server keys behave as decided for the desktop single-instance model: first startup generates and persists `SECRET_KEY` and `TOKEN_ENCRYPTION_KEY`; later startups reuse the file when present; when the key file is gone, previously stored encrypted credentials are treated as absent so the user re-authorizes instead of hitting a 500.
 
 ## Changes
 
-- Rewrote `RevoMail.cmd` to be self-contained: it checks `node` and `npm`, computes the `package-lock.json` SHA-256 fingerprint (lowercase, matching the previous stamp format), compares it with `node_modules/.revomail-lock.sha256`, runs `npm ci` when missing or stale, writes the stamp, and runs `npm run desktop` (build + Electron).
-- Deleted `scripts/launch-desktop.mjs` and `scripts/launch-desktop.test.js`; the logic now lives entirely in `RevoMail.cmd`.
-- Removed the `npm run launch` script from `package.json` and its row from the `README.md` npm script table.
-- Updated the `README.md` `RevoMail.cmd` description to reflect the new inline prerequisite checks and install flow.
-- Archived the previous task record as `change/change-13.md`.
+- `backend/app/persistence.py` `AuthRepository.get_tokens()` now catches the `RuntimeError` raised when a stored credential cannot be decrypted (key changed or lost) and returns `None`, so `require_tokens()` responds 401 "No connected mailbox is available." instead of an internal server error.
+- Added `backend/python_tests/test_api.py` `test_lost_encryption_key_returns_401_not_500`, which authorizes with one key, reopens the same SQLite database with a different Fernet key (simulating a deleted `data/revomail-server.key`), and asserts `/api/v1/emails` returns 401 `NOT_AUTHENTICATED`.
+- Archived the previous task record as `change/change-14.md`.
 
 ## Reason
 
-The contributor asked for the auto-install logic to replace the root `RevoMail.cmd` wrapper. Keeping the Node launcher module would duplicate the same fingerprint/install/start behavior in two places, so the cmd script now owns the flow directly.
+The contributor confirmed that RevoMail is a desktop application with exactly one instance, so multi-instance key sharing does not apply. The lifecycle is: first startup generates keys; later startups reuse the persisted file; if the file is missing, previously stored provider credentials are considered abandoned and the user simply re-authorizes. The previous behavior surfaced a raw decrypt failure as a 500.
 
 ## Key Commands
 
-- `git status --short --branch`
-- `git rm scripts/launch-desktop.mjs scripts/launch-desktop.test.js`
-- `npm test`
-- `npm run build`
-- `cmd /c RevoMail.cmd` (verified prerequisite checks and install/start flow)
+- `npm run test:python`
 - `git diff --check`
 
 ## Validation
 
-- `npm test` passed all JavaScript and Python tests after removing the launcher test file (JS count drops accordingly).
-- `npm run build` produced the Vite production frontend.
-- `RevoMail.cmd` ran under `cmd /c`, detected the missing dependency stamp, ran `npm ci` (which invoked the Python setup post-install hook), wrote the new stamp, and proceeded to the desktop start step.
+- All 20 Python tests passed, including the new lost-key regression test (401 instead of 500, session cookie still accepted).
 - `git diff --check` passed.
 
 ## Known Issues and Remaining Work
 
-- The cmd launcher is Windows-only by design; macOS/Linux contributors use the npm commands directly.
-- Running Electron from the sandbox could not be completed interactively; the launcher reached the desktop start step but the window could not be verified in this environment.
+- The stored encrypted credential row remains in SQLite after a lost key; it is ignored (treated as no connected mailbox) but not deleted. Re-authorizing creates a fresh credential row via upsert.
+- Desktop single-instance model is assumed; multi-instance key sharing remains explicitly out of scope.
