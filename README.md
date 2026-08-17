@@ -35,13 +35,11 @@ npm run desktop
 
 `npm ci` automatically creates the ignored repository `.venv` and installs `backend/requirements.txt`. Source start, test, and packaging commands repeat this check and install only when the environment is missing or the requirements file changed. If Python is not installed, setup stops with an actionable message; it does not make system-wide changes. Packaged desktop builds launch their bundled standalone backend and do not require Node.js or Python on the target machine. Google and OpenAI buttons remain unavailable until the relevant server-side credentials are supplied. Register `${APP_BASE_URL}/api/v1/auth/google/callback` with Google.
 
-On Windows, contributors can instead double-click the root-level `RevoMail.cmd`. It compares the current `package-lock.json` with the installed Node environment, runs `npm ci` when dependencies are missing or stale, prepares the Python environment through the npm post-install hook, builds the frontend, and opens Electron. Node.js LTS and Python 3.11 or newer are the only source-development prerequisites.
+On Windows, contributors can instead double-click the root-level `RevoMail.cmd`. It compares the current `package-lock.json` with the installed Node environment, runs `npm ci` when dependencies are missing or stale, prepares the Python environment through the npm post-install hook, builds the frontend, and opens Electron. Node.js LTS and Python 3.11 or newer are the only source-development prerequisites. No prebuilt executable is committed; `RevoMail.cmd` is the one-click source launcher.
 
-The root-level `RevoMail.exe` is the current portable Windows build. It contains the Electron application and standalone Python backend, so members can launch it without installing project dependencies. The executable is rebuilt by `npm run desktop:root`; that command rejects artifacts at or above GitHub's 100,000,000-byte ordinary file limit. `RevoMail.cmd` remains the source-development fallback.
+The standalone-backend build keeps the Gmail v1 discovery definition and removes the hundreds of unrelated Google API discovery documents bundled by the generic client library. This keeps the packaged backend compact without removing any currently supported provider behavior.
 
-The standalone-backend build keeps the Gmail v1 discovery definition and removes the hundreds of unrelated Google API discovery documents bundled by the generic client library. This reduces the portable artifact without removing any currently supported provider behavior.
-
-Desktop packaging also includes only the English and Simplified Chinese Electron locales, the active desktop/runtime files, and the two Node packages used by the Electron main process. Legacy Node backend sources and build-time frontend dependencies remain in the repository but are not copied into the portable runtime. These reductions keep the current Windows executable below GitHub's normal per-file limit without external resource folders or LFS.
+Desktop packaging includes only the English and Simplified Chinese Electron locales, the active desktop/runtime files, and the two Node packages used by the Electron main process. Legacy Node backend sources and build-time frontend dependencies remain in the repository but are not copied into the packaged runtime.
 
 ## Desktop Application
 
@@ -80,8 +78,8 @@ Supported runtime variables:
 | `APP_BASE_URL` | `http://localhost:4173` | Public same-origin URL and OAuth callback base |
 | `REVOMAIL_DEBUG` | `false` | Enables FastAPI development documentation |
 | `DATABASE_URL` | `file:./data/revomail.db` | SQLite database URL used by the active Python repositories |
-| `SECRET_KEY` | Development-only local value | Signs the opaque session cookie; at least 32 characters in production |
-| `TOKEN_ENCRYPTION_KEY` | Derived locally | Fernet key for stored provider credentials; required in production |
+| `SECRET_KEY` | Auto-generated | Signs the opaque session cookie; optional, generated and stored in `data/revomail-server.key` on first startup |
+| `TOKEN_ENCRYPTION_KEY` | Auto-generated | Fernet key for stored provider credentials; optional, generated and stored in `data/revomail-server.key` on first startup |
 | `JOB_LEASE_SECONDS` | `60` | Lease duration before an interrupted job can be recovered |
 | `JOB_MAX_ATTEMPTS` | `3` | Maximum attempts before a recovered job is marked failed |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Empty | Google OAuth application credentials |
@@ -90,7 +88,7 @@ Supported runtime variables:
 | `OPENAI_API_KEY` | Empty | OpenAI server-side API key |
 | `OPENAI_MODEL` | `gpt-4o` | OpenAI model used by the merged AI service |
 
-Process variables take precedence over the ignored root `.env`, followed by code defaults. Production startup rejects an insecure public URL, a short signing secret, a missing encryption key, or a non-SQLite database URL. Generate a Fernet key with `.venv\Scripts\python.exe -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` and store it only in the real environment. Electron supplies its private database and encryption-key paths under `userData`. Real `.env` files are ignored and must never be committed.
+Process variables take precedence over the ignored root `.env`, followed by code defaults. Production startup rejects an insecure public URL. `SECRET_KEY` and `TOKEN_ENCRYPTION_KEY` are optional: when empty, RevoMail generates both on first startup and stores them in the ignored `data/revomail-server.key`, so sessions and encrypted credentials stay stable across restarts without manual key configuration. Electron supplies its private database and encryption-key paths under `userData`. Real `.env` files are ignored and must never be committed.
 
 ## npm Scripts
 
@@ -120,10 +118,8 @@ Process variables take precedence over the ignored root `.env`, followed by code
 | `npm run desktop:pack` | Build an unpacked desktop application for the current platform |
 | `npm run desktop:smoke` | Start and health-check the service from the Windows unpacked package |
 | `npm run desktop:ui-smoke` | Exercise the real unpacked Electron launcher and Google authorization entry |
-| `npm run desktop:dist` | Build a desktop installer or distributable artifact |
-| `npm run desktop:root` | Build the portable Windows executable and copy it to repository root |
-| `npm run desktop:root-smoke` | Launch the root portable executable and verify its real Electron window |
-| `npm run verify:push` | Run all tests, rebuild the desktop package, and smoke-test it before a push |
+| `npm run desktop:dist` | Build a desktop installer or distributable artifact under ignored `release/` |
+| `npm run verify:push` | Run all tests, build the frontend, pack the desktop application, and smoke-test it before a push |
 
 ## Repository Structure
 

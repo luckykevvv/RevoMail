@@ -145,7 +145,6 @@ npm run desktop
 npm run desktop:dev
 npm run desktop:pack
 npm run desktop:dist
-npm run desktop:root
 npm run verify:push
 ```
 
@@ -164,6 +163,7 @@ Environment rules:
 - Add new supported variables to `.env.example` with safe placeholder values.
 - Keep the real `.env` ignored.
 - FastAPI loads the ignored root `.env`; process and Electron-injected variables take precedence over file values.
+- `SECRET_KEY` and `TOKEN_ENCRYPTION_KEY` are optional. When empty, the backend generates both on first startup and persists them to the ignored `data/revomail-server.key`; never commit that file. Electron stores its own keys under `userData` and keeps them out of renderer-accessible settings.
 - npm and PM2 select the repository `.venv` and then the platform Python command. Development Electron uses the same resolver; packaged Electron launches only its bundled standalone backend.
 - The earlier Node SQLite schema and migration remain committed while persistence is migrated to Python. Do not claim that the current FastAPI session path persists accounts in SQLite.
 - Keep `/data/`, `*.db`, `*.db-journal`, `*.db-shm`, and `*.db-wal` ignored. Never commit a local database or copy one into a desktop package.
@@ -221,9 +221,9 @@ Production verification:
 - Store ordinary desktop preferences under Electron `userData`. Keep tokens, the generated encryption key, mailbox content, and other secrets out of renderer-accessible settings.
 - Keep Python runtime selection, OAuth values, and LLM keys outside renderer-accessible settings and IPC.
 - Preserve the independent Web and PM2 workflows. Desktop integration must not make Electron a server or deployment prerequisite.
-- Keep intermediate installers and unpacked applications under ignored `release/`. The sole exception is the root `RevoMail.exe` portable build, which is tracked directly and must remain below 100,000,000 bytes without containing environment files or credentials.
-- Keep `RevoMail.cmd` at the repository root as the tracked Windows source launcher. It must install missing or stale Node and Python project dependencies before starting Electron.
-- Build the root executable with `npm run desktop:root`; never copy `release/win-unpacked/RevoMail.exe`, because that unpacked executable depends on adjacent packaged resources.
+- Keep intermediate installers and unpacked applications under ignored `release/`. Never track packaged executables or build output in the repository; the portable `RevoMail.exe` build is retired.
+- Keep `RevoMail.cmd` at the repository root as the tracked Windows source launcher. It must install missing or stale Node and Python project dependencies, build the frontend, and start Electron.
+- Build unpacked desktop packages with `npm run desktop:pack` and installers with `npm run desktop:dist`; never copy `release/win-unpacked/RevoMail.exe` anywhere, because that unpacked executable depends on adjacent packaged resources.
 
 ## 9. Validation Matrix
 

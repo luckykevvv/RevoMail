@@ -13,11 +13,12 @@ describe("desktop package configuration", () => {
     expect(packageJson.scripts["predesktop:dev"]).toBe("npm run setup");
     expect(packageJson.scripts.prestart).toBe("npm run setup");
     expect(packageJson.scripts["prebackend:pack"]).toBe("npm run setup");
-    expect(packageJson.scripts["desktop:root"]).toContain("scripts/copy-root-desktop.mjs");
-    expect(packageJson.scripts["verify:push"]).toContain("npm run desktop:root");
+    expect(packageJson.scripts["desktop:root"]).toBeUndefined();
+    expect(packageJson.scripts["desktop:root-smoke"]).toBeUndefined();
+    expect(packageJson.scripts["verify:push"]).not.toContain("desktop:root");
+    expect(packageJson.scripts["verify:push"]).toContain("npm run desktop:pack");
     expect(packageJson.scripts["verify:push"]).toContain("npm run desktop:smoke");
-    expect(packageJson.scripts["verify:push"]).toContain("npm run desktop:root-smoke");
-    expect(packageJson.build.win.target).toBe("portable");
+    expect(packageJson.build.win.target).toBe("nsis");
   });
 
   it("includes the Python runtime resolver imported by the Electron main process", () => {

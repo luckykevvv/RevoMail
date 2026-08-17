@@ -39,9 +39,7 @@
     "desktop:ui-smoke": "node scripts/smoke-electron-ui.mjs",
     "desktop:pack": "npm run build && npm run backend:pack && electron-builder --dir",
     "desktop:dist": "npm run build && npm run backend:pack && electron-builder",
-    "desktop:root": "npm run desktop:dist && node scripts/copy-root-desktop.mjs",
-    "desktop:root-smoke": "node scripts/smoke-root-desktop.mjs",
-    "verify:push": "npm test && npm run desktop:root && npm run desktop:smoke && npm run desktop:root-smoke"
+    "verify:push": "npm test && npm run build && npm run desktop:pack && npm run desktop:smoke"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
@@ -87,7 +85,7 @@
       "zh-CN"
     ],
     "win": {
-      "target": "portable"
+      "target": "nsis"
     },
     "mac": {
       "target": [
