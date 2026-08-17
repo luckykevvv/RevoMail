@@ -11,7 +11,7 @@ from backend.app.main import create_app
 from backend.app.persistence import Database, TokenProtector, utc_now
 
 
-def test_production_configuration_fails_fast_with_safe_validation():
+def test_production_configuration_fails_fast_with_safe_validation(tmp_path):
     with pytest.raises(ValidationError) as error:
         Settings(
             _env_file=None,
@@ -20,6 +20,7 @@ def test_production_configuration_fails_fast_with_safe_validation():
             database_url="file:./test.db",
             secret_key="short",
             token_encryption_key="",
+            runtime_key_file=tmp_path / "keys" / "server.key",
         )
     message = str(error.value)
     assert "HTTPS" in message
@@ -33,8 +34,53 @@ def test_production_configuration_fails_fast_with_safe_validation():
             database_url="file:./test.db",
             secret_key="super-private-secret",
             token_encryption_key="",
+            runtime_key_file=tmp_path / "keys" / "server.key",
         )
     assert "super-private-secret" not in str(secret_error.value)
+
+
+def test_runtime_keys_are_generated_and_persisted(tmp_path):
+    key_file = tmp_path / "keys" / "server.key"
+    settings = Settings(
+        _env_file=None,
+        environment="test",
+        database_url=f"file:{(tmp_path / 'keys.db').as_posix()}",
+        secret_key="",
+        token_encryption_key="",
+        runtime_key_file=key_file,
+    )
+    assert len(settings.secret_key) >= 32
+    assert len(settings.token_encryption_key) == 44
+    assert key_file.is_file()
+    stored = key_file.read_text(encoding="utf-8")
+    assert f"SECRET_KEY={settings.secret_key}" in stored
+    assert f"TOKEN_ENCRYPTION_KEY={settings.token_encryption_key}" in stored
+
+    restarted = Settings(
+        _env_file=None,
+        environment="test",
+        database_url=f"file:{(tmp_path / 'keys.db').as_posix()}",
+        secret_key="",
+        token_encryption_key="",
+        runtime_key_file=key_file,
+    )
+    assert restarted.secret_key == settings.secret_key
+    assert restarted.token_encryption_key == settings.token_encryption_key
+
+
+def test_invalid_configured_encryption_key_is_replaced(tmp_path):
+    key_file = tmp_path / "keys" / "server.key"
+    settings = Settings(
+        _env_file=None,
+        environment="test",
+        database_url=f"file:{(tmp_path / 'keys.db').as_posix()}",
+        secret_key="a-configured-secret-that-is-long",
+        token_encryption_key="replace-with-base64-encoded-32-byte-key",
+        runtime_key_file=key_file,
+    )
+    assert settings.secret_key == "a-configured-secret-that-is-long"
+    assert len(settings.token_encryption_key) == 44
+    assert key_file.is_file()
 
 
 def test_migrations_apply_and_latest_migration_rolls_back(tmp_path):

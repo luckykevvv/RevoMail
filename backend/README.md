@@ -36,4 +36,4 @@ npm run start
 
 The npm post-install hook creates `.venv` and installs `backend/requirements.txt`. `npm run setup` can be run explicitly, while source start, Python test, desktop, and backend packaging commands verify the environment automatically. A system Python 3.11 or newer is still required for source development. `npm run backend:pack` produces the standalone backend used by packaged Electron builds.
 
-FastAPI applies pending migrations before it becomes ready. Production mode requires a secure signing secret and an explicit Fernet encryption key. Keep real Google and OpenAI credentials in the ignored root `.env`. Do not commit tokens, mailbox content, or test-account data.
+FastAPI applies pending migrations before it becomes ready. `SECRET_KEY` and `TOKEN_ENCRYPTION_KEY` are optional: when left empty, RevoMail generates both on first startup and stores them in the ignored `data/revomail-server.key`, so sessions and encrypted credentials stay stable across restarts. Production mode additionally rejects an insecure public URL. Keep real Google and OpenAI credentials in the ignored root `.env`. Do not commit tokens, mailbox content, or test-account data.
