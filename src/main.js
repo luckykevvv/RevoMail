@@ -1,4 +1,5 @@
 import "./style.css";
+import { applyMailboxPage } from "./mailbox-state.js";
 import {
   AlignLeft,
   Archive,
@@ -100,30 +101,7 @@ const demoIcons = {
 
 const app = document.querySelector("#app");
 
-let emails = [
-  {
-    id: 1,
-    sender: "Prof. Smith",
-    address: "smith@university.edu",
-    subject: "Project Meeting Tomorrow",
-    preview: "Just a reminder that we will have our project meeting tomorrow…",
-    time: "10:30 AM",
-    category: "Primary",
-    unread: true,
-    starred: false,
-    body: [
-      "Hi team,",
-      "Just a reminder that we will have our project meeting tomorrow at 10:00 AM in Room 302.",
-      "Please prepare the progress update and any blockers you would like to discuss.",
-      "Best,\nProf. Smith"
-    ]
-  },
-  { id: 2, sender: "Marketing Team", address: "news@revomail.example", subject: "Weekly Newsletter", preview: "Here is this week’s update on campaigns and product launches…", time: "9:15 AM", category: "Promotions", unread: true, starred: false },
-  { id: 3, sender: "service@github.com", address: "service@github.com", subject: "Security alert", preview: "A new sign-in to your GitHub account was detected…", time: "Yesterday", category: "Primary", unread: false, starred: true },
-  { id: 4, sender: "Alice Chen", address: "alice.chen@example.com", subject: "Lunch Invitation", preview: "Would you like to join lunch this Friday? I found a great place…", time: "Yesterday", category: "Social", unread: false, starred: false },
-  { id: 5, sender: "no-reply@university.edu", address: "no-reply@university.edu", subject: "Course Update", preview: "The deadline for assignment 2 has been confirmed…", time: "May 12", category: "Primary", unread: false, starred: false },
-  { id: 6, sender: "HR Department", address: "careers@example.com", subject: "New Internship Opportunity", preview: "Please find attached the details of the winter internship…", time: "May 11", category: "Promotions", unread: false, starred: false }
-];
+let emails = [];
 
 const state = {
   authenticated: null,
@@ -134,7 +112,7 @@ const state = {
   authError: "",
   accountBusy: "",
   view: "inbox",
-  selectedEmail: emails[0],
+  selectedEmail: null,
   category: "All",
   search: "",
   theme: "light",
@@ -236,10 +214,11 @@ function sidebar() {
   const name = escapeHtml(state.user?.displayName || "RevoMail User");
   const email = escapeHtml(state.user?.email || "");
   const initials = name.split(/\s/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
+  const unreadCount = emails.filter((message) => message.unread).length;
   return `<aside class="sidebar">
     <div class="sidebar-top">${logo()}</div>
     <nav class="nav-list" aria-label="Mailbox navigation">
-      ${navItems.map(([view, label, navIcon]) => `<button class="nav-item ${state.view === view ? "active" : ""}" data-nav="${view}" aria-label="${label}">${icon(navIcon)}<span>${label}</span>${view === "inbox" ? '<b class="nav-count">3</b>' : ""}</button>`).join("")}
+      ${navItems.map(([view, label, navIcon]) => `<button class="nav-item ${state.view === view ? "active" : ""}" data-nav="${view}" aria-label="${label}">${icon(navIcon)}<span>${label}</span>${view === "inbox" && unreadCount ? `<b class="nav-count">${unreadCount}</b>` : ""}</button>`).join("")}
     </nav>
     <div class="account-card">
       <span class="avatar">${initials}</span>
@@ -272,9 +251,9 @@ function inboxView() {
     ${["All", "Primary", "Social", "Promotions"].map((category) => `<button class="tab ${state.category === category ? "active" : ""}" data-category="${category}">${category}</button>`).join("")}
   </div>
   <section class="mail-panel">
-    <div class="mail-panel-heading"><span>${visible.length} conversations</span><button class="text-button" data-summarize-all>${icon("sparkles")} Summarise inbox</button></div>
+    <div class="mail-panel-heading"><span>${state.emailsLoading && !emails.length ? "Loading conversations" : `${visible.length} conversations`}</span><button class="text-button" data-summarize-all ${emails.length && !state.emailsLoading ? "" : "disabled"}>${icon("sparkles")} Summarise inbox</button></div>
     <div class="email-list">
-      ${state.emailsLoading && !emails.length ? '<div class="empty-state"><h3>Loading inbox…</h3></div>' : visible.length ? visible.map(emailRow).join("") : `<div class="empty-state">${icon("search-x")}<h3>No emails found</h3><p>Try a different search or category.</p></div>`}
+      ${state.emailsLoading && !emails.length ? '<div class="empty-state"><h3>Loading your inbox…</h3><p>Fetching messages from your connected account.</p></div>' : visible.length ? visible.map(emailRow).join("") : emails.length ? `<div class="empty-state">${icon("search-x")}<h3>No emails found</h3><p>Try a different search or category.</p></div>` : `<div class="empty-state">${icon("inbox")}<h3>Your inbox is empty</h3><p>No messages were returned by your connected account.</p></div>`}
     </div>
     ${state.nextPageToken ? `<div class="mail-panel-heading"><button class="text-button" data-load-more ${state.emailsLoading ? "disabled" : ""}>${state.emailsLoading ? "Loading…" : "Load more"}</button></div>` : ""}
   </section>
@@ -478,7 +457,7 @@ function bindEvents() {
   document.querySelector("[data-clear-auth-error]")?.addEventListener("click", () => { state.authError = ""; render(); });
   document.querySelectorAll("[data-logout]").forEach((button) => button.addEventListener("click", async () => {
     try { await api("/api/v1/auth/logout", { method: "POST" }); } catch (error) { showToast(error.message); return; }
-    state.authenticated = false; state.user = null; state.csrfToken = ""; state.accounts = []; state.view = "inbox"; render();
+    state.authenticated = false; state.user = null; state.csrfToken = ""; state.accounts = []; state.view = "inbox"; resetMailbox(); render();
   }));
   document.querySelectorAll("[data-nav]").forEach((button) => button.addEventListener("click", () => { state.view = button.dataset.nav; render(); }));
   document.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => { state.view = button.dataset.view; render(); }));
@@ -512,7 +491,7 @@ function bindEvents() {
   document.querySelector("[data-discard]")?.addEventListener("click", () => { state.view = "reading"; render(); });
   document.querySelectorAll("[data-send]").forEach((button) => button.addEventListener("click", () => { state.view = "sent"; showToast("Message sent — human review complete"); }));
   document.querySelector("[data-ai-compose]")?.addEventListener("click", () => { const field = document.querySelector("#compose-body"); field.value = "Hi,\n\nI’m following up with a quick update on our project progress. The team has completed the initial planning and is now preparing the interactive prototype.\n\nBest regards,\nAnon User"; showToast("AI draft inserted — review before sending"); });
-  document.querySelector("[data-summarize-all]")?.addEventListener("click", () => showToast("6 emails summarised: 2 need attention today"));
+  document.querySelector("[data-summarize-all]")?.addEventListener("click", () => showToast(`${emails.length} emails ready to summarise`));
   document.querySelector("[data-load-more]")?.addEventListener("click", () => void fetchEmails(state.nextPageToken));
   document.querySelector("[data-ai-summarise]")?.addEventListener("click", () => void aiSummarise());
   document.querySelector("[data-ai-extract]")?.addEventListener("click", () => void aiExtract());
@@ -541,21 +520,32 @@ function bindEvents() {
 }
 
 async function fetchEmails(pageToken = null) {
+  if (!pageToken) resetMailbox();
   state.emailsLoading = true;
   render();
   try {
     const query = new URLSearchParams({ max_results: "20" });
     if (pageToken) query.set("page_token", pageToken);
     const payload = await api(`/api/v1/emails?${query}`);
-    emails = pageToken ? [...emails, ...payload.messages] : payload.messages;
-    state.nextPageToken = payload.next_page_token || null;
-    if (!pageToken && emails.length) state.selectedEmail = emails[0];
+    const mailbox = applyMailboxPage(emails, payload, { append: Boolean(pageToken) });
+    emails = mailbox.messages;
+    state.nextPageToken = mailbox.nextPageToken;
+    if (!pageToken) state.selectedEmail = mailbox.selectedMessage;
   } catch (error) {
     showToast(error.message);
   } finally {
     state.emailsLoading = false;
     render();
   }
+}
+
+function resetMailbox() {
+  emails = [];
+  state.selectedEmail = null;
+  state.nextPageToken = null;
+  state.aiSummary = null;
+  state.aiExtraction = null;
+  state.aiDraft = "";
 }
 
 async function aiSummarise() {
@@ -631,6 +621,7 @@ async function bootstrap() {
       const accounts = await api("/api/v1/accounts");
       state.accounts = accounts.accounts;
       if (state.accounts.length) await fetchEmails();
+      else resetMailbox();
     }
   } catch (error) {
     state.authenticated = false;

@@ -16,6 +16,7 @@ google-api-python-client==2.151.0
 
 # Session management
 itsdangerous==2.2.0
+cryptography==43.0.3
 
 # LLM (add more as needed)
 openai==1.54.0

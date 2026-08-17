@@ -2,7 +2,7 @@
 
 RevoMail is an AI-assisted email client for email summarization, reply drafting, voice commands, and task/calendar extraction.
 
-> **Current status:** RevoMail now uses Python/FastAPI for its active API, with Google OAuth, the existing connected-account UI, Gmail inbox/message endpoints, and OpenAI summary, extraction, and reply-draft endpoints. The Windows desktop package includes a standalone backend and does not require a system Python installation. Automated tests use simulated providers; real Google and OpenAI calls remain unverified. Microsoft, Speech-to-Text, sending, and calendar writes remain pending.
+> **Current status:** RevoMail uses Python/FastAPI for its active API and SQLite for active server-side sessions, encrypted provider credentials, user/account records, settings, tasks, audits, idempotency records, and recoverable jobs. Google OAuth, Gmail reads, and OpenAI operations are implemented with simulated provider coverage; real Google and OpenAI calls remain unverified. Microsoft, Speech-to-Text, sending, and calendar writes remain pending.
 
 ## Current Prototype
 
@@ -68,18 +68,23 @@ Supported runtime variables:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `HOST` | `0.0.0.0` | Address used by the production preview server |
+| `REVOMAIL_ENV` | `development` | Selects `development`, `test`, or strict `production` validation |
+| `HOST` | `127.0.0.1` | Address used by the production server; set explicitly for remote hosting |
 | `PORT` | `4173` | Port used by the production preview server |
 | `APP_BASE_URL` | `http://localhost:4173` | Public same-origin URL and OAuth callback base |
 | `REVOMAIL_DEBUG` | `false` | Enables FastAPI development documentation |
-| `SECRET_KEY` | Local placeholder | FastAPI session signing key |
+| `DATABASE_URL` | `file:./data/revomail.db` | SQLite database URL used by the active Python repositories |
+| `SECRET_KEY` | Development-only local value | Signs the opaque session cookie; at least 32 characters in production |
+| `TOKEN_ENCRYPTION_KEY` | Derived locally | Fernet key for stored provider credentials; required in production |
+| `JOB_LEASE_SECONDS` | `60` | Lease duration before an interrupted job can be recovered |
+| `JOB_MAX_ATTEMPTS` | `3` | Maximum attempts before a recovered job is marked failed |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Empty | Google OAuth application credentials |
 | `GOOGLE_REDIRECT_URI` | `${APP_BASE_URL}/api/v1/auth/google/callback` | Registered Google callback override |
 | `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET` | Empty | Microsoft OAuth application credentials |
 | `OPENAI_API_KEY` | Empty | OpenAI server-side API key |
 | `OPENAI_MODEL` | `gpt-4o` | OpenAI model used by the merged AI service |
 
-Process variables take precedence over the ignored root `.env`, followed by code defaults. Electron uses this precedence to supply its validated loopback host, port, and base URL. Real `.env` files are ignored and must never be committed.
+Process variables take precedence over the ignored root `.env`, followed by code defaults. Production startup rejects an insecure public URL, a short signing secret, a missing encryption key, or a non-SQLite database URL. Generate a Fernet key with `.venv\Scripts\python.exe -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` and store it only in the real environment. Electron supplies its private database and encryption-key paths under `userData`. Real `.env` files are ignored and must never be committed.
 
 ## npm Scripts
 
@@ -94,6 +99,7 @@ Process variables take precedence over the ignored root `.env`, followed by code
 | `npm run test:db` | Run isolated SQLite repository integration tests |
 | `npm run db:migrate` | Apply committed SQLite migrations to the configured local database |
 | `npm run db:migrate:dev` | Apply committed SQLite migrations during development |
+| `npm run db:rollback` | Roll back the most recently applied SQLite migration |
 | `npm run pm2:start` | Build and start the production preview with PM2 |
 | `npm run pm2:logs` | View RevoMail PM2 logs |
 | `npm run pm2:restart` | Rebuild and restart the PM2 process |
@@ -128,25 +134,15 @@ RevoMail/
 |-- data/                      # Ignored local SQLite database files
 |-- backend/                   # Active Python/FastAPI backend plus retained Node modules
 |   |-- README.md              # Backend layering and implementation rules
-|   |-- src/
-|   |   |-- config/            # Environment loading and configuration validation
-|   |   |-- routes/            # HTTP route declarations
-|   |   |-- controllers/       # Transport validation and response mapping
-|   |   |-- middleware/        # Authentication, errors, rate limits, and tracing
-|   |   |-- services/          # Provider-neutral application use cases
-|   |   |-- domain/            # Business entities, values, and rules
-|   |   |-- providers/
-|   |   |   |-- email/         # Gmail and Microsoft Graph adapters
-|   |   |   |-- ai/            # LLM adapters
-|   |   |   |-- calendar/      # Calendar adapters
-|   |   |   `-- speech/        # Speech-to-Text adapters
-|   |   |-- repositories/      # Persistence interfaces and implementations
-|   |   |-- jobs/              # Retryable and asynchronous work
-|   |   `-- utils/             # Small backend-only utilities
-|   `-- tests/
-|       |-- unit/              # Isolated business and utility tests
-|       |-- integration/       # API, provider, and persistence tests
-|       `-- fixtures/          # Sanitized test data
+|   |-- app/                   # Active FastAPI application
+|   |   |-- routers/           # HTTP transport and validation
+|   |   |-- services/          # Gmail, OAuth, and AI use cases
+|   |   |-- config.py          # Typed environment configuration
+|   |   |-- persistence.py     # SQLite migrations, sessions, and credentials
+|   |   |-- jobs.py            # Recoverable asynchronous-job foundation
+|   |   `-- contracts.py       # Provider-neutral v1 models
+|   |-- python_tests/          # Active API, persistence, and provider tests
+|   `-- src/                   # Retained Node migration reference and regression tests
 |-- shared/
 |   |-- contracts/             # Frontend/backend request and response contracts
 |   `-- schemas/               # Runtime-neutral validation schemas
@@ -162,7 +158,7 @@ RevoMail/
 
 ## Architecture Boundaries
 
-The active runtime is under `backend/app/`. The earlier Node authentication paths under `backend/src/` remain temporarily for migration reference and automated regression coverage.
+The active runtime is under `backend/app/`. FastAPI initializes the SQLite schema before serving requests, stores provider credentials with authenticated encryption, keeps only an opaque session token in the signed browser cookie, and recovers expired job leases on restart. The earlier Node authentication paths under `backend/src/` remain temporarily for migration reference and automated regression coverage.
 
 Backend dependency rules:
 
@@ -173,7 +169,7 @@ Backend dependency rules:
 5. Repositories isolate persistence.
 6. Shared contracts define the frontend/backend boundary without importing provider SDKs.
 
-The authentication history is recorded in ADR 0001, desktop SQLite history in ADR 0002, and the active Python/FastAPI decision in ADR 0003. The HTTP contract is documented in `docs/api/authentication.md`.
+The authentication history is recorded in ADR 0001, desktop SQLite history in ADR 0002, the active Python/FastAPI decision in ADR 0003, and the platform persistence decision in ADR 0004. The versioned HTTP contract is documented in `docs/api/v1-contracts.md`.
 
 ## Collaboration
 

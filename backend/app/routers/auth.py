@@ -4,7 +4,6 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 
 from backend.app.config import settings
-from backend.app.services.oauth_transactions import oauth_transactions
 
 
 router = APIRouter()
@@ -52,16 +51,18 @@ def _authorization(request: Request, return_to: str = "/") -> str:
         prompt="consent",
     )
     safe_return_to = return_to if return_to.startswith("/") and not return_to.startswith("//") else "/"
-    oauth_transactions.put(state, safe_return_to)
+    request.app.state.oauth_transactions.put(state, safe_return_to)
     return authorization_url
 
 
 @router.get("/session")
 async def session(request: Request):
-    user = request.session.get("user")
+    authenticated_session = request.app.state.auth_repository.find_session(request.session.get("session_token"))
+    if not authenticated_session:
+        request.session.pop("session_token", None)
     return {
-        "authenticated": bool(user),
-        "user": user,
+        "authenticated": bool(authenticated_session),
+        "user": authenticated_session.user if authenticated_session else None,
         "csrfToken": request.session.setdefault("csrf_token", "internal-project"),
         "providers": _providers(),
     }
@@ -76,9 +77,9 @@ async def provider_start(provider: str, request: Request, returnTo: str = "/"):
 
 @router.get("/google/callback")
 async def google_callback(request: Request, code: str = "", state: str = "", error: str = ""):
-    transaction = oauth_transactions.consume(state)
+    transaction = request.app.state.oauth_transactions.consume(state)
     if error:
-        return RedirectResponse(f"/?authError=AUTHORIZATION_DENIED")
+        return RedirectResponse("/?authError=AUTHORIZATION_DENIED")
     if not code or transaction is None:
         return RedirectResponse("/?authError=INVALID_OAUTH_STATE")
 
@@ -96,8 +97,7 @@ async def google_callback(request: Request, code: str = "", state: str = "", err
         "displayName": profile.get("name") or profile.get("email", "RevoMail User"),
         "avatarUrl": profile.get("picture"),
     }
-    request.session["user"] = user
-    request.session["tokens"] = {
+    tokens = {
         "token": credentials.token,
         "refresh_token": credentials.refresh_token,
         "token_uri": credentials.token_uri,
@@ -105,17 +105,18 @@ async def google_callback(request: Request, code: str = "", state: str = "", err
         "client_secret": credentials.client_secret,
         "scopes": list(credentials.scopes or SCOPES),
     }
-    request.session["account"] = {
-        "id": "google",
-        "provider": "google",
-        "email": user["email"],
-        "displayName": user["displayName"],
-        "status": "CONNECTED",
-        "scopes": request.session["tokens"]["scopes"],
-    }
+    user_id, _connection_id = request.app.state.auth_repository.save_authorized_account(
+        user,
+        "google",
+        tokens["scopes"],
+        tokens,
+    )
+    request.session.clear()
+    request.session["session_token"] = request.app.state.auth_repository.create_session(user_id)
     return RedirectResponse(transaction.return_to)
 
 
 @router.post("/logout", status_code=204)
 async def logout(request: Request):
+    request.app.state.auth_repository.delete_session(request.session.get("session_token"))
     request.session.clear()

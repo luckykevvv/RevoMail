@@ -152,7 +152,10 @@ app.whenReady().then(async () => {
     userDataPath
   });
   process.env.DATABASE_URL = `file:${path.join(userDataPath, "revomail.db").replaceAll("\\", "/")}`;
-  process.env.TOKEN_ENCRYPTION_KEY ||= ensureEncryptionKey(path.join(userDataPath, "server.key"));
+  const serverKey = ensureEncryptionKey(path.join(userDataPath, "server.key"));
+  process.env.TOKEN_ENCRYPTION_KEY ||= serverKey;
+  process.env.SECRET_KEY ||= serverKey;
+  if (app.isPackaged) process.env.REVOMAIL_ENV ||= "production";
   settingsStore = new DesktopSettingsStore(path.join(userDataPath, "desktop-settings.json"));
   const backendLaunch = resolveBackendLaunch({
     isPackaged: app.isPackaged,

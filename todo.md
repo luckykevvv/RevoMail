@@ -39,7 +39,7 @@ Target users:
 - [ ] Verify the merged OAuth, Gmail, and OpenAI implementations with provider test credentials; speech recognition and calendar APIs are not implemented.
 - [ ] Verify Google OAuth authorization, refresh, and revocation end to end with a provider test application and test account.
 - [ ] Microsoft OAuth and Microsoft Graph support is pending and is not part of the currently supported MVP provider path.
-- [ ] Complete Python persistence, task queue, durable user sessions, and migration of the retained Node/SQLite authentication code.
+- [x] Add Python SQLite persistence, encrypted credentials, durable user sessions, ordered migrations, and a recoverable job foundation. The retained Node implementation remains regression-only migration reference.
 - [ ] Add automated tests, security review, monitoring, and production deployment.
 - [ ] Verify signed and installed desktop releases on macOS and Linux; code signing, notarization, and auto-update remain future work.
 
@@ -196,9 +196,9 @@ Acceptance criteria:
 ### P0: Foundation
 
 - [x] Select the backend technology stack and define the initial authentication API contract.
-- [ ] Establish development, test, and production environment configuration.
+- [x] Establish development, test, and production environment configuration.
 - [x] Add a backend health check and a standard API error response.
-- [ ] Define data models for users, mailbox connections, settings, tasks, and audit records. (User, mailbox connection, credential, OAuth transaction, and session models are complete.)
+- [x] Define data models for users, mailbox connections, credentials, OAuth transactions, sessions, settings, tasks, audit records, jobs, and idempotency keys.
 - [x] Add the initial authentication database migration.
 - [ ] Establish CI for installation, linting, tests, and production builds.
 
