@@ -33,6 +33,7 @@ Target users:
 - [x] Preserved the Module 1 connected-account UI and `/api/v1` contract while adopting FastAPI for Google OAuth session, account, Gmail, and AI endpoints. Real-provider validation and Python persistence remain incomplete.
 - [x] Added simulated FastAPI integration tests for Google callback/session, account disconnect/logout, Gmail listing, and AI summary behavior.
 - [x] Added an Electron desktop launcher MVP with one-click service controls, health-based status, persisted local settings, secure preload/IPC boundaries, and Windows packaging configuration.
+- [x] Added automatic, idempotent Python virtual-environment setup for source installs and launch commands.
 
 ### Not Yet Completed
 

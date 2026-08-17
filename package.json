@@ -7,11 +7,16 @@
   "type": "module",
   "main": "desktop/main.js",
   "scripts": {
+    "setup": "node scripts/setup-python-env.mjs",
+    "postinstall": "npm run setup",
+    "launch": "node scripts/launch-desktop.mjs",
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
+    "prestart": "npm run setup",
     "start": "node scripts/python-runtime.mjs -m backend.run",
     "test": "npm run test:js && npm run test:python",
     "test:js": "vitest run",
+    "pretest:python": "npm run setup",
     "test:python": "node scripts/python-runtime.mjs -m pytest",
     "test:db": "vitest run backend/tests/integration/sqlite-auth.test.js",
     "test:watch": "vitest",
@@ -23,25 +28,31 @@
     "pm2:restart": "npm run build && pm2 restart revomail",
     "pm2:stop": "pm2 stop revomail",
     "pm2:delete": "pm2 delete revomail",
+    "predesktop": "npm run setup",
     "desktop": "npm run build && electron .",
+    "predesktop:dev": "npm run setup",
     "desktop:dev": "electron .",
+    "prebackend:pack": "npm run setup",
     "backend:pack": "node scripts/build-python-backend.mjs",
     "backend:smoke": "node scripts/smoke-python-backend.mjs",
     "desktop:smoke": "node scripts/smoke-desktop-service.mjs",
     "desktop:ui-smoke": "node scripts/smoke-electron-ui.mjs",
     "desktop:pack": "npm run build && npm run backend:pack && electron-builder --dir",
-    "desktop:dist": "npm run build && npm run backend:pack && electron-builder"
+    "desktop:dist": "npm run build && npm run backend:pack && electron-builder",
+    "desktop:root": "npm run desktop:dist && node scripts/copy-root-desktop.mjs",
+    "desktop:root-smoke": "node scripts/smoke-root-desktop.mjs",
+    "verify:push": "npm test && npm run desktop:root && npm run desktop:smoke && npm run desktop:root-smoke"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
-    "express": "^4.21.2",
-    "helmet": "^8.3.0",
-    "lucide": "^0.468.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "electron": "^43.2.0",
     "electron-builder": "^26.15.3",
+    "express": "^4.21.2",
+    "helmet": "^8.3.0",
+    "lucide": "^0.468.0",
     "supertest": "^7.2.2",
     "vite": "^6.1.0",
     "vitest": "^4.1.10"
@@ -51,12 +62,8 @@
     "productName": "RevoMail",
     "asar": true,
     "asarUnpack": [
-      "server.js",
-      "backend/**/*",
-      "database/**/*",
-      "scripts/python-runtime.mjs",
       "dist/**/*",
-      "node_modules/**/*"
+      "database/migrations/**/*"
     ],
     "directories": {
       "output": "release"
@@ -69,19 +76,18 @@
     ],
     "files": [
       "desktop/**/*",
-      "backend/**/*",
-      "database/**/*",
+      "database/migrations/**/*",
       "dist/**/*",
       "scripts/python-runtime.mjs",
-      "server.js",
-      "pytest.ini",
       "package.json",
-      "!desktop/tests/**/*",
-      "!backend/tests/**/*",
-      "!backend/python_tests/**/*"
+      "!desktop/tests/**/*"
+    ],
+    "electronLanguages": [
+      "en-US",
+      "zh-CN"
     ],
     "win": {
-      "target": "nsis"
+      "target": "portable"
     },
     "mac": {
       "target": [

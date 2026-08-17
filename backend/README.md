@@ -26,8 +26,7 @@ The previous Node authentication modules under `src/` and their Vitest coverage 
 From the repository root:
 
 ```powershell
-python -m venv .venv
-.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
+npm ci
 npm run test:python
 npm run db:migrate
 npm run db:rollback
@@ -35,6 +34,6 @@ npm run build
 npm run start
 ```
 
-On macOS or Linux, install with `.venv/bin/python -m pip install -r backend/requirements.txt`. Development commands select the repository `.venv` and then the platform Python command. `npm run backend:pack` produces the standalone backend used by packaged Electron builds.
+The npm post-install hook creates `.venv` and installs `backend/requirements.txt`. `npm run setup` can be run explicitly, while source start, Python test, desktop, and backend packaging commands verify the environment automatically. A system Python 3.11 or newer is still required for source development. `npm run backend:pack` produces the standalone backend used by packaged Electron builds.
 
 FastAPI applies pending migrations before it becomes ready. Production mode requires a secure signing secret and an explicit Fernet encryption key. Keep real Google and OpenAI credentials in the ignored root `.env`. Do not commit tokens, mailbox content, or test-account data.

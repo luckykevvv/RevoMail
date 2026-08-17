@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { config as loadDotenv } from "dotenv";
+import { ensureEncryptionKey } from "./secret-store.js";
 
 
 export function desktopEnvironmentCandidates({ isPackaged, resourcesPath, projectRoot, userDataPath }) {
@@ -22,4 +23,16 @@ export function loadDesktopEnvironment(options, { exists = existsSync, load = lo
     loaded.push(envPath);
   }
   return loaded;
+}
+
+
+export function configureDesktopBackendEnvironment(
+  { isPackaged, userDataPath },
+  { env = process.env, ensureKey = ensureEncryptionKey } = {}
+) {
+  env.DATABASE_URL = `file:${path.join(userDataPath, "revomail.db").replaceAll("\\", "/")}`;
+  const serverKey = ensureKey(path.join(userDataPath, "server.key"));
+  env.TOKEN_ENCRYPTION_KEY ||= serverKey;
+  env.SECRET_KEY ||= serverKey;
+  if (isPackaged) env.REVOMAIL_ENV ||= "production";
 }

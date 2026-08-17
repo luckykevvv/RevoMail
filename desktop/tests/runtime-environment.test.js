@@ -1,6 +1,10 @@
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { desktopEnvironmentCandidates, loadDesktopEnvironment } from "../runtime-environment.js";
+import {
+  configureDesktopBackendEnvironment,
+  desktopEnvironmentCandidates,
+  loadDesktopEnvironment,
+} from "../runtime-environment.js";
 
 
 describe("desktop environment loading", () => {
@@ -30,5 +34,22 @@ describe("desktop environment loading", () => {
       load,
     })).toEqual([workspaceEnv]);
     expect(load).toHaveBeenCalledWith({ path: workspaceEnv, override: false });
+  });
+
+  it("configures packaged backend persistence and production secrets outside the renderer", () => {
+    const env = { SECRET_KEY: "configured-secret" };
+    const ensureKey = vi.fn(() => "generated-server-key");
+    const userDataPath = "C:\\Users\\tester\\AppData\\Roaming\\RevoMail";
+
+    configureDesktopBackendEnvironment(
+      { isPackaged: true, userDataPath },
+      { env, ensureKey }
+    );
+
+    expect(env.DATABASE_URL).toBe("file:C:/Users/tester/AppData/Roaming/RevoMail/revomail.db");
+    expect(env.TOKEN_ENCRYPTION_KEY).toBe("generated-server-key");
+    expect(env.SECRET_KEY).toBe("configured-secret");
+    expect(env.REVOMAIL_ENV).toBe("production");
+    expect(ensureKey).toHaveBeenCalledWith(path.join(userDataPath, "server.key"));
   });
 });

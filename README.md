@@ -26,16 +26,22 @@ Prerequisites:
 - Python 3.11 or newer.
 - npm.
 
-Install Node and isolated Python dependencies, then launch the desktop application:
+Install the project and launch the desktop application:
 
 ```powershell
 npm ci
-python -m venv .venv
-.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
 npm run desktop
 ```
 
-On macOS or Linux, use `.venv/bin/python` for the install command. Development commands select the repository `.venv` and then the platform Python command. Packaged desktop builds launch their bundled standalone backend. Google and OpenAI buttons remain unavailable until the relevant server-side credentials are supplied. Register `${APP_BASE_URL}/api/v1/auth/google/callback` with Google.
+`npm ci` automatically creates the ignored repository `.venv` and installs `backend/requirements.txt`. Source start, test, and packaging commands repeat this check and install only when the environment is missing or the requirements file changed. If Python is not installed, setup stops with an actionable message; it does not make system-wide changes. Packaged desktop builds launch their bundled standalone backend and do not require Node.js or Python on the target machine. Google and OpenAI buttons remain unavailable until the relevant server-side credentials are supplied. Register `${APP_BASE_URL}/api/v1/auth/google/callback` with Google.
+
+On Windows, contributors can instead double-click the root-level `RevoMail.cmd`. It compares the current `package-lock.json` with the installed Node environment, runs `npm ci` when dependencies are missing or stale, prepares the Python environment through the npm post-install hook, builds the frontend, and opens Electron. Node.js LTS and Python 3.11 or newer are the only source-development prerequisites.
+
+The root-level `RevoMail.exe` is the current portable Windows build. It contains the Electron application and standalone Python backend, so members can launch it without installing project dependencies. The executable is rebuilt by `npm run desktop:root`; that command rejects artifacts at or above GitHub's 100,000,000-byte ordinary file limit. `RevoMail.cmd` remains the source-development fallback.
+
+The standalone-backend build keeps the Gmail v1 discovery definition and removes the hundreds of unrelated Google API discovery documents bundled by the generic client library. This reduces the portable artifact without removing any currently supported provider behavior.
+
+Desktop packaging also includes only the English and Simplified Chinese Electron locales, the active desktop/runtime files, and the two Node packages used by the Electron main process. Legacy Node backend sources and build-time frontend dependencies remain in the repository but are not copied into the portable runtime. These reductions keep the current Windows executable below GitHub's normal per-file limit without external resource folders or LFS.
 
 ## Desktop Application
 
@@ -90,6 +96,8 @@ Process variables take precedence over the ignored root `.env`, followed by code
 
 | Command | Purpose |
 | --- | --- |
+| `npm run setup` | Create `.venv` and install Python dependencies when required |
+| `npm run launch` | Install stale source dependencies and launch the desktop application |
 | `npm run dev` | Start the Vite development server |
 | `npm run build` | Build the frontend into `dist/` |
 | `npm run start` | Serve the production build and `/api/v1` with FastAPI |
@@ -113,6 +121,9 @@ Process variables take precedence over the ignored root `.env`, followed by code
 | `npm run desktop:smoke` | Start and health-check the service from the Windows unpacked package |
 | `npm run desktop:ui-smoke` | Exercise the real unpacked Electron launcher and Google authorization entry |
 | `npm run desktop:dist` | Build a desktop installer or distributable artifact |
+| `npm run desktop:root` | Build the portable Windows executable and copy it to repository root |
+| `npm run desktop:root-smoke` | Launch the root portable executable and verify its real Electron window |
+| `npm run verify:push` | Run all tests, rebuild the desktop package, and smoke-test it before a push |
 
 ## Repository Structure
 
