@@ -9,7 +9,6 @@
   "scripts": {
     "setup": "node scripts/setup-python-env.mjs",
     "postinstall": "npm run setup",
-    "launch": "node scripts/launch-desktop.mjs",
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "prestart": "npm run setup",

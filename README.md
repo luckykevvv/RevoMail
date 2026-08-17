@@ -35,7 +35,7 @@ npm run desktop
 
 `npm ci` automatically creates the ignored repository `.venv` and installs `backend/requirements.txt`. Source start, test, and packaging commands repeat this check and install only when the environment is missing or the requirements file changed. If Python is not installed, setup stops with an actionable message; it does not make system-wide changes. Packaged desktop builds launch their bundled standalone backend and do not require Node.js or Python on the target machine. Google and OpenAI buttons remain unavailable until the relevant server-side credentials are supplied. Register `${APP_BASE_URL}/api/v1/auth/google/callback` with Google.
 
-On Windows, contributors can instead double-click the root-level `RevoMail.cmd`. It compares the current `package-lock.json` with the installed Node environment, runs `npm ci` when dependencies are missing or stale, prepares the Python environment through the npm post-install hook, builds the frontend, and opens Electron. Node.js LTS and Python 3.11 or newer are the only source-development prerequisites. No prebuilt executable is committed; `RevoMail.cmd` is the one-click source launcher.
+On Windows, contributors can instead double-click the root-level `RevoMail.cmd`. It checks for Node.js and npm, compares the current `package-lock.json` with the installed Node environment, runs `npm ci` when dependencies are missing or stale (preparing the Python environment through the npm post-install hook), builds the frontend, and opens Electron. Node.js LTS and Python 3.11 or newer are the only source-development prerequisites. No prebuilt executable is committed; `RevoMail.cmd` is the one-click source launcher.
 
 The standalone-backend build keeps the Gmail v1 discovery definition and removes the hundreds of unrelated Google API discovery documents bundled by the generic client library. This keeps the packaged backend compact without removing any currently supported provider behavior.
 
@@ -95,7 +95,6 @@ Process variables take precedence over the ignored root `.env`, followed by code
 | Command | Purpose |
 | --- | --- |
 | `npm run setup` | Create `.venv` and install Python dependencies when required |
-| `npm run launch` | Install stale source dependencies and launch the desktop application |
 | `npm run dev` | Start the Vite development server |
 | `npm run build` | Build the frontend into `dist/` |
 | `npm run start` | Serve the production build and `/api/v1` with FastAPI |
