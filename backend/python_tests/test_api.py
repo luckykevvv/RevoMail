@@ -1,8 +1,10 @@
 from types import SimpleNamespace
 
 import pytest
+from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
+from backend.app.config import Settings
 from backend.app.main import create_app
 from backend.app.routers import auth
 from backend.app.services.oauth_transactions import OAuthTransactionStore, oauth_transactions
@@ -45,12 +47,19 @@ class FakeOAuthService:
 
 
 @pytest.fixture()
-def client(monkeypatch):
+def client(monkeypatch, tmp_path):
     oauth_transactions.clear()
     monkeypatch.setattr(auth, "_providers", lambda: {"google": True, "microsoft": False})
     monkeypatch.setattr(auth, "_build_flow", FakeFlow)
     monkeypatch.setattr(auth, "build", lambda *_args, **_kwargs: FakeOAuthService())
-    with TestClient(create_app()) as test_client:
+    test_settings = Settings(
+        _env_file=None,
+        environment="test",
+        database_url=f"file:{(tmp_path / 'api.db').as_posix()}",
+        secret_key="test-session-secret-that-is-long-enough",
+        token_encryption_key=Fernet.generate_key().decode("ascii"),
+    )
+    with TestClient(create_app(test_settings)) as test_client:
         yield test_client
 
 
@@ -64,7 +73,10 @@ def authenticate(client):
 
 
 def test_health_and_signed_out_session(client):
-    assert client.get("/api/v1/health").json()["status"] == "ok"
+    health = client.get("/api/v1/health")
+    assert health.json()["status"] == "ok"
+    assert health.json()["checks"] == {"database": "ok"}
+    assert health.headers["x-correlation-id"]
     session = client.get("/api/v1/auth/session").json()
     assert session["authenticated"] is False
     assert session["providers"] == {"google": True, "microsoft": False}
@@ -73,6 +85,8 @@ def test_health_and_signed_out_session(client):
 def test_google_callback_preserves_account_ui_contract(client):
     callback = authenticate(client)
     assert callback.status_code == 307
+    assert "access-token" not in client.cookies.get("revomail_session", "")
+    assert b"access-token" not in client.app.state.database.path.read_bytes()
 
     session = client.get("/api/v1/auth/session").json()
     assert session["authenticated"] is True
@@ -87,7 +101,8 @@ def test_google_callback_preserves_account_ui_contract(client):
 
 def test_disconnect_and_logout(client):
     authenticate(client)
-    assert client.delete("/api/v1/accounts/google").status_code == 204
+    account_id = client.get("/api/v1/accounts").json()["accounts"][0]["id"]
+    assert client.delete(f"/api/v1/accounts/{account_id}").status_code == 204
     assert client.get("/api/v1/accounts").json() == {"accounts": []}
     assert client.post("/api/v1/auth/logout").status_code == 204
     assert client.get("/api/v1/auth/session").json()["authenticated"] is False
@@ -125,6 +140,29 @@ def test_gmail_and_ai_routes_use_authenticated_provider(client, monkeypatch):
     assert summary.json()["summary"] == "Meeting tomorrow."
 
 
+def test_provider_error_uses_safe_stable_contract(client, monkeypatch):
+    from backend.app.routers import emails
+
+    authenticate(client)
+    monkeypatch.setattr(
+        emails.gmail_service,
+        "list_messages",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("fixture-access-token private detail")),
+    )
+    response = client.get("/api/v1/emails", headers={"X-Correlation-ID": "fixture-correlation"})
+    assert response.status_code == 502
+    assert response.headers["x-correlation-id"] == "fixture-correlation"
+    assert response.json() == {
+        "error": {
+            "code": "EMAIL_PROVIDER_FAILED",
+            "message": "The mailbox provider could not complete the request.",
+            "retryable": True,
+            "correlationId": "fixture-correlation",
+        }
+    }
+    assert "private detail" not in response.text
+
+
 def test_invalid_state_returns_retryable_frontend_status(client):
     client.get("/api/v1/auth/google/start", follow_redirects=False)
     response = client.get(
@@ -160,7 +198,7 @@ def test_server_side_oauth_state_expires_and_cannot_be_replayed():
 def test_callback_rejects_expired_and_replayed_server_state(client, monkeypatch):
     now = [100.0]
     store = OAuthTransactionStore(ttl_seconds=10, clock=lambda: now[0])
-    monkeypatch.setattr(auth, "oauth_transactions", store)
+    client.app.state.oauth_transactions = store
 
     client.get("/api/v1/auth/google/start", follow_redirects=False)
     now[0] = 111.0

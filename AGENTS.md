@@ -127,7 +127,6 @@ git check-ignore -v -- path/to/file
 - Do not force-push, rewrite shared history, or delete remote branches without explicit authorization.
 - Before committing, review `git diff`, `git diff --cached`, and `git status`.
 - Use focused commit messages such as `feat:`, `fix:`, `docs:`, `test:`, or `chore:`.
-- Before every push, run `npm run verify:push`. A push is not verified until the root `RevoMail.exe` portable build has been refreshed and the packaged service smoke test has passed.
 
 ## 7. Python, Node.js, Environment, and PM2 Contract
 

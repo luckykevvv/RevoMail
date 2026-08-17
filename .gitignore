@@ -18,6 +18,7 @@ prisma/data/
 *.sqlite
 *.sqlite3
 .playwright-cli/
+.pytest_cache/
 
 # Python
 __pycache__/

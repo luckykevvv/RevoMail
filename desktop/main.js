@@ -3,11 +3,10 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, ipcMain, Menu, shell } from "electron";
 import { ZodError } from "zod";
-import { ensureEncryptionKey } from "./secret-store.js";
 import { DesktopSettingsStore } from "./settings-store.js";
 import { ServiceController } from "./service-controller.js";
 import { resolveBackendLaunch } from "./backend-launch.js";
-import { loadDesktopEnvironment } from "./runtime-environment.js";
+import { configureDesktopBackendEnvironment, loadDesktopEnvironment } from "./runtime-environment.js";
 import { isAllowedNavigation } from "./navigation-policy.js";
 
 const desktopDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -151,8 +150,7 @@ app.whenReady().then(async () => {
     projectRoot,
     userDataPath
   });
-  process.env.DATABASE_URL = `file:${path.join(userDataPath, "revomail.db").replaceAll("\\", "/")}`;
-  process.env.TOKEN_ENCRYPTION_KEY ||= ensureEncryptionKey(path.join(userDataPath, "server.key"));
+  configureDesktopBackendEnvironment({ isPackaged: app.isPackaged, userDataPath });
   settingsStore = new DesktopSettingsStore(path.join(userDataPath, "desktop-settings.json"));
   const backendLaunch = resolveBackendLaunch({
     isPackaged: app.isPackaged,

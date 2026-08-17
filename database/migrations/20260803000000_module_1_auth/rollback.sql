@@ -1,0 +1,5 @@
+DROP TABLE IF EXISTS "OAuthTransaction";
+DROP TABLE IF EXISTS "Session";
+DROP TABLE IF EXISTS "OAuthCredential";
+DROP TABLE IF EXISTS "MailboxConnection";
+DROP TABLE IF EXISTS "User";

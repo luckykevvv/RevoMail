@@ -20,8 +20,9 @@
     "test:python": "node scripts/python-runtime.mjs -m pytest",
     "test:db": "vitest run backend/tests/integration/sqlite-auth.test.js",
     "test:watch": "vitest",
-    "db:migrate": "node scripts/migrate.js",
-    "db:migrate:dev": "node scripts/migrate.js",
+    "db:migrate": "node scripts/python-runtime.mjs -m backend.migrate up",
+    "db:migrate:dev": "node scripts/python-runtime.mjs -m backend.migrate up",
+    "db:rollback": "node scripts/python-runtime.mjs -m backend.migrate down",
     "pm2:start": "npm run build && pm2 start ecosystem.config.cjs",
     "pm2:logs": "pm2 logs revomail",
     "pm2:restart": "npm run build && pm2 restart revomail",
@@ -61,7 +62,8 @@
     "productName": "RevoMail",
     "asar": true,
     "asarUnpack": [
-      "dist/**/*"
+      "dist/**/*",
+      "database/migrations/**/*"
     ],
     "directories": {
       "output": "release"
@@ -74,6 +76,7 @@
     ],
     "files": [
       "desktop/**/*",
+      "database/migrations/**/*",
       "dist/**/*",
       "scripts/python-runtime.mjs",
       "package.json",

@@ -27,6 +27,8 @@ describe("desktop package configuration", () => {
 
   it("builds and includes the standalone Python backend", () => {
     expect(packageJson.scripts["desktop:pack"]).toContain("npm run backend:pack");
+    expect(packageJson.build.files).toContain("database/migrations/**/*");
+    expect(packageJson.build.asarUnpack).toContain("database/migrations/**/*");
     expect(packageJson.build.extraResources).toContainEqual({
       from: "build/python/revomail-backend",
       to: "python-backend",
@@ -34,7 +36,7 @@ describe("desktop package configuration", () => {
   });
 
   it("keeps only runtime files and supported Electron locales in the package", () => {
-    expect(packageJson.build.asarUnpack).toEqual(["dist/**/*"]);
+    expect(packageJson.build.asarUnpack).toContain("dist/**/*");
     expect(packageJson.build.files).not.toContain("backend/**/*");
     expect(packageJson.build.files).not.toContain("server.js");
     expect(packageJson.build.electronLanguages).toEqual(["en-US", "zh-CN"]);

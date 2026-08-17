@@ -7,12 +7,13 @@ All routes are same-origin under `/api/v1`. JSON errors use:
   "error": {
     "code": "STABLE_CODE",
     "message": "Safe user-facing message",
-    "retryable": false
+    "retryable": false,
+    "correlationId": "45dd5f26-1adb-4c46-95d4-22ca87ee092f"
   }
 }
 ```
 
-Provider tokens and secrets are never response fields.
+Provider tokens and secrets are never response fields. The browser cookie contains only a signed opaque session token; its hash and the encrypted provider credential are stored in SQLite.
 
 ## Session and OAuth
 
@@ -30,7 +31,7 @@ Google is implemented; Microsoft returns a pending-provider error. The endpoint 
 
 ### `GET /api/v1/auth/:provider/callback`
 
-Atomically consumes and validates state, exchanges the code, loads the Google profile, creates the signed application session, and redirects to a clean frontend URL. Expired or replayed states and provider failures redirect with a safe `authError` code.
+Atomically consumes and validates state, exchanges the code, loads the Google profile, stores the encrypted credential and hashed application session in SQLite, and redirects to a clean frontend URL. Expired or replayed states and provider failures redirect with a safe `authError` code.
 
 ### `POST /api/v1/auth/logout`
 

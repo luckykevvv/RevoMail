@@ -1,19 +1,21 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { resolveBackendLaunch } from "../desktop/backend-launch.js";
-import { loadDesktopEnvironment } from "../desktop/runtime-environment.js";
+import { configureDesktopBackendEnvironment, loadDesktopEnvironment } from "../desktop/runtime-environment.js";
 import { ServiceController } from "../desktop/service-controller.js";
 
 
 const projectRoot = process.cwd();
 const resourcesPath = path.join(projectRoot, "release", "win-unpacked", "resources");
 const packagedRoot = path.join(resourcesPath, "app.asar.unpacked");
+const userDataPath = path.join(projectRoot, "data", "desktop-smoke-user-data");
 loadDesktopEnvironment({
   isPackaged: true,
   resourcesPath,
   projectRoot: packagedRoot,
-  userDataPath: path.join(projectRoot, ".desktop-smoke-user-data"),
+  userDataPath,
 });
+configureDesktopBackendEnvironment({ isPackaged: true, userDataPath });
 const controller = new ServiceController({
   spawn,
   ...resolveBackendLaunch({

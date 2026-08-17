@@ -7,13 +7,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 export function pythonCandidates(projectRoot = process.cwd(), platform = process.platform) {
   return platform === "win32"
     ? [
-        path.join(projectRoot, "runtime", "python", "python.exe"),
         path.join(projectRoot, ".venv", "Scripts", "python.exe"),
+        path.join(projectRoot, "runtime", "python", "python.exe"),
         "python",
       ]
     : [
-        path.join(projectRoot, "runtime", "python", "bin", "python3"),
         path.join(projectRoot, ".venv", "bin", "python"),
+        path.join(projectRoot, "runtime", "python", "bin", "python3"),
         "python3",
         "python",
       ];
