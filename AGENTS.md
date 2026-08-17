@@ -127,6 +127,7 @@ git check-ignore -v -- path/to/file
 - Do not force-push, rewrite shared history, or delete remote branches without explicit authorization.
 - Before committing, review `git diff`, `git diff --cached`, and `git status`.
 - Use focused commit messages such as `feat:`, `fix:`, `docs:`, `test:`, or `chore:`.
+- Before every push, run `npm run verify:push`. A push is not verified until the root `RevoMail.exe` portable build has been refreshed and the packaged service smoke test has passed.
 
 ## 7. Python, Node.js, Environment, and PM2 Contract
 
@@ -145,6 +146,8 @@ npm run desktop
 npm run desktop:dev
 npm run desktop:pack
 npm run desktop:dist
+npm run desktop:root
+npm run verify:push
 ```
 
 Dependency rules:
@@ -219,7 +222,9 @@ Production verification:
 - Store ordinary desktop preferences under Electron `userData`. Keep tokens, the generated encryption key, mailbox content, and other secrets out of renderer-accessible settings.
 - Keep Python runtime selection, OAuth values, and LLM keys outside renderer-accessible settings and IPC.
 - Preserve the independent Web and PM2 workflows. Desktop integration must not make Electron a server or deployment prerequisite.
-- Keep generated installers and unpacked applications under ignored `release/`; never commit packaged environment files or credentials.
+- Keep intermediate installers and unpacked applications under ignored `release/`. The sole exception is the root `RevoMail.exe` portable build, which is tracked directly and must remain below 100,000,000 bytes without containing environment files or credentials.
+- Keep `RevoMail.cmd` at the repository root as the tracked Windows source launcher. It must install missing or stale Node and Python project dependencies before starting Electron.
+- Build the root executable with `npm run desktop:root`; never copy `release/win-unpacked/RevoMail.exe`, because that unpacked executable depends on adjacent packaged resources.
 
 ## 9. Validation Matrix
 
