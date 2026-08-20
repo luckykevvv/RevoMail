@@ -21,6 +21,7 @@ Implement the Gmail-deliverable parts of GitHub Module 3 issue #3 while preservi
 - Fixed packaged Google sign-in for accounts with legacy Calendar/read/send grants by disabling incremental scope merging. Scope mismatches now return an actionable frontend status, and OAuth callback failures log only correlation ID and exception type.
 - Restored the OAuth2 v2 discovery document required by the packaged callback's Google profile lookup. The pruning test now protects both Gmail v1 and OAuth2 v2 while continuing to remove unrelated Google discovery data.
 - Stopped mailbox synchronization polling from clearing and rebuilding the entire UI every 700 milliseconds. Intermediate pages now update only synchronization state; the cache refreshes once at completion while preserving the current view, selected message, and loaded body.
+- Published the implementation on `codex/module-3-gmail-mailbox`, linked commit `fc198df` from issue #20 with the remaining image/HTML-attachment gap, and opened draft PR #64 without closing partially completed issues.
 
 ## Reason
 
@@ -39,6 +40,9 @@ The project currently needs one Gmail implementation and one stable mailbox cont
 - Read-only inspection of the packaged desktop settings and non-secret OAuth database status
 - Python OpenAPI/route inspection and health checks
 - `git diff --check`
+- `git switch -c codex/module-3-gmail-mailbox`
+- explicit-path `git add`, `git commit`, and `git push`
+- GitHub issue #20 comment and draft PR #64 creation
 
 ## Validation
 
