@@ -105,6 +105,7 @@ class TokenProtector:
 class AuthenticatedSession:
     token: str
     user: dict
+    csrf_hash: str | None = None
 
 
 @dataclass(frozen=True)
@@ -150,14 +151,15 @@ class AuthRepository:
                 raise
         return user_id, connection_id
 
-    def create_session(self, user_id: str, lifetime: timedelta = timedelta(days=7)) -> str:
+    def create_session(self, user_id: str, csrf_token: str | None = None, lifetime: timedelta = timedelta(days=7)) -> str:
         token = Fernet.generate_key().decode("ascii")
         token_hash = hashlib.sha256(token.encode("ascii")).hexdigest()
+        csrf_hash = hashlib.sha256(csrf_token.encode("utf-8")).hexdigest() if csrf_token else None
         now = utc_now()
         with self.database.connect() as connection:
             connection.execute(
-                'INSERT INTO "Session" ("id", "userId", "tokenHash", "expiresAt", "idleAt", "lastSeenAt", "createdAt") VALUES (?, ?, ?, ?, ?, ?, ?)',
-                (str(uuid4()), user_id, token_hash, (now + lifetime).isoformat(), (now + timedelta(hours=24)).isoformat(), now.isoformat(), now.isoformat()),
+                'INSERT INTO "Session" ("id", "userId", "tokenHash", "csrfHash", "expiresAt", "idleAt", "lastSeenAt", "createdAt") VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                (str(uuid4()), user_id, token_hash, csrf_hash, (now + lifetime).isoformat(), (now + timedelta(hours=24)).isoformat(), now.isoformat(), now.isoformat()),
             )
         return token
 
@@ -168,14 +170,20 @@ class AuthRepository:
         now = utc_now().isoformat()
         with self.database.connect() as connection:
             row = connection.execute(
-                'SELECT s."userId", u."email", u."displayName", u."avatarUrl" FROM "Session" s JOIN "User" u ON u."id"=s."userId" '
+                'SELECT s."userId", s."csrfHash", u."email", u."displayName", u."avatarUrl" FROM "Session" s JOIN "User" u ON u."id"=s."userId" '
                 'WHERE s."tokenHash"=? AND s."expiresAt">? AND s."idleAt">?',
                 (token_hash, now, now),
             ).fetchone()
             if not row:
                 return None
             connection.execute('UPDATE "Session" SET "lastSeenAt"=? WHERE "tokenHash"=?', (now, token_hash))
-        return AuthenticatedSession(token=token, user={"id": row["userId"], "email": row["email"], "displayName": row["displayName"], "avatarUrl": row["avatarUrl"]})
+        return AuthenticatedSession(token=token, user={"id": row["userId"], "email": row["email"], "displayName": row["displayName"], "avatarUrl": row["avatarUrl"]}, csrf_hash=row["csrfHash"])
+
+    def set_csrf(self, session_token: str, csrf_token: str) -> None:
+        token_hash = hashlib.sha256(session_token.encode("ascii")).hexdigest()
+        csrf_hash = hashlib.sha256(csrf_token.encode("utf-8")).hexdigest()
+        with self.database.connect() as connection:
+            connection.execute('UPDATE "Session" SET "csrfHash"=? WHERE "tokenHash"=?', (csrf_hash, token_hash))
 
     def delete_session(self, token: str | None) -> None:
         if not token:
@@ -190,7 +198,16 @@ class AuthRepository:
                 'SELECT "id", "provider", "email", "displayName", "status", "scopes" FROM "MailboxConnection" WHERE "userId"=? ORDER BY "createdAt"',
                 (user_id,),
             ).fetchall()
-        return [{"id": row["id"], "provider": row["provider"], "email": row["email"], "displayName": row["displayName"], "status": row["status"], "scopes": json.loads(row["scopes"])} for row in rows]
+        accounts = []
+        for row in rows:
+            scopes = json.loads(row["scopes"])
+            requires_reauthorization = "https://www.googleapis.com/auth/gmail.modify" not in scopes
+            accounts.append({
+                "id": row["id"], "provider": row["provider"], "email": row["email"], "displayName": row["displayName"],
+                "status": "REAUTHORIZATION_REQUIRED" if requires_reauthorization else row["status"],
+                "requiresReauthorization": requires_reauthorization, "scopes": scopes,
+            })
+        return accounts
 
     def get_tokens(self, user_id: str) -> dict | None:
         with self.database.connect() as connection:
@@ -203,9 +220,36 @@ class AuthRepository:
         try:
             return self.protector.unprotect(row["accessTokenEncrypted"])
         except RuntimeError:
-            # The encryption key changed or was lost (e.g. data/revomail-server.key was deleted).
-            # Treat the stored credential as absent so the user re-authorizes instead of seeing a 500.
+            # A lost encryption key makes the old provider credential unusable.
             return None
+
+    def get_account_tokens(self, user_id: str, connection_id: str) -> tuple[dict, dict] | None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                'SELECT m."id", m."provider", m."email", m."displayName", m."status", m."scopes", c."accessTokenEncrypted" '
+                'FROM "MailboxConnection" m JOIN "OAuthCredential" c ON c."connectionId"=m."id" '
+                'WHERE m."id"=? AND m."userId"=? AND m."status"=?',
+                (connection_id, user_id, "CONNECTED"),
+            ).fetchone()
+        if not row:
+            return None
+        try:
+            tokens = self.protector.unprotect(row["accessTokenEncrypted"])
+        except RuntimeError:
+            return None
+        account = {
+            "id": row["id"], "provider": row["provider"], "email": row["email"],
+            "displayName": row["displayName"], "status": row["status"], "scopes": json.loads(row["scopes"]),
+        }
+        return account, tokens
+
+    def get_primary_mailbox(self, user_id: str) -> tuple[dict, dict] | None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                'SELECT "id" FROM "MailboxConnection" WHERE "userId"=? AND "provider"=? AND "status"=? ORDER BY "createdAt" LIMIT 1',
+                (user_id, "google", "CONNECTED"),
+            ).fetchone()
+        return self.get_account_tokens(user_id, row["id"]) if row else None
 
     def disconnect(self, user_id: str, connection_id: str) -> bool:
         with self.database.connect() as connection:

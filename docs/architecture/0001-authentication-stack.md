@@ -19,7 +19,7 @@ Token refresh uses a short database lease plus a credential version check. Only 
 ## Consequences
 
 - ADR 0002 records the earlier local SQLite implementation; ADR 0003 defines the active Python/FastAPI runtime and its staged persistence migration.
-- Google and Microsoft credentials remain environment-only configuration.
+- Google credentials remain environment-only configuration.
 - Mailbox and calendar modules can reuse provider credentials through `AuthService.validAccessToken` without exposing tokens to clients.
-- Microsoft does not expose a direct OAuth token revocation endpoint for this flow; disconnect deletes RevoMail's local credential. Google disconnect also calls its revocation endpoint.
+- Disconnect deletes RevoMail's local credential; the retained Node reference also calls Google's revocation endpoint.
 - A future cross-origin deployment must revisit Cookie, CORS, trusted-origin, and CSRF policy before it is supported.

@@ -2,13 +2,13 @@
 
 RevoMail is an AI-assisted email client for email summarization, reply drafting, voice commands, and task/calendar extraction.
 
-> **Current status:** RevoMail uses Python/FastAPI for its active API and SQLite for active server-side sessions, encrypted provider credentials, user/account records, settings, tasks, audits, idempotency records, and recoverable jobs. Google OAuth, Gmail reads, and OpenAI operations are implemented with simulated provider coverage; real Google and OpenAI calls remain unverified. Microsoft, Speech-to-Text, sending, and calendar writes remain pending.
+> **Current status:** RevoMail is a Gmail-only, single-user MVP. Python/FastAPI and SQLite provide active sessions, encrypted credentials and cached message bodies, recoverable Gmail synchronization through the original `/api/v1/emails` contract, safe reading, message-state changes, and confirmed idempotent sending. Google and OpenAI provider calls remain covered by sanitized fixtures until the dedicated test account is exercised. Speech-to-Text and calendar writes remain pending.
 
 ## Current Prototype
 
 The frontend currently demonstrates:
 
-- Google and Microsoft sign-in states backed by the authentication API.
+- Google sign-in backed by the authentication API.
 - Searchable and filterable inbox.
 - Email reading with an AI summary and extracted information.
 - Editable and regeneratable AI reply drafts.
@@ -16,7 +16,7 @@ The frontend currently demonstrates:
 - Task and calendar extraction.
 - Light, dark, desktop, and mobile layouts.
 
-The inbox keeps demo data while signed out or unconnected and loads Gmail data after a configured Google session. OAuth and OpenAI actions are enabled only when their server-side credentials are configured. Sending and calendar creation remain simulated.
+The authenticated inbox contains only synchronized provider data. Gmail synchronization is paginated and recoverable, HTML is sanitized and isolated from the application document, and sending requires a final review plus an idempotency key. Calendar creation remains simulated.
 
 ## Quick Start
 
@@ -37,7 +37,7 @@ npm run desktop
 
 On Windows, contributors can instead double-click the root-level `RevoMail.cmd`. It checks for Node.js and npm, compares the current `package-lock.json` with the installed Node environment, runs `npm ci` when dependencies are missing or stale (preparing the Python environment through the npm post-install hook), builds the frontend, and opens Electron. Node.js LTS and Python 3.11 or newer are the only source-development prerequisites. No prebuilt executable is committed; `RevoMail.cmd` is the one-click source launcher.
 
-The standalone-backend build keeps the Gmail v1 discovery definition and removes the hundreds of unrelated Google API discovery documents bundled by the generic client library. This keeps the packaged backend compact without removing any currently supported provider behavior.
+The standalone-backend build keeps the Gmail v1 and OAuth2 v2 profile discovery definitions and removes the hundreds of unrelated Google API discovery documents bundled by the generic client library. This keeps the packaged backend compact without breaking Gmail operations or the Google sign-in callback.
 
 Desktop packaging includes only the English and Simplified Chinese Electron locales, the active desktop/runtime files, and the two Node packages used by the Electron main process. Legacy Node backend sources and build-time frontend dependencies remain in the repository but are not copied into the packaged runtime.
 
@@ -82,9 +82,9 @@ Supported runtime variables:
 | `TOKEN_ENCRYPTION_KEY` | Auto-generated | Fernet key for stored provider credentials; optional, generated and stored in `data/revomail-server.key` on first startup |
 | `JOB_LEASE_SECONDS` | `60` | Lease duration before an interrupted job can be recovered |
 | `JOB_MAX_ATTEMPTS` | `3` | Maximum attempts before a recovered job is marked failed |
+| `MAIL_SEND_LIMIT_PER_MINUTE` | `10` | Per-user confirmed-send attempt limit |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Empty | Google OAuth application credentials |
 | `GOOGLE_REDIRECT_URI` | `${APP_BASE_URL}/api/v1/auth/google/callback` | Registered Google callback override |
-| `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET` | Empty | Microsoft OAuth application credentials |
 | `OPENAI_API_KEY` | Empty | OpenAI server-side API key |
 | `OPENAI_MODEL` | `gpt-4o` | OpenAI model used by the merged AI service |
 
@@ -142,7 +142,7 @@ RevoMail/
 |   |-- README.md              # Backend layering and implementation rules
 |   |-- app/                   # Active FastAPI application
 |   |   |-- routers/           # HTTP transport and validation
-|   |   |-- services/          # Gmail, OAuth, and AI use cases
+|   |   |-- services/          # Mailbox synchronization, Gmail, OAuth, and AI use cases
 |   |   |-- config.py          # Typed environment configuration
 |   |   |-- persistence.py     # SQLite migrations, sessions, and credentials
 |   |   |-- jobs.py            # Recoverable asynchronous-job foundation
@@ -171,7 +171,7 @@ Backend dependency rules:
 1. Routes and controllers handle HTTP concerns only.
 2. Services implement application use cases and the human-confirmation workflow.
 3. Domain code contains provider-independent business rules.
-4. Providers isolate Gmail, Microsoft Graph, LLM, calendar, and speech SDKs.
+4. Providers isolate Gmail, LLM, calendar, and speech SDKs.
 5. Repositories isolate persistence.
 6. Shared contracts define the frontend/backend boundary without importing provider SDKs.
 

@@ -7,8 +7,10 @@ from pydantic import ValidationError
 
 from backend.app.config import Settings
 from backend.app.jobs import JobRepository
+from backend.app.mailbox import MailboxRepository
 from backend.app.main import create_app
 from backend.app.persistence import Database, TokenProtector, utc_now
+from backend.app.services.mailbox import MailboxSyncService
 
 
 def test_production_configuration_fails_fast_with_safe_validation(tmp_path):
@@ -85,10 +87,14 @@ def test_invalid_configured_encryption_key_is_replaced(tmp_path):
 
 def test_migrations_apply_and_latest_migration_rolls_back(tmp_path):
     database = Database(f"file:{(tmp_path / 'migration.db').as_posix()}")
-    assert database.migrate() == 2
+    assert database.migrate() == 3
     with database.connect() as connection:
         assert connection.execute("SELECT name FROM sqlite_master WHERE name='Job'").fetchone()
 
+    assert database.rollback_last() == 2
+    with database.connect() as connection:
+        assert connection.execute("SELECT name FROM sqlite_master WHERE name='MailboxMessage'").fetchone() is None
+        assert connection.execute("SELECT name FROM sqlite_master WHERE name='Job'").fetchone()
     assert database.rollback_last() == 1
     with database.connect() as connection:
         assert connection.execute("SELECT name FROM sqlite_master WHERE name='Job'").fetchone() is None
@@ -96,7 +102,7 @@ def test_migrations_apply_and_latest_migration_rolls_back(tmp_path):
     assert database.rollback_last() == 0
     with database.connect() as connection:
         assert connection.execute("SELECT name FROM sqlite_master WHERE name='User'").fetchone() is None
-    assert database.migrate() == 2
+    assert database.migrate() == 3
 
 
 def test_token_protector_never_persists_plaintext(tmp_path):
@@ -133,6 +139,71 @@ def test_interrupted_jobs_are_recovered_after_restart(tmp_path):
     recovered = restarted_jobs.claim_next()
     assert recovered.id == job_id
     assert recovered.attempts == 2
+
+
+def test_mailbox_sync_pages_resume_and_upsert_without_duplicates(tmp_path, monkeypatch):
+    from backend.app.services import mailbox as mailbox_service
+
+    settings = Settings(
+        _env_file=None, environment="test", database_url=f"file:{(tmp_path / 'mailbox.db').as_posix()}",
+        secret_key="test-session-secret-that-is-long-enough", token_encryption_key=Fernet.generate_key().decode("ascii"),
+    )
+    database = Database(settings.database_url)
+    database.migrate()
+    repository = MailboxRepository(database, TokenProtector(settings.token_encryption_key, settings.secret_key))
+    jobs = JobRepository(database, settings)
+    timestamp = utc_now().isoformat()
+    with database.connect() as connection:
+        connection.execute('INSERT INTO "User" ("id", "email", "displayName", "createdAt", "updatedAt") VALUES (?, ?, ?, ?, ?)', ("user-1", "fixture@example.com", "Fixture", timestamp, timestamp))
+        connection.execute('INSERT INTO "MailboxConnection" ("id", "userId", "provider", "providerAccountId", "email", "scopes", "status", "createdAt", "updatedAt") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', ("google:user-1", "user-1", "google", "user-1", "fixture@example.com", "[]", "CONNECTED", timestamp, timestamp))
+
+    message = {
+        "id": "gmail-1", "threadId": "thread-1", "historyId": "10", "sender": "sender@example.com",
+        "recipients": ["user@example.com"], "subject": "First", "receivedAt": timestamp, "preview": "Preview",
+        "unread": True, "starred": False, "category": "Primary", "attachments": [], "bodyText": "Body", "bodyHtmlSafe": "",
+    }
+
+    class FakeAuth:
+        def get_account_tokens(self, user_id, connection_id):
+            assert (user_id, connection_id) == ("user-1", "google:user-1")
+            return {"provider": "google"}, {"token": "fixture"}
+
+    class FakeAdapter:
+        def __init__(self, _tokens):
+            pass
+
+        def list_messages(self, _limit, cursor):
+            return {"items": [{**message, "subject": "First" if cursor is None else "Updated"}], "nextCursor": "next" if cursor is None else None}
+
+        def list_history(self, history_id, cursor):
+            assert (history_id, cursor) == ("10", None)
+            return {"items": [], "deletedIds": [], "nextCursor": None, "historyId": "11"}
+
+    monkeypatch.setattr(mailbox_service, "GmailAdapter", FakeAdapter)
+    service = MailboxSyncService(repository, FakeAuth(), jobs)
+    service.enqueue("user-1", "google:user-1")
+    assert service.process_next() is True
+    assert repository.sync_state("google:user-1")["pageCursor"] == "next"
+    assert service.process_next() is True
+    assert service.process_next() is True
+    page = repository.list_messages("google:user-1", 20)
+    assert len(page["items"]) == 1
+    assert page["items"][0]["subject"] == "Updated"
+    assert repository.sync_state("google:user-1")["status"] == "idle"
+    assert repository.sync_state("google:user-1")["historyId"] == "11"
+
+    class ExpiredAdapter(FakeAdapter):
+        def list_history(self, _history_id, _cursor):
+            raise mailbox_service.HistoryExpired()
+
+    monkeypatch.setattr(mailbox_service, "GmailAdapter", ExpiredAdapter)
+    service.enqueue("user-1", "google:user-1")
+    assert service.process_next() is True
+    assert repository.list_messages("google:user-1", 20)["items"] == []
+    expired_state = repository.sync_state("google:user-1")
+    assert expired_state["status"] == "syncing"
+    assert expired_state["phase"] == "full"
+    assert expired_state["historyId"] is None
 
 
 def test_exhausted_interrupted_job_becomes_explicitly_failed(tmp_path):

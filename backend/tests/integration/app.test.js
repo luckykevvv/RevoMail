@@ -8,7 +8,7 @@ function appFixture(overrides = {}) {
   const session = { id: "session-1", userId: "user-1", csrfHash: "hash", user: { id: "user-1", email: "safe@example.test", displayName: "Safe User", avatarUrl: null } };
   const authService = {
     authenticate: vi.fn(async (token) => token === "valid" ? session : null),
-    providerStatus: vi.fn(() => ({ google: true, microsoft: false })),
+    providerStatus: vi.fn(() => ({ google: true })),
     issueCsrf: vi.fn(async () => "csrf-token"),
     assertCsrf: vi.fn((_session, token) => { if (token !== "csrf-token") throw new AppError("INVALID_CSRF_TOKEN", "The request could not be verified.", 403, true); }),
     logout: vi.fn(),
@@ -32,7 +32,7 @@ describe("authentication HTTP API", () => {
   it("returns provider status to signed-out clients", async () => {
     const { app } = appFixture();
     const response = await request(app).get("/api/v1/auth/session").expect(200);
-    expect(response.body).toEqual({ authenticated: false, providers: { google: true, microsoft: false } });
+    expect(response.body).toEqual({ authenticated: false, providers: { google: true } });
   });
 
   it("returns only safe session fields and a CSRF token", async () => {

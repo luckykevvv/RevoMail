@@ -65,3 +65,26 @@ class JobRepository:
     def complete(self, job_id: str) -> None:
         with self.database.connect() as connection:
             connection.execute('UPDATE "Job" SET "status"=?, "leaseUntil"=NULL, "updatedAt"=? WHERE "id"=?', ("SUCCEEDED", utc_now().isoformat(), job_id))
+
+    def fail(self, job_id: str, error_code: str) -> None:
+        with self.database.connect() as connection:
+            connection.execute(
+                'UPDATE "Job" SET "status"=?, "lastErrorCode"=?, "leaseUntil"=NULL, "updatedAt"=? WHERE "id"=?',
+                ("FAILED", error_code, utc_now().isoformat(), job_id),
+            )
+
+    def retry(self, job_id: str, error_code: str, delay_seconds: int) -> None:
+        available_at = (utc_now() + timedelta(seconds=delay_seconds)).isoformat()
+        with self.database.connect() as connection:
+            connection.execute(
+                'UPDATE "Job" SET "status"=?, "availableAt"=?, "lastErrorCode"=?, "leaseUntil"=NULL, "updatedAt"=? WHERE "id"=?',
+                ("PENDING", available_at, error_code, utc_now().isoformat(), job_id),
+            )
+
+    def status(self, job_id: str) -> dict | None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                'SELECT "id", "kind", "status", "attempts", "lastErrorCode", "createdAt", "updatedAt" FROM "Job" WHERE "id"=?',
+                (job_id,),
+            ).fetchone()
+        return dict(row) if row else None

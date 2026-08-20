@@ -23,7 +23,7 @@ Clients may retry only when `retryable` is true and the operation itself is safe
 
 - `GET /api/v1/health` returns process status, a non-sensitive database readiness check, service name, and timestamp.
 - `GET /api/v1/auth/session` returns authentication state, safe user display fields, CSRF value, and provider availability.
-- `GET /api/v1/auth/{provider}/start?returnTo=/` redirects to an available provider.
+- `GET /api/v1/auth/google/start?returnTo=/` redirects to Google.
 - `GET /api/v1/auth/google/callback` consumes a single-use server-side OAuth transaction and creates an opaque application session.
 - `POST /api/v1/auth/logout` invalidates the server-side session and returns `204`.
 
@@ -33,19 +33,25 @@ Clients may retry only when `retryable` is true and the operation itself is safe
 - `POST /api/v1/accounts/{id}/reauthorize` returns a fresh authorization URL.
 - `DELETE /api/v1/accounts/{id}` deletes the local connection and encrypted credential, then returns `204`.
 
-## Mailbox pagination
+## Gmail mailbox
 
-The implemented Gmail compatibility route is `GET /api/v1/emails?max_results=20&page_token=...`. It returns `messages` and `next_page_token`. New provider-neutral list endpoints must use the following v1 page shape without exposing provider cursors as provider-specific fields:
+`/api/v1/emails` is the sole mailbox API for the current Gmail-only, single-user MVP. `GET /api/v1/emails?max_results=20&page_token=...` returns the established `messages` and `next_page_token` fields, plus safe synchronization status:
 
 ```json
 {
-  "items": [],
-  "page": {
-    "nextCursor": null,
-    "hasMore": false
-  }
+  "messages": [],
+  "next_page_token": null,
+  "sync": { "status": "idle", "lastSyncedAt": null }
 }
 ```
+
+- `GET /api/v1/emails` accepts `max_results`, `page_token`, `query`, `category`, `unread`, and `starred`.
+- `GET /api/v1/emails/{messageId}` returns normalized metadata, attachment metadata, encrypted-cache-backed plain text, and sanitized HTML.
+- `PATCH /api/v1/emails/{messageId}` modifies unread/starred state after validating the session CSRF token.
+- `POST /api/v1/emails/sync` starts or reuses a recoverable sync; `GET /api/v1/emails/sync/{jobId}` reports job and mailbox state.
+- `POST /api/v1/emails/send` requires reviewed recipients, subject, body, `confirmed=true`, and an idempotency key. Results are `sent`, `failed`, or `unknown`; an unknown operation is never automatically resent.
+
+Gmail message identifiers and page cursors are opaque. Gmail payloads, credentials, raw HTML, and provider errors never cross the public boundary. There is no parallel account-scoped mailbox API.
 
 ## AI operations
 
@@ -53,7 +59,7 @@ The implemented endpoints are `POST /api/v1/ai/summarise`, `POST /api/v1/ai/extr
 
 ## Reserved v1 operation contracts
 
-Voice, task creation, calendar creation, and email sending are not implemented. Their shared request boundaries are reserved in `backend/app/contracts.py` so later modules do not invent incompatible shapes:
+Voice, task creation, and calendar creation are not implemented. Email sending now uses the confirmed Gmail contract; the other shared request boundaries remain reserved in `backend/app/contracts.py`:
 
 - Voice commands carry an editable `transcript` and an explicit `confirmed` flag.
 - Task mutations carry reviewed fields, `confirmed`, and an `idempotencyKey`.

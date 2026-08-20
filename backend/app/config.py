@@ -96,13 +96,11 @@ class Settings(BaseSettings):
     database_url: str = "file:./data/revomail.db"
     job_lease_seconds: int = Field(default=60, ge=5, le=3600)
     job_max_attempts: int = Field(default=3, ge=1, le=20)
+    mail_send_limit_per_minute: int = Field(default=10, ge=1, le=100)
 
     google_client_id: str = ""
     google_client_secret: str = ""
     google_redirect_uri: str = ""
-
-    microsoft_client_id: str = ""
-    microsoft_client_secret: str = ""
 
     openai_api_key: str = ""
     openai_model: str = "gpt-4o"
