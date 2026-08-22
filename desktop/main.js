@@ -48,7 +48,7 @@ function secureWindowOptions(overrides = {}) {
 
 function protectNavigation(window, { allowAppOrigin = false, allowProviderAuth = false } = {}) {
   window.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith("https://")) void shell.openExternal(url);
+    if (url.startsWith("https://") || url.startsWith("http://") || url.startsWith("mailto:")) void shell.openExternal(url);
     return { action: "deny" };
   });
   window.webContents.on("will-navigate", (event, url) => {

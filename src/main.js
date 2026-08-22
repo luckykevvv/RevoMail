@@ -138,6 +138,29 @@ function escapeHtml(value = "") {
   return String(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[character]));
 }
 
+function formatEmailDate(raw) {
+  if (!raw) return "";
+  try {
+    // RFC 2822 dates often end with a comment like "+0000 (UTC)" or "+1000 (AEST)".
+    // JavaScript's Date parser rejects the parenthesised token, returning Invalid Date.
+    // Strip it before parsing.
+    const cleaned = raw.replace(/\s*\([^)]*\)\s*$/, "").trim();
+    const date = new Date(cleaned);
+    if (isNaN(date.getTime())) return raw;
+    const now = new Date();
+    const isToday =
+      date.getFullYear() === now.getFullYear() &&
+      date.getMonth() === now.getMonth() &&
+      date.getDate() === now.getDate();
+    if (isToday) {
+      return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    }
+    return date.toLocaleDateString([], { day: "numeric", month: "short" });
+  } catch {
+    return raw;
+  }
+}
+
 async function api(path, options = {}) {
   const headers = { accept: "application/json", ...(options.body ? { "content-type": "application/json" } : {}), ...(state.csrfToken ? { "x-csrf-token": state.csrfToken } : {}), ...options.headers };
   const response = await fetch(path, { credentials: "same-origin", ...options, headers });
@@ -267,7 +290,7 @@ function emailRow(email) {
     <span class="avatar avatar-sm avatar-soft">${email.sender.split(/\s|@/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</span>
     <div class="email-sender">${email.sender}</div>
     <div class="email-content"><strong>${email.subject}</strong><span>${email.preview}</span></div>
-    <time>${escapeHtml(email.time || email.date || "")}</time>
+    <time>${escapeHtml(formatEmailDate(email.date || email.time || ""))}</time>
     ${email.unread ? '<span class="unread-dot" aria-label="Unread"></span>' : ""}
   </article>`;
 }
@@ -275,7 +298,6 @@ function emailRow(email) {
 function readingView() {
   const email = state.selectedEmail;
   const plainBody = escapeHtml(email.body_plain || email.preview || "").replaceAll("\n", "<br />");
-  const messageBody = email._loading ? "<p>Loading email…</p>" : email.body_html || `<p>${plainBody}</p>`;
   const summary = state.aiSummary;
   const extraction = state.aiExtraction;
   return shell(`<header class="compact-header">
@@ -285,8 +307,8 @@ function readingView() {
   </header>
   <div class="reading-grid">
     <article class="message-card">
-      <div class="message-from"><span class="avatar">PS</span><div><strong>${escapeHtml(email.sender)}</strong><small>${escapeHtml(email.to || email.address || "")}</small></div><time>${escapeHtml(email.time || email.date || "")}</time><button class="star-button">${icon("star")}</button></div>
-      <div class="message-body">${messageBody}</div>
+      <div class="message-from"><span class="avatar">PS</span><div><strong>${escapeHtml(email.sender)}</strong><small>${escapeHtml(email.to || email.address || "")}</small></div><time>${escapeHtml(formatEmailDate(email.date || email.time || ""))}</time><button class="star-button">${icon("star")}</button></div>
+      <iframe id="email-body-frame" class="message-body-frame" sandbox="allow-scripts"></iframe>
       <div class="message-actions"><button class="secondary-button" data-reply>${icon("reply")} Reply</button><button class="secondary-button">${icon("reply-all")} Reply all</button><button class="secondary-button">${icon("forward")} Forward</button></div>
     </article>
     <aside class="ai-rail">
@@ -517,6 +539,65 @@ function bindEvents() {
   document.querySelector("[data-toggle-listening]")?.addEventListener("click", () => { state.voiceListening = !state.voiceListening; render(); });
   document.querySelectorAll("[data-command]").forEach((button) => button.addEventListener("click", () => { state.transcript = button.dataset.command; state.voiceListening = false; render(); }));
   document.querySelector("[data-run-command]")?.addEventListener("click", () => { state.voiceOpen = false; state.view = state.transcript.toLowerCase().includes("task") ? "tasks" : "reading"; showToast("Voice command completed"); });
+  const emailFrame = document.querySelector("#email-body-frame");
+  if (emailFrame && state.selectedEmail) {
+    const email = state.selectedEmail;
+    const plainBody = escapeHtml(email.body_plain || email.preview || "").replaceAll("\n", "<br />");
+    const rawContent = email._loading
+      ? "<p style='font-family:sans-serif;padding:16px'>Loading email…</p>"
+      : email.body_html || `<p style='font-family:sans-serif;padding:16px'>${plainBody}</p>`;
+
+    // Inject base styles + a postMessage-based resize/link handler into the srcdoc.
+    // We use postMessage because sandbox="allow-scripts" (without allow-same-origin) is
+    // the safest choice — it lets scripts run but treats the frame as a unique origin,
+    // meaning contentDocument access would throw. postMessage works across origins.
+    const injection =
+      `<style>body{margin:0;overflow-x:hidden}img{max-width:100%;height:auto}table{max-width:100%}</style>` +
+      `<script>(function(){` +
+        `function measure(){` +
+          `var h=Math.max(` +
+            `document.documentElement?document.documentElement.scrollHeight:0,` +
+            `document.body?document.body.scrollHeight:0` +
+          `);` +
+          `window.parent.postMessage({type:'revomail-resize',height:h},'*');` +
+        `}` +
+        `window.addEventListener('load',function(){` +
+          `measure();` +
+          `document.querySelectorAll('img').forEach(function(i){i.addEventListener('load',measure);});` +
+        `});` +
+        `setTimeout(measure,300);setTimeout(measure,900);setTimeout(measure,2500);` +
+        `document.addEventListener('click',function(e){` +
+          `var t=e.target;` +
+          `while(t&&t.tagName!=='A')t=t.parentElement;` +
+          `if(!t)return;` +
+          `var href=t.getAttribute('href');` +
+          `if(!href)return;` +
+          `e.preventDefault();` +
+          `window.parent.postMessage({type:'revomail-open',url:href},'*');` +
+        `});` +
+      `})();<` + `/script>`;
+
+    emailFrame.srcdoc = rawContent + injection;
+
+    // Listen for postMessage from the iframe. Store handler so we can replace it
+    // on the next render without stacking up redundant listeners.
+    if (window._revoFrameHandler) window.removeEventListener("message", window._revoFrameHandler);
+    window._revoFrameHandler = (event) => {
+      if (!event.data || typeof event.data !== "object") return;
+      const frame = document.querySelector("#email-body-frame");
+      if (!frame) return;
+      if (event.data.type === "revomail-resize") {
+        const h = event.data.height;
+        if (h > 50) frame.style.height = h + "px";
+      } else if (event.data.type === "revomail-open") {
+        const url = event.data.url;
+        if (url && (url.startsWith("http") || url.startsWith("mailto:"))) {
+          window.open(url, "_blank", "noopener,noreferrer");
+        }
+      }
+    };
+    window.addEventListener("message", window._revoFrameHandler);
+  }
 }
 
 async function fetchEmails(pageToken = null) {

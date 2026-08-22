@@ -17,19 +17,56 @@ import bleach
 import google.oauth2.credentials
 from googleapiclient.discovery import build
 
-# HTML tags and attributes we allow through the sanitiser.
-# Everything else (scripts, iframes, forms, event handlers…) is stripped.
+# HTML tags we allow through the sanitiser.
+# We preserve <style> blocks and structural tags so marketing emails render
+# correctly inside the sandboxed iframe on the client.  Scripts and event
+# handlers are removed below in _sanitise_html.
 ALLOWED_TAGS = list(bleach.sanitizer.ALLOWED_TAGS) + [
+    # Text / structure
     "p", "br", "div", "span", "pre", "blockquote",
     "h1", "h2", "h3", "h4", "h5", "h6",
-    "ul", "ol", "li", "table", "thead", "tbody", "tr", "th", "td",
+    "ul", "ol", "li",
     "strong", "em", "b", "i", "u", "s", "code",
+    "figure", "figcaption",
+    # Tables — marketing emails are almost always table-based
+    "table", "thead", "tbody", "tfoot", "tr", "th", "td",
+    "caption", "colgroup", "col",
+    # Legacy but common in marketing HTML
+    "center", "font",
+    # Media
     "img",
+    # Full-document structure — preserve so srcdoc renders with correct <head>
+    "html", "head", "body",
+    "style",   # keep CSS blocks; they are harmless in a sandboxed iframe
+    "meta", "title",
 ]
+
+# Allow style/class/layout attributes on every element so marketing email
+# table layouts, inline colours, and widths are preserved.
 ALLOWED_ATTRS = {
-    **bleach.sanitizer.ALLOWED_ATTRIBUTES,
-    "a": ["href", "title"],
-    "img": ["src", "alt", "width", "height"],
+    # Universal attributes — apply to all tags
+    "*": [
+        "style", "class", "id", "width", "height",
+        "align", "valign", "bgcolor", "color",
+        "border", "cellpadding", "cellspacing",
+        "colspan", "rowspan", "nowrap",
+        "dir", "lang", "role", "title", "aria-label",
+    ],
+    "a":        ["href", "title", "target", "name", "style", "class"],
+    "img":      ["src", "alt", "width", "height", "style", "class", "border"],
+    "font":     ["face", "size", "color"],
+    "style":    ["type"],
+    "meta":     ["charset", "name", "content", "http-equiv"],
+    "table":    ["width", "height", "align", "bgcolor", "border",
+                 "cellpadding", "cellspacing", "style", "class"],
+    "td":       ["width", "height", "align", "valign", "bgcolor",
+                 "colspan", "rowspan", "nowrap", "style", "class"],
+    "th":       ["width", "height", "align", "valign", "bgcolor",
+                 "colspan", "rowspan", "style", "class"],
+    "col":      ["width", "span", "style"],
+    "colgroup": ["width", "span", "style"],
+    "body":     ["bgcolor", "style", "class"],
+    "html":     ["lang", "dir"],
 }
 
 
@@ -97,16 +134,26 @@ def _header(headers: list[dict], name: str) -> str:
 
 
 def _sanitise_html(html: str) -> str:
-    """Strip dangerous tags/attributes and block remote images."""
-    # Remove <style> and <script> blocks entirely (tag + content).
-    # bleach.clean with strip=True removes the tag but leaves the text
-    # content, which causes raw CSS to appear as visible text.
-    html = re.sub(r"<style[\s\S]*?</style>", "", html, flags=re.IGNORECASE)
+    """
+    Remove only executable content from email HTML; preserve everything else.
+
+    Emails are rendered inside a sandboxed iframe (sandbox="allow-scripts")
+    on the client, which already blocks navigation, form submission, and
+    popups.  We therefore skip bleach's tag/attribute allowlist — it strips
+    structural markup that marketing emails rely on — and instead only remove
+    the three things that can actually execute code:
+
+      • <script> blocks (tag + content)
+      • on* inline event-handler attributes  (onclick, onload, onerror, …)
+      • javascript: URI schemes in href/src
+    """
+    # Remove script blocks entirely (tag and content)
     html = re.sub(r"<script[\s\S]*?</script>", "", html, flags=re.IGNORECASE)
-
-    clean = bleach.clean(html, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRS, strip=True)
-
-    return clean
+    # Strip inline event handlers: onclick="…"  onload='…'  onerror=foo
+    html = re.sub(r'\s+on\w+\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s>]+)', "", html, flags=re.IGNORECASE)
+    # Replace javascript: URIs with a safe placeholder
+    html = re.sub(r'(href|src)\s*=\s*["\']?\s*javascript:[^"\'>\s]*', r'\1="#"', html, flags=re.IGNORECASE)
+    return html
 
 
 # ---------------------------------------------------------------------------
