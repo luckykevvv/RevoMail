@@ -1,5 +1,5 @@
 import "./style.css";
-import { applyMailboxPage, matchesMailboxCategory, selectAfterMailboxRefresh } from "./mailbox-state.js";
+import { applyMailboxPage, LatestRequestCoordinator, matchesMailboxCategory, selectAfterMailboxRefresh } from "./mailbox-state.js";
 import {
   AlignLeft,
   Archive,
@@ -156,6 +156,24 @@ async function api(path, options = {}) {
   return payload;
 }
 
+const requestCoordinator = new LatestRequestCoordinator();
+
+function beginRequest(key) {
+  return requestCoordinator.begin(key);
+}
+
+function finishRequest(key, controller) {
+  return requestCoordinator.finish(key, controller);
+}
+
+function cancelRequest(key) {
+  requestCoordinator.cancel(key);
+}
+
+function isAbortError(error) {
+  return error?.name === "AbortError";
+}
+
 const navItems = [
   ["inbox", "Inbox", "inbox"],
   ["starred", "Starred", "star"],
@@ -233,7 +251,7 @@ function sidebar() {
 }
 
 function shell(content) {
-  return `<main class="app-shell">${sidebar()}<section class="workspace">${content}</section></main>`;
+  return `<main class="app-shell">${sidebar()}<section class="workspace" data-workspace>${content}</section></main><div data-overlays></div>`;
 }
 
 function inboxView() {
@@ -243,7 +261,7 @@ function inboxView() {
     const haystack = `${email.sender} ${email.subject} ${email.preview}`.toLowerCase();
     return matchesCategory && haystack.includes(state.search.toLowerCase());
   });
-  return shell(`<header class="page-header">
+  return `<header class="page-header">
     <div><span class="eyebrow">Good morning, ${firstName}</span><h1>Inbox</h1><p>AI has highlighted what needs your attention.</p></div>
     <button class="primary-button compose-button" data-compose>${icon("square-pen")} Compose</button>
   </header>
@@ -261,7 +279,7 @@ function inboxView() {
     </div>
     ${state.nextPageToken ? `<div class="mail-panel-heading"><button class="text-button" data-load-more ${state.emailsLoading ? "disabled" : ""}>${state.emailsLoading ? "Loading…" : "Load more"}</button></div>` : ""}
   </section>
-  <button class="floating-mic" data-voice title="Voice input">${icon("mic")}</button>`);
+  <button class="floating-mic" data-voice title="Voice input">${icon("mic")}</button>`;
 }
 
 function emailRow(email) {
@@ -283,7 +301,7 @@ function readingView() {
   const messageBody = email._loading ? "<p>Loading email…</p>" : safeHtml && state.bodyMode === "formatted" ? '<iframe class="message-frame" data-message-frame sandbox="" title="Formatted email content"></iframe>' : `<p>${plainBody}</p>`;
   const summary = state.aiSummary;
   const extraction = state.aiExtraction;
-  return shell(`<header class="compact-header">
+  return `<header class="compact-header">
     <button class="back-button" data-nav="inbox">${icon("arrow-left")}</button>
     <div><span class="eyebrow">Inbox / Primary</span><h1>${email.subject}</h1></div>
     <div class="header-actions"><button class="icon-button" title="Archive">${icon("archive")}</button><button class="icon-button" title="Delete">${icon("trash-2")}</button><button class="icon-button" title="More">${icon("ellipsis")}</button></div>
@@ -301,7 +319,7 @@ function readingView() {
       <section class="insight-card"><div class="insight-title"><span>${icon("scan-text")}</span><div><small>EXTRACTED</small><h2>Key details</h2></div>${extraction ? "" : `<button class="text-button" data-ai-extract ${state.aiExtractionLoading ? "disabled" : ""}>${state.aiExtractionLoading ? "Extracting…" : "Extract"}</button>`}</div>${extraction ? renderExtraction(extraction) : `<p>${state.aiExtractionLoading ? "Extracting details…" : "Extract tasks and events from this email."}</p>`}</section>
     </aside>
   </div>
-  <button class="floating-mic" data-voice title="Voice input">${icon("mic")}</button>`);
+  <button class="floating-mic" data-voice title="Voice input">${icon("mic")}</button>`;
 }
 
 function renderExtraction(extraction) {
@@ -313,7 +331,7 @@ function renderExtraction(extraction) {
 
 function replyView() {
   const draft = state.aiDraft || replies[state.replyVersion];
-  return shell(`<header class="compact-header">
+  return `<header class="compact-header">
     <button class="back-button" data-view="reading">${icon("arrow-left")}</button>
     <div><span class="eyebrow">AI generated · review before sending</span><h1>Reply draft</h1></div>
     <button class="secondary-button" data-regenerate>${icon("refresh-cw")} Regenerate</button>
@@ -325,11 +343,11 @@ function replyView() {
     ${state.aiDraftLoading ? '<div class="reply-editor">Generating draft…</div>' : `<textarea id="reply-text" class="reply-editor">${escapeHtml(draft)}</textarea>`}
     <div class="tone-row"><span>Quick tone</span>${["professional", "concise", "friendly"].map((tone) => `<button class="tone-chip ${state.aiDraftTone === tone ? "active" : ""}" data-tone="${tone}">${tone[0].toUpperCase() + tone.slice(1)}</button>`).join("")}</div>
     <div class="composer-footer"><div class="compose-tools"><button class="icon-button">${icon("paperclip")}</button><button class="icon-button">${icon("smile")}</button><button class="icon-button">${icon("image")}</button><button class="icon-button" data-voice>${icon("mic")}</button></div><div><button class="secondary-button" data-discard>Discard</button><button class="primary-button" data-send>${icon("send")} Send reply</button></div></div>
-  </section>`);
+  </section>`;
 }
 
 function tasksView(calendarOnly = false) {
-  return shell(`<header class="page-header">
+  return `<header class="page-header">
     <div><span class="eyebrow">AI extracted from your email</span><h1>${calendarOnly ? "Calendar" : "Tasks & events"}</h1><p>${calendarOnly ? "A focused view of upcoming email commitments." : "Turn commitments into action without copy and paste."}</p></div>
     <button class="primary-button">${icon("plus")} Add manually</button>
   </header>
@@ -339,11 +357,11 @@ function tasksView(calendarOnly = false) {
     <article class="task-card"><div class="task-icon amber">${icon("square-check-big")}</div><div class="task-copy"><span class="task-type">TASK · UNIVERSITY</span><h2>Submit Assignment 2</h2><dl><div><dt>Due</dt><dd>May 20, 2025 · 11:59 PM</dd></div><div><dt>Source</dt><dd>Course Update</dd></div></dl><button class="${state.assignmentAdded ? "success-button" : "secondary-button"}" data-add-assignment>${icon(state.assignmentAdded ? "check" : "calendar-plus")} ${state.assignmentAdded ? "Added to calendar" : "Add to calendar"}</button></div></article>
   </section>
   <div class="ai-footnote">${icon("sparkles")} AI extracted these items from your emails. Always check important details.</div>
-  <button class="floating-mic" data-voice title="Voice input">${icon("mic")}</button>`);
+  <button class="floating-mic" data-voice title="Voice input">${icon("mic")}</button>`;
 }
 
 function settingsView() {
-  return shell(`<header class="page-header"><div><span class="eyebrow">Personal workspace</span><h1>Settings</h1><p>Customise your RevoMail assistant experience.</p></div><span class="saved-status">${icon("circle-check")} Changes save automatically</span></header>
+  return `<header class="page-header"><div><span class="eyebrow">Personal workspace</span><h1>Settings</h1><p>Customise your RevoMail assistant experience.</p></div><span class="saved-status">${icon("circle-check")} Changes save automatically</span></header>
   <section class="settings-stack">
     ${connectedAccountsGroup()}
     ${settingGroup("General", "settings", `
@@ -357,7 +375,7 @@ function settingsView() {
       ${selectSetting("Speech-to-text language", "captions", ["English (US)", "English (AU)", "简体中文"])}
       <div class="setting-row"><div class="setting-name">${icon("audio-waveform")}<span><strong>Voice input</strong><small>Enable spoken inbox commands</small></span></div><button class="toggle active" role="switch" aria-checked="true"><span></span></button></div>`)}
     <section class="about-card"><div>${logo()}<p>AI-powered email that helps you write, manage and organise more efficiently.</p></div><span>Prototype v0.1</span></section>
-  </section>`);
+  </section>`;
 }
 
 function connectedAccountsGroup() {
@@ -384,8 +402,8 @@ function selectSetting(label, settingIcon, values) {
 }
 
 function composeView() {
-  return shell(`<header class="compact-header"><button class="back-button" data-nav="inbox">${icon("arrow-left")}</button><div><span class="eyebrow">New message</span><h1>Compose</h1></div><button class="text-button" data-ai-compose>${icon("sparkles")} Write with AI</button></header>
-  <section class="composer-card compose-new"><div class="field-row"><label>To</label><input id="compose-to" class="input-shell" placeholder="Recipient" /></div><div class="field-row"><label>Subject</label><input id="compose-subject" class="input-shell" placeholder="Email subject" /></div><textarea id="compose-body" class="reply-editor" placeholder="Write a message, or ask Revo AI for a first draft…"></textarea><div class="composer-footer"><div class="compose-tools"><button class="icon-button">${icon("paperclip")}</button><button class="icon-button">${icon("smile")}</button><button class="icon-button" data-voice>${icon("mic")}</button></div><button class="primary-button" data-send>${icon("send")} Send</button></div></section>`);
+  return `<header class="compact-header"><button class="back-button" data-nav="inbox">${icon("arrow-left")}</button><div><span class="eyebrow">New message</span><h1>Compose</h1></div><button class="text-button" data-ai-compose>${icon("sparkles")} Write with AI</button></header>
+  <section class="composer-card compose-new"><div class="field-row"><label>To</label><input id="compose-to" class="input-shell" placeholder="Recipient" /></div><div class="field-row"><label>Subject</label><input id="compose-subject" class="input-shell" placeholder="Email subject" /></div><textarea id="compose-body" class="reply-editor" placeholder="Write a message, or ask Revo AI for a first draft…"></textarea><div class="composer-footer"><div class="compose-tools"><button class="icon-button">${icon("paperclip")}</button><button class="icon-button">${icon("smile")}</button><button class="icon-button" data-voice>${icon("mic")}</button></div><button class="primary-button" data-send>${icon("send")} Send</button></div></section>`;
 }
 
 function sendConfirmationModal() {
@@ -401,7 +419,7 @@ function sendConfirmationModal() {
 }
 
 function placeholderView(title, navIcon) {
-  return shell(`<header class="page-header"><div><span class="eyebrow">Mailbox</span><h1>${title}</h1><p>Your ${title.toLowerCase()} messages live here.</p></div></header><div class="placeholder-card">${icon(navIcon)}<h2>${title} is ready</h2><p>This demo focuses on the AI-assisted inbox flow from the presentation mock.</p><button class="secondary-button" data-nav="inbox">Back to inbox</button></div>`);
+  return `<header class="page-header"><div><span class="eyebrow">Mailbox</span><h1>${title}</h1><p>Your ${title.toLowerCase()} messages live here.</p></div></header><div class="placeholder-card">${icon(navIcon)}<h2>${title} is ready</h2><p>This demo focuses on the AI-assisted inbox flow from the presentation mock.</p><button class="secondary-button" data-nav="inbox">Back to inbox</button></div>`;
 }
 
 function voiceModal() {
@@ -421,6 +439,40 @@ function toast() {
   return state.toast ? `<div class="toast">${icon("circle-check")}<span>${state.toast}</span></div>` : "";
 }
 
+function currentViewContent() {
+  if (state.view === "inbox") return inboxView();
+  if (state.view === "reading") return readingView();
+  if (state.view === "reply") return replyView();
+  if (state.view === "tasks") return tasksView();
+  if (state.view === "calendar") return tasksView(true);
+  if (state.view === "settings") return settingsView();
+  if (state.view === "compose") return composeView();
+  if (state.view === "starred") return placeholderView("Starred", "star");
+  if (state.view === "drafts") return placeholderView("Drafts", "file");
+  return placeholderView("Sent", "send");
+}
+
+function updateSidebarState() {
+  const sidebarElement = app.querySelector(".sidebar");
+  if (!sidebarElement) return;
+  sidebarElement.querySelectorAll("[data-nav]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.nav === state.view);
+  });
+  const inboxButton = sidebarElement.querySelector('[data-nav="inbox"]');
+  const unreadCount = emails.filter((email) => email.unread).length;
+  let badge = inboxButton?.querySelector(".nav-count");
+  if (unreadCount && inboxButton) {
+    if (!badge) {
+      badge = document.createElement("b");
+      badge.className = "nav-count";
+      inboxButton.append(badge);
+    }
+    badge.textContent = String(unreadCount);
+  } else {
+    badge?.remove();
+  }
+}
+
 function render() {
   document.body.dataset.theme = state.theme;
   if (state.authenticated === null) {
@@ -428,18 +480,14 @@ function render() {
   } else if (!state.authenticated) {
     app.innerHTML = renderLogin() + toast();
   } else {
-    let content;
-    if (state.view === "inbox") content = inboxView();
-    else if (state.view === "reading") content = readingView();
-    else if (state.view === "reply") content = replyView();
-    else if (state.view === "tasks") content = tasksView();
-    else if (state.view === "calendar") content = tasksView(true);
-    else if (state.view === "settings") content = settingsView();
-    else if (state.view === "compose") content = composeView();
-    else if (state.view === "starred") content = placeholderView("Starred", "star");
-    else if (state.view === "drafts") content = placeholderView("Drafts", "file");
-    else content = placeholderView("Sent", "send");
-    app.innerHTML = content + voiceModal() + sendConfirmationModal() + toast();
+    let workspace = app.querySelector("[data-workspace]");
+    if (!workspace) {
+      app.innerHTML = shell("");
+      workspace = app.querySelector("[data-workspace]");
+    }
+    workspace.innerHTML = currentViewContent();
+    app.querySelector("[data-overlays]").innerHTML = voiceModal() + sendConfirmationModal() + toast();
+    updateSidebarState();
   }
   createIcons({ icons: demoIcons });
   bindEvents();
@@ -457,6 +505,29 @@ let toastTimer;
 let voiceTimer;
 let searchTimer;
 let syncTimer;
+
+function navigate(view, { render: shouldRender = true } = {}) {
+  if (view !== "inbox") {
+    clearTimeout(searchTimer);
+    cancelRequest("mailbox-list");
+    state.emailsLoading = false;
+  }
+  if (!["reading", "reply"].includes(view)) {
+    cancelRequest("message-detail");
+    cancelRequest("ai-summary");
+    cancelRequest("ai-extraction");
+    cancelRequest("ai-draft");
+    state.aiSummaryLoading = false;
+    state.aiExtractionLoading = false;
+    state.aiDraftLoading = false;
+  }
+  state.voiceOpen = false;
+  state.voiceListening = false;
+  clearTimeout(voiceTimer);
+  state.view = view;
+  if (shouldRender) render();
+}
+
 function showToast(message) {
   state.toast = message;
   clearTimeout(toastTimer);
@@ -479,19 +550,30 @@ function openVoice() {
 }
 
 function bindEvents() {
-  document.querySelectorAll("[data-login]").forEach((button) => button.addEventListener("click", () => {
+  const roots = state.authenticated
+    ? [app.querySelector("[data-workspace]"), app.querySelector("[data-overlays]")].filter(Boolean)
+    : [app];
+  const sidebarElement = app.querySelector(".sidebar:not([data-events-bound])");
+  if (sidebarElement) {
+    sidebarElement.dataset.eventsBound = "true";
+    roots.push(sidebarElement);
+  }
+  const queryAll = (selector) => roots.flatMap((root) => [...root.querySelectorAll(selector)]);
+  const query = (selector) => roots.map((root) => root.querySelector(selector)).find(Boolean) || null;
+
+  queryAll("[data-login]").forEach((button) => button.addEventListener("click", () => {
     button.disabled = true;
     button.lastChild.textContent = " Redirecting…";
     window.location.assign(`/api/v1/auth/google/start?returnTo=${encodeURIComponent(window.location.pathname)}`);
   }));
-  document.querySelector("[data-clear-auth-error]")?.addEventListener("click", () => { state.authError = ""; render(); });
-  document.querySelectorAll("[data-logout]").forEach((button) => button.addEventListener("click", async () => {
+  query("[data-clear-auth-error]")?.addEventListener("click", () => { state.authError = ""; render(); });
+  queryAll("[data-logout]").forEach((button) => button.addEventListener("click", async () => {
     try { await api("/api/v1/auth/logout", { method: "POST" }); } catch (error) { showToast(error.message); return; }
     state.authenticated = false; state.user = null; state.csrfToken = ""; state.accounts = []; state.view = "inbox"; resetMailbox(); render();
   }));
-  document.querySelectorAll("[data-nav]").forEach((button) => button.addEventListener("click", () => { state.view = button.dataset.nav; render(); }));
-  document.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => { state.view = button.dataset.view; render(); }));
-  document.querySelectorAll("[data-email]").forEach((row) => {
+  queryAll("[data-nav]").forEach((button) => button.addEventListener("click", () => navigate(button.dataset.nav)));
+  queryAll("[data-view]").forEach((button) => button.addEventListener("click", () => navigate(button.dataset.view)));
+  queryAll("[data-email]").forEach((row) => {
     row.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); row.click(); } });
     row.addEventListener("click", async (event) => {
     if (event.target.closest("button")) return;
@@ -502,64 +584,67 @@ function bindEvents() {
     state.aiDraft = "";
     state.selectedEmail = { ...selected, _loading: !selected.body_plain && !selected.body_html };
     state.selectedEmail.unread = false;
-    state.view = "reading";
-    render();
+    navigate("reading");
     if (!state.selectedEmail._loading) return;
+    const controller = beginRequest("message-detail");
     try {
-      state.selectedEmail = await api(`/api/v1/emails/${encodeURIComponent(selected.id)}`);
+      state.selectedEmail = await api(`/api/v1/emails/${encodeURIComponent(selected.id)}`, { signal: controller.signal });
       const cached = emails.find((item) => String(item.id) === String(selected.id));
       if (cached?.unread) void updateMessageState(cached, { unread: false });
       render();
     } catch (error) {
+      if (isAbortError(error)) return;
       state.selectedEmail._loading = false;
       showToast(error.message);
+    } finally {
+      finishRequest("message-detail", controller);
     }
     });
   });
-  document.querySelectorAll("[data-star]").forEach((button) => button.addEventListener("click", (event) => { event.stopPropagation(); const email = emails.find((item) => String(item.id) === button.dataset.star); if (email) void updateMessageState(email, { starred: !email.starred }); }));
-  document.querySelectorAll("[data-category]").forEach((button) => button.addEventListener("click", () => { state.category = button.dataset.category; void fetchEmails(); }));
-  document.querySelector("#search")?.addEventListener("input", (event) => {
+  queryAll("[data-star]").forEach((button) => button.addEventListener("click", (event) => { event.stopPropagation(); const email = emails.find((item) => String(item.id) === button.dataset.star); if (email) void updateMessageState(email, { starred: !email.starred }); }));
+  queryAll("[data-category]").forEach((button) => button.addEventListener("click", () => { state.category = button.dataset.category; void fetchEmails(); }));
+  query("#search")?.addEventListener("input", (event) => {
     state.search = event.target.value;
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => void fetchEmails(), 350);
   });
-  document.querySelector("[data-compose]")?.addEventListener("click", () => { state.view = "compose"; render(); });
-  document.querySelector("[data-reply]")?.addEventListener("click", () => { state.view = "reply"; if (!state.aiDraft) void aiDraftReply(state.aiDraftTone); else render(); });
-  document.querySelector("[data-regenerate]")?.addEventListener("click", () => void aiDraftReply(state.aiDraftTone));
-  document.querySelectorAll("[data-tone]").forEach((button) => button.addEventListener("click", () => void aiDraftReply(button.dataset.tone)));
-  document.querySelector("[data-discard]")?.addEventListener("click", () => { state.view = "reading"; render(); });
-  document.querySelectorAll("[data-send]").forEach((button) => button.addEventListener("click", () => prepareSendConfirmation()));
-  document.querySelectorAll("[data-cancel-send]").forEach((button) => button.addEventListener("click", closeSendConfirmation));
-  document.querySelector("[data-confirm-send]")?.addEventListener("click", () => void confirmSend());
-  document.querySelectorAll("[data-body-mode]").forEach((button) => button.addEventListener("click", () => { state.bodyMode = button.dataset.bodyMode; render(); }));
-  document.querySelector("[data-ai-compose]")?.addEventListener("click", () => { const field = document.querySelector("#compose-body"); field.value = "Hi,\n\nI’m following up with a quick update on our project progress. The team has completed the initial planning and is now preparing the interactive prototype.\n\nBest regards,\nAnon User"; showToast("AI draft inserted — review before sending"); });
-  document.querySelector("[data-summarize-all]")?.addEventListener("click", () => showToast(`${emails.length} emails ready to summarise`));
-  document.querySelector("[data-load-more]")?.addEventListener("click", () => void fetchEmails(state.nextPageToken));
-  document.querySelector("[data-retry-mailbox]")?.addEventListener("click", () => void startMailboxSync());
-  document.querySelector("[data-ai-summarise]")?.addEventListener("click", () => void aiSummarise());
-  document.querySelector("[data-ai-extract]")?.addEventListener("click", () => void aiExtract());
-  document.querySelectorAll("[data-add-event]").forEach((button) => button.addEventListener("click", () => { state.eventAdded = true; showToast("Project Meeting added to calendar"); }));
-  document.querySelector("[data-add-assignment]")?.addEventListener("click", () => { state.assignmentAdded = true; showToast("Assignment deadline added to calendar"); });
-  document.querySelectorAll("[data-theme]").forEach((button) => button.addEventListener("click", () => { state.theme = button.dataset.theme; render(); }));
-  document.querySelectorAll(".toggle").forEach((button) => button.addEventListener("click", () => { button.classList.toggle("active"); button.setAttribute("aria-checked", button.classList.contains("active")); }));
-  document.querySelectorAll("[data-disconnect]").forEach((button) => button.addEventListener("click", async () => {
+  query("[data-compose]")?.addEventListener("click", () => navigate("compose"));
+  query("[data-reply]")?.addEventListener("click", () => { navigate("reply", { render: Boolean(state.aiDraft) }); if (!state.aiDraft) void aiDraftReply(state.aiDraftTone); });
+  query("[data-regenerate]")?.addEventListener("click", () => void aiDraftReply(state.aiDraftTone));
+  queryAll("[data-tone]").forEach((button) => button.addEventListener("click", () => void aiDraftReply(button.dataset.tone)));
+  query("[data-discard]")?.addEventListener("click", () => navigate("reading"));
+  queryAll("[data-send]").forEach((button) => button.addEventListener("click", () => prepareSendConfirmation()));
+  queryAll("[data-cancel-send]").forEach((button) => button.addEventListener("click", closeSendConfirmation));
+  query("[data-confirm-send]")?.addEventListener("click", () => void confirmSend());
+  queryAll("[data-body-mode]").forEach((button) => button.addEventListener("click", () => { state.bodyMode = button.dataset.bodyMode; render(); }));
+  query("[data-ai-compose]")?.addEventListener("click", () => { const field = document.querySelector("#compose-body"); field.value = "Hi,\n\nI’m following up with a quick update on our project progress. The team has completed the initial planning and is now preparing the interactive prototype.\n\nBest regards,\nAnon User"; showToast("AI draft inserted — review before sending"); });
+  query("[data-summarize-all]")?.addEventListener("click", () => showToast(`${emails.length} emails ready to summarise`));
+  query("[data-load-more]")?.addEventListener("click", () => void fetchEmails(state.nextPageToken));
+  query("[data-retry-mailbox]")?.addEventListener("click", () => void startMailboxSync());
+  query("[data-ai-summarise]")?.addEventListener("click", () => void aiSummarise());
+  query("[data-ai-extract]")?.addEventListener("click", () => void aiExtract());
+  queryAll("[data-add-event]").forEach((button) => button.addEventListener("click", () => { state.eventAdded = true; showToast("Project Meeting added to calendar"); }));
+  query("[data-add-assignment]")?.addEventListener("click", () => { state.assignmentAdded = true; showToast("Assignment deadline added to calendar"); });
+  queryAll("[data-theme]").forEach((button) => button.addEventListener("click", () => { state.theme = button.dataset.theme; render(); }));
+  queryAll(".toggle").forEach((button) => button.addEventListener("click", () => { button.classList.toggle("active"); button.setAttribute("aria-checked", button.classList.contains("active")); }));
+  queryAll("[data-disconnect]").forEach((button) => button.addEventListener("click", async () => {
     const confirmed = window.confirm(`Disconnect ${button.dataset.providerName} account ${button.dataset.accountEmail}? RevoMail will revoke provider access where supported and permanently remove its stored credentials and active connection.`);
     if (!confirmed) return;
     state.accountBusy = button.dataset.disconnect; render();
     try { await api(`/api/v1/accounts/${button.dataset.disconnect}`, { method: "DELETE" }); await loadAccounts(); showToast("Account disconnected and local credentials removed"); }
     catch (error) { state.accountBusy = ""; showToast(error.message); }
   }));
-  document.querySelectorAll("[data-reauthorize]").forEach((button) => button.addEventListener("click", async () => {
+  queryAll("[data-reauthorize]").forEach((button) => button.addEventListener("click", async () => {
     state.accountBusy = button.dataset.reauthorize; render();
     try { const result = await api(`/api/v1/accounts/${button.dataset.reauthorize}/reauthorize`, { method: "POST" }); window.location.assign(result.authorizationUrl); }
     catch (error) { state.accountBusy = ""; showToast(error.message); }
   }));
-  document.querySelectorAll("[data-voice]").forEach((button) => button.addEventListener("click", openVoice));
-  document.querySelector("[data-close-voice]")?.addEventListener("click", () => { state.voiceOpen = false; clearTimeout(voiceTimer); render(); });
-  document.querySelector(".modal-backdrop")?.addEventListener("click", (event) => { if (event.target.classList.contains("modal-backdrop")) { state.voiceOpen = false; clearTimeout(voiceTimer); render(); } });
-  document.querySelector("[data-toggle-listening]")?.addEventListener("click", () => { state.voiceListening = !state.voiceListening; render(); });
-  document.querySelectorAll("[data-command]").forEach((button) => button.addEventListener("click", () => { state.transcript = button.dataset.command; state.voiceListening = false; render(); }));
-  document.querySelector("[data-run-command]")?.addEventListener("click", () => { state.voiceOpen = false; state.view = state.transcript.toLowerCase().includes("task") ? "tasks" : "reading"; showToast("Voice command completed"); });
+  queryAll("[data-voice]").forEach((button) => button.addEventListener("click", openVoice));
+  query("[data-close-voice]")?.addEventListener("click", () => { state.voiceOpen = false; clearTimeout(voiceTimer); render(); });
+  query(".modal-backdrop")?.addEventListener("click", (event) => { if (event.target.classList.contains("modal-backdrop")) { state.voiceOpen = false; clearTimeout(voiceTimer); render(); } });
+  query("[data-toggle-listening]")?.addEventListener("click", () => { state.voiceListening = !state.voiceListening; render(); });
+  queryAll("[data-command]").forEach((button) => button.addEventListener("click", () => { state.transcript = button.dataset.command; state.voiceListening = false; render(); }));
+  query("[data-run-command]")?.addEventListener("click", () => { state.voiceOpen = false; navigate(state.transcript.toLowerCase().includes("task") ? "tasks" : "reading", { render: false }); showToast("Voice command completed"); });
 }
 
 function activeAccount() {
@@ -644,6 +729,7 @@ async function confirmSend() {
 async function fetchEmails(pageToken = null, { background = false } = {}) {
   const account = activeAccount();
   if (!account) return;
+  const controller = beginRequest("mailbox-list");
   if (!pageToken && !background) resetMailbox();
   if (!background) state.emailsLoading = true;
   state.emailsError = "";
@@ -653,7 +739,7 @@ async function fetchEmails(pageToken = null, { background = false } = {}) {
     if (pageToken) query.set("page_token", pageToken);
     if (state.search.trim()) query.set("query", state.search.trim());
     if (state.category !== "All") query.set("category", state.category);
-    const payload = await api(`/api/v1/emails?${query}`);
+    const payload = await api(`/api/v1/emails?${query}`, { signal: controller.signal });
     const mailbox = applyMailboxPage(emails, payload, { append: Boolean(pageToken) });
     emails = mailbox.messages;
     state.nextPageToken = mailbox.nextPageToken;
@@ -662,8 +748,10 @@ async function fetchEmails(pageToken = null, { background = false } = {}) {
       state.selectedEmail = selectAfterMailboxRefresh(state.selectedEmail, emails, { background });
     }
   } catch (error) {
+    if (isAbortError(error)) return;
     state.emailsError = error.status === 401 ? "Your mailbox session expired. Reconnect the account in Settings." : error.message;
   } finally {
+    if (!finishRequest("mailbox-list", controller)) return;
     if (!background) state.emailsLoading = false;
     render();
   }
@@ -714,13 +802,16 @@ function resetMailbox() {
 
 async function aiSummarise() {
   if (!state.selectedEmail) return;
+  const controller = beginRequest("ai-summary");
   state.aiSummaryLoading = true;
   render();
   try {
-    state.aiSummary = await api("/api/v1/ai/summarise", { method: "POST", body: JSON.stringify({ message_id: String(state.selectedEmail.id) }) });
+    state.aiSummary = await api("/api/v1/ai/summarise", { method: "POST", body: JSON.stringify({ message_id: String(state.selectedEmail.id) }), signal: controller.signal });
   } catch (error) {
+    if (isAbortError(error)) return;
     showToast(error.message);
   } finally {
+    if (!finishRequest("ai-summary", controller)) return;
     state.aiSummaryLoading = false;
     render();
   }
@@ -728,13 +819,16 @@ async function aiSummarise() {
 
 async function aiExtract() {
   if (!state.selectedEmail) return;
+  const controller = beginRequest("ai-extraction");
   state.aiExtractionLoading = true;
   render();
   try {
-    state.aiExtraction = await api("/api/v1/ai/extract", { method: "POST", body: JSON.stringify({ message_id: String(state.selectedEmail.id) }) });
+    state.aiExtraction = await api("/api/v1/ai/extract", { method: "POST", body: JSON.stringify({ message_id: String(state.selectedEmail.id) }), signal: controller.signal });
   } catch (error) {
+    if (isAbortError(error)) return;
     showToast(error.message);
   } finally {
+    if (!finishRequest("ai-extraction", controller)) return;
     state.aiExtractionLoading = false;
     render();
   }
@@ -742,15 +836,18 @@ async function aiExtract() {
 
 async function aiDraftReply(tone) {
   if (!state.selectedEmail) return;
+  const controller = beginRequest("ai-draft");
   state.aiDraftTone = tone;
   state.aiDraftLoading = true;
   render();
   try {
-    const payload = await api("/api/v1/ai/draft-reply", { method: "POST", body: JSON.stringify({ message_id: String(state.selectedEmail.id), tone }) });
+    const payload = await api("/api/v1/ai/draft-reply", { method: "POST", body: JSON.stringify({ message_id: String(state.selectedEmail.id), tone }), signal: controller.signal });
     state.aiDraft = payload.draft;
   } catch (error) {
+    if (isAbortError(error)) return;
     showToast(error.message);
   } finally {
+    if (!finishRequest("ai-draft", controller)) return;
     state.aiDraftLoading = false;
     render();
   }
