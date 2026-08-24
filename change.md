@@ -1,6 +1,7 @@
 # Implement Module 3 through the original Gmail API
 
 Date: 2026-08-20
+Updated: 2026-08-24
 
 ## Task Scope
 
@@ -22,6 +23,9 @@ Implement the Gmail-deliverable parts of GitHub Module 3 issue #3 while preservi
 - Restored the OAuth2 v2 discovery document required by the packaged callback's Google profile lookup. The pruning test now protects both Gmail v1 and OAuth2 v2 while continuing to remove unrelated Google discovery data.
 - Stopped mailbox synchronization polling from clearing and rebuilding the entire UI every 700 milliseconds. Intermediate pages now update only synchronization state; the cache refreshes once at completion while preserving the current view, selected message, and loaded body.
 - Published the implementation on `codex/module-3-gmail-mailbox`, linked commit `fc198df` from issue #20 with the remaining image/HTML-attachment gap, and opened draft PR #64 without closing partially completed issues.
+- Corrected Gmail history processing so messages that no longer carry the `INBOX` label are removed from the local inbox cache, explicit message-level 404 responses are treated as deletions, and retryable timeouts, rate limits, and provider failures propagate to the recoverable job retry path instead of being misclassified as deletions.
+- Added a default `Primary` main-inbox filter across cached, live-search, and frontend paths. It excludes `Social` and `Promotions` while retaining Primary, Updates, Forums, and other non-advertising inbox categories; `All` remains available for every synchronized INBOX message.
+- Added regression coverage for archived/sent history events, explicit missing messages, retryable history-read failures, repository category filtering, and frontend Primary-category matching.
 
 ## Reason
 
@@ -40,6 +44,9 @@ The project currently needs one Gmail implementation and one stable mailbox cont
 - Read-only inspection of the packaged desktop settings and non-secret OAuth database status
 - Python OpenAPI/route inspection and health checks
 - `git diff --check`
+- `npm run test:python`
+- `npm run test:js`
+- `npm run build`
 - `git switch -c codex/module-3-gmail-mailbox`
 - explicit-path `git add`, `git commit`, and `git push`
 - GitHub issue #20 comment and draft PR #64 creation
@@ -55,6 +62,8 @@ The project currently needs one Gmail implementation and one stable mailbox cont
 - OAuth regression coverage confirms authorization requests no longer opt into legacy granted-scope merging and that a residual scope mismatch produces the dedicated safe retry instruction. The final suite passed with 54 JavaScript and 27 Python tests before the package rebuild.
 - The rebuilt standalone and Electron package were inspected and contain both `gmail.v1.json` and `oauth2.v2.json`; the packaged service smoke test passed after this callback dependency was restored.
 - The synchronization refresh regression suite passed with 55 JavaScript and 27 Python tests. The Electron package was rebuilt again and its packaged service smoke test passed.
+- The Gmail history and Primary-inbox correction suite passed with 56 JavaScript tests and 30 Python tests.
+- The Vite production build passed after the Primary-inbox UI and filtering changes.
 - `git diff --check` passed; Git reported only the repository's existing LF-to-CRLF working-copy warnings.
 
 ## Known Issues and Remaining Work

@@ -4,7 +4,7 @@ from fastapi.concurrency import run_in_threadpool
 from backend.app.contracts import MessageStateMutation, SendEmailRequest
 from backend.app.dependencies import require_csrf, require_mailbox
 from backend.app.errors import AppError
-from backend.app.services.gmail import GmailAdapter, InvalidAuthorization, MailProviderError, ProviderRateLimited, ProviderTimeout
+from backend.app.services.gmail import GmailAdapter, InvalidAuthorization, MailProviderError, MessageNotFound, ProviderRateLimited, ProviderTimeout
 
 
 router = APIRouter()
@@ -12,6 +12,8 @@ GMAIL_MODIFY_SCOPE = "https://www.googleapis.com/auth/gmail.modify"
 
 
 def _provider_error(exc: MailProviderError) -> AppError:
+    if isinstance(exc, MessageNotFound):
+        return AppError(exc.code, "The Gmail message was not found.", 404, False)
     if isinstance(exc, InvalidAuthorization):
         return AppError(exc.code, "Gmail authorization expired. Reconnect the account and try again.", 401, False)
     if isinstance(exc, ProviderRateLimited):
@@ -65,7 +67,9 @@ async def list_emails(
         except MailProviderError as exc:
             raise _provider_error(exc) from exc
         items = page["items"]
-        if category:
+        if category == "Primary":
+            items = [item for item in items if item.get("category") not in {"Social", "Promotions"}]
+        elif category:
             items = [item for item in items if item.get("category") == category]
         if unread is not None:
             items = [item for item in items if bool(item.get("unread")) is unread]

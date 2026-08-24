@@ -32,6 +32,11 @@ class ProviderTimeout(MailProviderError):
     code = "PROVIDER_TIMEOUT"
 
 
+class MessageNotFound(MailProviderError):
+    code = "MESSAGE_NOT_FOUND"
+    retryable = False
+
+
 class HistoryExpired(MailProviderError):
     code = "SYNC_CURSOR_EXPIRED"
 
@@ -153,7 +158,7 @@ class GmailAdapter:
         )
         self.gmail = build("gmail", "v1", credentials=credentials, cache_discovery=False)
 
-    def _execute(self, request, *, history: bool = False):
+    def _execute(self, request, *, history: bool = False, message_lookup: bool = False):
         try:
             return request.execute()
         except HttpError as exc:
@@ -161,6 +166,8 @@ class GmailAdapter:
             content = bytes(getattr(exc, "content", b"")).lower()
             if history and status == 404:
                 raise HistoryExpired() from exc
+            if message_lookup and status == 404:
+                raise MessageNotFound() from exc
             if status == 429 or b"ratelimit" in content or b"quotaexceeded" in content:
                 raise ProviderRateLimited() from exc
             if status in {401, 403}:
@@ -170,8 +177,13 @@ class GmailAdapter:
             raise ProviderTimeout() from exc
 
     def get_message(self, message_id: str) -> dict:
-        detail = self._execute(self.gmail.users().messages().get(userId="me", id=message_id, format="full"))
-        return normalise_message(detail)
+        detail = self._execute(
+            self.gmail.users().messages().get(userId="me", id=message_id, format="full"),
+            message_lookup=True,
+        )
+        message = normalise_message(detail)
+        message["_inInbox"] = "INBOX" in set(detail.get("labelIds") or [])
+        return message
 
     def list_messages(self, limit: int = 50, page_cursor: str | None = None, query: str = "", label_ids: list[str] | None = None) -> dict:
         kwargs: dict[str, Any] = {"userId": "me", "maxResults": limit, "labelIds": label_ids or ["INBOX"]}
@@ -181,6 +193,8 @@ class GmailAdapter:
             kwargs["q"] = query
         result = self._execute(self.gmail.users().messages().list(**kwargs))
         items = [self.get_message(str(item["id"])) for item in result.get("messages") or []]
+        for item in items:
+            item.pop("_inInbox", None)
         return {"items": items, "nextCursor": result.get("nextPageToken")}
 
     def list_history(self, history_id: str, page_cursor: str | None = None) -> dict:
@@ -204,8 +218,13 @@ class GmailAdapter:
         messages: list[dict] = []
         for message_id in changed:
             try:
-                messages.append(self.get_message(message_id))
-            except MailProviderError:
+                message = self.get_message(message_id)
+            except MessageNotFound:
+                deleted.add(message_id)
+                continue
+            if message.pop("_inInbox", False):
+                messages.append(message)
+            else:
                 deleted.add(message_id)
         return {"items": messages, "deletedIds": sorted(deleted), "nextCursor": result.get("nextPageToken"), "historyId": str(result.get("historyId") or history_id)}
 

@@ -1,5 +1,5 @@
 import "./style.css";
-import { applyMailboxPage, selectAfterMailboxRefresh } from "./mailbox-state.js";
+import { applyMailboxPage, matchesMailboxCategory, selectAfterMailboxRefresh } from "./mailbox-state.js";
 import {
   AlignLeft,
   Archive,
@@ -113,7 +113,7 @@ const state = {
   accountBusy: "",
   view: "inbox",
   selectedEmail: null,
-  category: "All",
+  category: "Primary",
   search: "",
   theme: "light",
   voiceOpen: false,
@@ -239,7 +239,7 @@ function shell(content) {
 function inboxView() {
   const firstName = escapeHtml(state.user?.displayName?.split(/\s+/)[0] || "there");
   const visible = emails.filter((email) => {
-    const matchesCategory = state.category === "All" || email.category === state.category;
+    const matchesCategory = matchesMailboxCategory(email, state.category);
     const haystack = `${email.sender} ${email.subject} ${email.preview}`.toLowerCase();
     return matchesCategory && haystack.includes(state.search.toLowerCase());
   });

@@ -192,6 +192,16 @@ def test_mailbox_sync_pages_resume_and_upsert_without_duplicates(tmp_path, monke
     assert repository.sync_state("google:user-1")["status"] == "idle"
     assert repository.sync_state("google:user-1")["historyId"] == "11"
 
+    repository.upsert_messages("google:user-1", [
+        {**message, "id": "primary", "category": "Primary"},
+        {**message, "id": "updates", "category": "Updates"},
+        {**message, "id": "uncategorized", "category": None},
+        {**message, "id": "social", "category": "Social"},
+        {**message, "id": "promotions", "category": "Promotions"},
+    ])
+    primary = repository.list_messages("google:user-1", 20, category="Primary")
+    assert {item["id"] for item in primary["items"]} == {"gmail-1", "primary", "updates", "uncategorized"}
+
     class ExpiredAdapter(FakeAdapter):
         def list_history(self, _history_id, _cursor):
             raise mailbox_service.HistoryExpired()

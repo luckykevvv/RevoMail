@@ -1,3 +1,9 @@
+export function matchesMailboxCategory(message, category) {
+  if (category === "All") return true;
+  if (category === "Primary") return !["Social", "Promotions"].includes(message?.category);
+  return message?.category === category;
+}
+
 export function applyMailboxPage(currentMessages, payload, { append = false } = {}) {
   const providerMessages = Array.isArray(payload?.messages) ? payload.messages : [];
   const combined = append ? [...currentMessages, ...providerMessages] : providerMessages;

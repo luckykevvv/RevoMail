@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { applyMailboxPage, selectAfterMailboxRefresh } from "./mailbox-state.js";
+import { applyMailboxPage, matchesMailboxCategory, selectAfterMailboxRefresh } from "./mailbox-state.js";
 
 
 describe("mailbox state", () => {
+  it("treats Primary as the main inbox without Social or Promotions", () => {
+    expect(matchesMailboxCategory({ category: "Primary" }, "Primary")).toBe(true);
+    expect(matchesMailboxCategory({ category: "Updates" }, "Primary")).toBe(true);
+    expect(matchesMailboxCategory({ category: "Forums" }, "Primary")).toBe(true);
+    expect(matchesMailboxCategory({ category: "Social" }, "Primary")).toBe(false);
+    expect(matchesMailboxCategory({ category: "Promotions" }, "Primary")).toBe(false);
+  });
+
   it("replaces stale or preset messages with the first provider page", () => {
     const result = applyMailboxPage(
       [{ id: "preset", subject: "Preset message" }],

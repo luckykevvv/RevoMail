@@ -101,7 +101,10 @@ class MailboxRepository:
             clauses.append('(LOWER("sender") LIKE ? OR LOWER("subject") LIKE ? OR LOWER("preview") LIKE ?)')
             term = f"%{query.strip().lower()}%"
             values.extend([term, term, term])
-        if category:
+        if category == "Primary":
+            clauses.append('("category" IS NULL OR "category" NOT IN (?, ?))')
+            values.extend(["Social", "Promotions"])
+        elif category:
             clauses.append('"category"=?')
             values.append(category)
         if unread is not None:

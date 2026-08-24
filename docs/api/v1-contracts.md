@@ -45,7 +45,7 @@ Clients may retry only when `retryable` is true and the operation itself is safe
 }
 ```
 
-- `GET /api/v1/emails` accepts `max_results`, `page_token`, `query`, `category`, `unread`, and `starred`.
+- `GET /api/v1/emails` accepts `max_results`, `page_token`, `query`, `category`, `unread`, and `starred`. The `Primary` category is the main inbox view and excludes Gmail `Social` and `Promotions`; `All` returns every synchronized INBOX message.
 - `GET /api/v1/emails/{messageId}` returns normalized metadata, attachment metadata, encrypted-cache-backed plain text, and sanitized HTML.
 - `PATCH /api/v1/emails/{messageId}` modifies unread/starred state after validating the session CSRF token.
 - `POST /api/v1/emails/sync` starts or reuses a recoverable sync; `GET /api/v1/emails/sync/{jobId}` reports job and mailbox state.
