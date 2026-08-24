@@ -14,13 +14,7 @@ const schema = z.object({
   GOOGLE_AUTH_URL: optionalUrl.default("https://accounts.google.com/o/oauth2/v2/auth"),
   GOOGLE_TOKEN_URL: optionalUrl.default("https://oauth2.googleapis.com/token"),
   GOOGLE_USERINFO_URL: optionalUrl.default("https://openidconnect.googleapis.com/v1/userinfo"),
-  GOOGLE_REVOKE_URL: optionalUrl.default("https://oauth2.googleapis.com/revoke"),
-  MICROSOFT_CLIENT_ID: z.string().optional().default(""),
-  MICROSOFT_CLIENT_SECRET: z.string().optional().default(""),
-  MICROSOFT_TENANT: z.string().default("common"),
-  MICROSOFT_AUTH_URL: optionalUrl.default(""),
-  MICROSOFT_TOKEN_URL: optionalUrl.default(""),
-  MICROSOFT_USERINFO_URL: optionalUrl.default("https://graph.microsoft.com/v1.0/me")
+  GOOGLE_REVOKE_URL: optionalUrl.default("https://oauth2.googleapis.com/revoke")
 }).superRefine((value, context) => {
   if (value.NODE_ENV === "production" && !value.APP_BASE_URL.startsWith("https://")) {
     context.addIssue({ code: "custom", path: ["APP_BASE_URL"], message: "must use HTTPS in production" });
@@ -33,9 +27,5 @@ export function loadConfig(source = process.env) {
     const names = result.error.issues.map((issue) => issue.path.join(".")).join(", ");
     throw new Error(`Invalid server configuration: ${names}`);
   }
-  const config = result.data;
-  const tenant = encodeURIComponent(config.MICROSOFT_TENANT);
-  config.MICROSOFT_AUTH_URL ||= `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/authorize`;
-  config.MICROSOFT_TOKEN_URL ||= `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`;
-  return config;
+  return result.data;
 }

@@ -1,4 +1,6 @@
+import asyncio
 import logging
+from contextlib import suppress
 from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
@@ -11,8 +13,10 @@ from starlette.middleware.sessions import SessionMiddleware
 from backend.app.config import PROJECT_ROOT, Settings, settings
 from backend.app.errors import AppError, error_payload
 from backend.app.jobs import JobRepository
+from backend.app.mailbox import MailboxRepository
 from backend.app.persistence import build_persistence
 from backend.app.routers import accounts, ai, auth, emails, health
+from backend.app.services.mailbox import MailboxSyncService
 
 
 logger = logging.getLogger("revomail.api")
@@ -36,7 +40,17 @@ def create_app(app_settings: Settings = settings) -> FastAPI:
         app.state.oauth_transactions = oauth_repository
         app.state.job_repository = JobRepository(database, app_settings)
         app.state.job_repository.recover_interrupted()
-        yield
+        app.state.mailbox_repository = MailboxRepository(database, auth_repository.protector)
+        app.state.mailbox_sync = MailboxSyncService(app.state.mailbox_repository, auth_repository, app.state.job_repository)
+        app.state.settings = app_settings
+        worker = asyncio.create_task(app.state.mailbox_sync.run())
+        try:
+            yield
+        finally:
+            app.state.mailbox_sync.stop()
+            worker.cancel()
+            with suppress(asyncio.CancelledError):
+                await worker
 
     app = FastAPI(
         title="RevoMail API",

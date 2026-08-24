@@ -3,13 +3,7 @@ import { AppError } from "../../utils/errors.js";
 const GOOGLE_SCOPES = [
   "openid", "email", "profile",
   "https://www.googleapis.com/auth/gmail.modify",
-  "https://www.googleapis.com/auth/gmail.send",
-  "https://www.googleapis.com/auth/calendar.events"
-];
-
-const MICROSOFT_SCOPES = [
-  "openid", "profile", "email", "offline_access",
-  "User.Read", "Mail.ReadWrite", "Mail.Send", "Calendars.ReadWrite"
+  "https://www.googleapis.com/auth/gmail.send"
 ];
 
 async function readJson(response, code) {
@@ -20,10 +14,10 @@ async function readJson(response, code) {
 }
 
 export function createOAuthProvider({ name, clientId, clientSecret, authorizationUrl, tokenUrl, userInfoUrl, revokeUrl, redirectUri, fetchImpl = fetch }) {
-  const scopes = name === "google" ? GOOGLE_SCOPES : MICROSOFT_SCOPES;
+  const scopes = GOOGLE_SCOPES;
   const configured = Boolean(clientId && clientSecret);
   const requireConfigured = () => {
-    if (!configured) throw new AppError("PROVIDER_NOT_CONFIGURED", `${name === "google" ? "Google" : "Microsoft"} sign-in is not configured.`, 503, false);
+    if (!configured) throw new AppError("PROVIDER_NOT_CONFIGURED", "Google sign-in is not configured.", 503, false);
   };
 
   return {
@@ -43,7 +37,7 @@ export function createOAuthProvider({ name, clientId, clientSecret, authorizatio
         code_challenge_method: "S256",
         prompt
       }).toString();
-      if (name === "google") url.searchParams.set("access_type", "offline");
+      url.searchParams.set("access_type", "offline");
       return url.toString();
     },
     async exchangeCode({ code, verifier }) {
@@ -61,9 +55,9 @@ export function createOAuthProvider({ name, clientId, clientSecret, authorizatio
     async profile(accessToken) {
       const response = await fetchImpl(userInfoUrl, { headers: { authorization: `Bearer ${accessToken}`, accept: "application/json" }, signal: AbortSignal.timeout(10_000) });
       const profile = await readJson(response, "PROFILE_FETCH_FAILED");
-      const id = name === "google" ? profile.sub : profile.id;
-      const email = name === "google" ? profile.email : (profile.mail || profile.userPrincipalName);
-      if (name === "google" && profile.email_verified !== true) throw new AppError("PROFILE_FETCH_FAILED", "Google did not return a verified email address.", 502, false);
+      const id = profile.sub;
+      const email = profile.email;
+      if (profile.email_verified !== true) throw new AppError("PROFILE_FETCH_FAILED", "Google did not return a verified email address.", 502, false);
       if (!id || !email) throw new AppError("PROFILE_FETCH_FAILED", "The provider did not return an account identifier and email address.", 502, false);
       return { id, email: email.toLowerCase(), displayName: profile.name || profile.displayName || email, avatarUrl: profile.picture || null };
     },
@@ -93,7 +87,6 @@ export function createOAuthProvider({ name, clientId, clientSecret, authorizatio
 
 export function createProviders(config, fetchImpl = fetch) {
   return {
-    google: createOAuthProvider({ name: "google", clientId: config.GOOGLE_CLIENT_ID, clientSecret: config.GOOGLE_CLIENT_SECRET, authorizationUrl: config.GOOGLE_AUTH_URL, tokenUrl: config.GOOGLE_TOKEN_URL, userInfoUrl: config.GOOGLE_USERINFO_URL, revokeUrl: config.GOOGLE_REVOKE_URL, redirectUri: `${config.APP_BASE_URL}/api/v1/auth/google/callback`, fetchImpl }),
-    microsoft: createOAuthProvider({ name: "microsoft", clientId: config.MICROSOFT_CLIENT_ID, clientSecret: config.MICROSOFT_CLIENT_SECRET, authorizationUrl: config.MICROSOFT_AUTH_URL, tokenUrl: config.MICROSOFT_TOKEN_URL, userInfoUrl: config.MICROSOFT_USERINFO_URL, revokeUrl: null, redirectUri: `${config.APP_BASE_URL}/api/v1/auth/microsoft/callback`, fetchImpl })
+    google: createOAuthProvider({ name: "google", clientId: config.GOOGLE_CLIENT_ID, clientSecret: config.GOOGLE_CLIENT_SECRET, authorizationUrl: config.GOOGLE_AUTH_URL, tokenUrl: config.GOOGLE_TOKEN_URL, userInfoUrl: config.GOOGLE_USERINFO_URL, revokeUrl: config.GOOGLE_REVOKE_URL, redirectUri: `${config.APP_BASE_URL}/api/v1/auth/google/callback`, fetchImpl })
   };
 }

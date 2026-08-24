@@ -1,5 +1,5 @@
 import "./style.css";
-import { applyMailboxPage } from "./mailbox-state.js";
+import { applyMailboxPage, matchesMailboxCategory, selectAfterMailboxRefresh } from "./mailbox-state.js";
 import {
   AlignLeft,
   Archive,
@@ -107,13 +107,13 @@ const state = {
   authenticated: null,
   user: null,
   csrfToken: "",
-  providers: { google: false, microsoft: false },
+  providers: { google: false },
   accounts: [],
   authError: "",
   accountBusy: "",
   view: "inbox",
   selectedEmail: null,
-  category: "All",
+  category: "Primary",
   search: "",
   theme: "light",
   voiceOpen: false,
@@ -124,7 +124,12 @@ const state = {
   assignmentAdded: false,
   toast: "",
   emailsLoading: false,
+  emailsError: "",
+  sync: null,
   nextPageToken: null,
+  bodyMode: "formatted",
+  sendConfirmation: null,
+  sendBusy: false,
   aiSummary: null,
   aiSummaryLoading: false,
   aiExtraction: null,
@@ -199,10 +204,9 @@ function renderLogin() {
         <div class="login-heading"><p>Welcome to your calmer inbox</p><h2>Continue to RevoMail</h2></div>
         ${state.authError ? `<div class="auth-alert" role="alert">${escapeHtml(state.authError)} <button class="text-button" data-clear-auth-error>Dismiss</button></div>` : ""}
         <div class="oauth-stack">
-          <button class="oauth google" data-login="google" ${state.providers.google ? "" : "disabled"}><span class="provider provider-google">G</span>Continue with Google</button>
-          <button class="oauth microsoft" data-login="microsoft" ${state.providers.microsoft ? "" : "disabled"}><span class="provider provider-microsoft">⊞</span>Continue with Microsoft</button>
+          <button class="oauth google" data-login ${state.providers.google ? "" : "disabled"}><span class="provider provider-google">G</span>Continue with Google</button>
         </div>
-        ${!state.providers.google && !state.providers.microsoft ? '<p class="provider-note">Sign-in providers are not configured on this environment.</p>' : ""}
+        ${!state.providers.google ? '<p class="provider-note">Google sign-in is not configured on this environment.</p>' : ""}
         <p class="secure-note">${icon("shield-check")} OAuth 2.0 · RevoMail never sees your password</p>
         <p class="legal">By continuing, you agree to the Terms and Privacy Policy.</p>
       </div>
@@ -235,7 +239,7 @@ function shell(content) {
 function inboxView() {
   const firstName = escapeHtml(state.user?.displayName?.split(/\s+/)[0] || "there");
   const visible = emails.filter((email) => {
-    const matchesCategory = state.category === "All" || email.category === state.category;
+    const matchesCategory = matchesMailboxCategory(email, state.category);
     const haystack = `${email.sender} ${email.subject} ${email.preview}`.toLowerCase();
     return matchesCategory && haystack.includes(state.search.toLowerCase());
   });
@@ -251,9 +255,9 @@ function inboxView() {
     ${["All", "Primary", "Social", "Promotions"].map((category) => `<button class="tab ${state.category === category ? "active" : ""}" data-category="${category}">${category}</button>`).join("")}
   </div>
   <section class="mail-panel">
-    <div class="mail-panel-heading"><span>${state.emailsLoading && !emails.length ? "Loading conversations" : `${visible.length} conversations`}</span><button class="text-button" data-summarize-all ${emails.length && !state.emailsLoading ? "" : "disabled"}>${icon("sparkles")} Summarise inbox</button></div>
+    <div class="mail-panel-heading"><span>${state.emailsLoading && !emails.length ? "Loading conversations" : `${visible.length} conversations`}${state.sync?.status === "syncing" ? " · Synchronising…" : ""}</span><button class="text-button" data-summarize-all ${emails.length && !state.emailsLoading ? "" : "disabled"}>${icon("sparkles")} Summarise inbox</button></div>
     <div class="email-list">
-      ${state.emailsLoading && !emails.length ? '<div class="empty-state"><h3>Loading your inbox…</h3><p>Fetching messages from your connected account.</p></div>' : visible.length ? visible.map(emailRow).join("") : emails.length ? `<div class="empty-state">${icon("search-x")}<h3>No emails found</h3><p>Try a different search or category.</p></div>` : `<div class="empty-state">${icon("inbox")}<h3>Your inbox is empty</h3><p>No messages were returned by your connected account.</p></div>`}
+      ${state.emailsError ? `<div class="empty-state" role="alert"><h3>Mailbox unavailable</h3><p>${escapeHtml(state.emailsError)}</p><button class="secondary-button" data-retry-mailbox>Retry</button></div>` : state.emailsLoading && !emails.length ? '<div class="empty-state"><h3>Loading your inbox…</h3><p>Fetching messages from your connected account.</p></div>' : visible.length ? visible.map(emailRow).join("") : emails.length ? `<div class="empty-state">${icon("search-x")}<h3>No emails found</h3><p>Try a different search or category.</p></div>` : `<div class="empty-state">${icon("inbox")}<h3>Your inbox is empty</h3><p>${state.sync?.status === "syncing" ? "Your provider mailbox is synchronising." : "No messages were returned by your connected account."}</p></div>`}
     </div>
     ${state.nextPageToken ? `<div class="mail-panel-heading"><button class="text-button" data-load-more ${state.emailsLoading ? "disabled" : ""}>${state.emailsLoading ? "Loading…" : "Load more"}</button></div>` : ""}
   </section>
@@ -264,18 +268,19 @@ function emailRow(email) {
   return `<article class="email-row ${email.unread ? "unread" : ""}" data-email="${email.id}" tabindex="0">
     <button class="check-button" aria-label="Select email"><span></span></button>
     <button class="star-button ${email.starred ? "starred" : ""}" data-star="${email.id}" aria-label="Star email">${icon("star")}</button>
-    <span class="avatar avatar-sm avatar-soft">${email.sender.split(/\s|@/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</span>
-    <div class="email-sender">${email.sender}</div>
-    <div class="email-content"><strong>${email.subject}</strong><span>${email.preview}</span></div>
-    <time>${escapeHtml(email.time || email.date || "")}</time>
+    <span class="avatar avatar-sm avatar-soft">${escapeHtml(String(email.sender || "?").split(/\s|@/).slice(0, 2).map((part) => part[0]).join("").toUpperCase())}</span>
+    <div class="email-sender">${escapeHtml(email.sender)}</div>
+    <div class="email-content"><strong>${escapeHtml(email.subject)}</strong><span>${escapeHtml(email.preview)}</span></div>
+    <time>${escapeHtml(email.receivedAt || email.time || email.date || "")}</time>
     ${email.unread ? '<span class="unread-dot" aria-label="Unread"></span>' : ""}
   </article>`;
 }
 
 function readingView() {
   const email = state.selectedEmail;
-  const plainBody = escapeHtml(email.body_plain || email.preview || "").replaceAll("\n", "<br />");
-  const messageBody = email._loading ? "<p>Loading email…</p>" : email.body_html || `<p>${plainBody}</p>`;
+  const plainBody = escapeHtml(email.bodyText || email.body_plain || email.preview || "").replaceAll("\n", "<br />");
+  const safeHtml = email.bodyHtmlSafe || email.body_html || "";
+  const messageBody = email._loading ? "<p>Loading email…</p>" : safeHtml && state.bodyMode === "formatted" ? '<iframe class="message-frame" data-message-frame sandbox="" title="Formatted email content"></iframe>' : `<p>${plainBody}</p>`;
   const summary = state.aiSummary;
   const extraction = state.aiExtraction;
   return shell(`<header class="compact-header">
@@ -285,8 +290,10 @@ function readingView() {
   </header>
   <div class="reading-grid">
     <article class="message-card">
-      <div class="message-from"><span class="avatar">PS</span><div><strong>${escapeHtml(email.sender)}</strong><small>${escapeHtml(email.to || email.address || "")}</small></div><time>${escapeHtml(email.time || email.date || "")}</time><button class="star-button">${icon("star")}</button></div>
+      <div class="message-from"><span class="avatar">${escapeHtml(String(email.sender || "?")[0].toUpperCase())}</span><div><strong>${escapeHtml(email.sender)}</strong><small>${escapeHtml((email.recipients || []).join(", ") || email.to || "")}</small></div><time>${escapeHtml(email.receivedAt || email.date || "")}</time><button class="star-button">${icon("star")}</button></div>
+      ${safeHtml ? `<div class="body-mode"><button class="text-button ${state.bodyMode === "formatted" ? "active" : ""}" data-body-mode="formatted">Formatted</button><button class="text-button ${state.bodyMode === "plain" ? "active" : ""}" data-body-mode="plain">Plain text</button></div>` : ""}
       <div class="message-body">${messageBody}</div>
+      ${(email.attachments || []).length ? `<ul class="attachment-list" aria-label="Attachments">${email.attachments.map((attachment) => `<li>${icon("paperclip")} ${escapeHtml(attachment.filename)} <small>${escapeHtml(attachment.mimeType)} · ${Number(attachment.size || 0)} bytes</small></li>`).join("")}</ul>` : ""}
       <div class="message-actions"><button class="secondary-button" data-reply>${icon("reply")} Reply</button><button class="secondary-button">${icon("reply-all")} Reply all</button><button class="secondary-button">${icon("forward")} Forward</button></div>
     </article>
     <aside class="ai-rail">
@@ -312,8 +319,8 @@ function replyView() {
     <button class="secondary-button" data-regenerate>${icon("refresh-cw")} Regenerate</button>
   </header>
   <section class="composer-card">
-    <div class="field-row"><label>To</label><div class="input-shell"><span class="avatar avatar-xs">PS</span> Prof. Smith &lt;smith@university.edu&gt;</div></div>
-    <div class="field-row"><label>Subject</label><div class="input-shell">Re: Project Meeting Tomorrow</div></div>
+    <div class="field-row"><label>To</label><div class="input-shell">${escapeHtml(state.selectedEmail?.sender || "")}</div></div>
+    <div class="field-row"><label>Subject</label><div class="input-shell">${escapeHtml(`Re: ${state.selectedEmail?.subject || ""}`)}</div></div>
     <div class="ai-draft-label"><span>${icon("sparkles")} AI generated reply</span><small>Version ${state.replyVersion + 1} of 3 · Edit as needed</small></div>
     ${state.aiDraftLoading ? '<div class="reply-editor">Generating draft…</div>' : `<textarea id="reply-text" class="reply-editor">${escapeHtml(draft)}</textarea>`}
     <div class="tone-row"><span>Quick tone</span>${["professional", "concise", "friendly"].map((tone) => `<button class="tone-chip ${state.aiDraftTone === tone ? "active" : ""}" data-tone="${tone}">${tone[0].toUpperCase() + tone.slice(1)}</button>`).join("")}</div>
@@ -355,15 +362,16 @@ function settingsView() {
 
 function connectedAccountsGroup() {
   const content = state.accounts.length ? state.accounts.map((account) => {
-    const provider = account.provider === "google" ? "Google" : "Microsoft";
+    const provider = "Google";
     const busy = state.accountBusy === account.id;
     return `<article class="connected-account">
-      <div class="account-provider"><span class="provider ${account.provider === "google" ? "provider-google" : "provider-microsoft"}">${account.provider === "google" ? "G" : "⊞"}</span><span><strong>${provider}</strong><small>${escapeHtml(account.email)}</small></span></div>
+      <div class="account-provider"><span class="provider provider-google">G</span><span><strong>${provider}</strong><small>${escapeHtml(account.email)}</small></span></div>
       <span class="connection-status ${account.status.toLowerCase()}">${escapeHtml(account.status.replaceAll("_", " "))}</span>
+      ${account.requiresReauthorization ? '<p class="provider-note">Reconnect to enable read/unread, starring, and confirmed sending.</p>' : ""}
       <details><summary>Granted permissions</summary><ul>${account.scopes.map((scope) => `<li>${escapeHtml(scope)}</li>`).join("")}</ul></details>
       <div class="account-actions"><button class="secondary-button" data-reauthorize="${account.id}" ${busy ? "disabled" : ""}>Reconnect</button><button class="danger-button" data-disconnect="${account.id}" data-provider-name="${provider}" data-account-email="${escapeHtml(account.email)}" ${busy ? "disabled" : ""}>Disconnect</button></div>
     </article>`;
-  }).join("") : '<div class="empty-account"><p>No connected accounts.</p><p>Sign out, then connect Google or Microsoft from the sign-in page.</p></div>';
+  }).join("") : '<div class="empty-account"><p>No connected Gmail account.</p><p>Sign out, then connect Google from the sign-in page.</p></div>';
   return settingGroup("Connected accounts", "shield-check", `<div class="connected-account-list">${content}<div class="session-actions"><span><strong>RevoMail session</strong><small>Signing out keeps provider access connected until you disconnect it above.</small></span><button class="secondary-button" data-logout>${icon("log-out")} Sign out of RevoMail</button></div></div>`);
 }
 
@@ -378,6 +386,18 @@ function selectSetting(label, settingIcon, values) {
 function composeView() {
   return shell(`<header class="compact-header"><button class="back-button" data-nav="inbox">${icon("arrow-left")}</button><div><span class="eyebrow">New message</span><h1>Compose</h1></div><button class="text-button" data-ai-compose>${icon("sparkles")} Write with AI</button></header>
   <section class="composer-card compose-new"><div class="field-row"><label>To</label><input id="compose-to" class="input-shell" placeholder="Recipient" /></div><div class="field-row"><label>Subject</label><input id="compose-subject" class="input-shell" placeholder="Email subject" /></div><textarea id="compose-body" class="reply-editor" placeholder="Write a message, or ask Revo AI for a first draft…"></textarea><div class="composer-footer"><div class="compose-tools"><button class="icon-button">${icon("paperclip")}</button><button class="icon-button">${icon("smile")}</button><button class="icon-button" data-voice>${icon("mic")}</button></div><button class="primary-button" data-send>${icon("send")} Send</button></div></section>`);
+}
+
+function sendConfirmationModal() {
+  const draft = state.sendConfirmation;
+  if (!draft) return "";
+  return `<div class="modal-backdrop"><section class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="send-title">
+    <div class="modal-header"><div><span class="eyebrow">FINAL REVIEW</span><h2 id="send-title">Confirm email send</h2></div><button class="icon-button" data-cancel-send aria-label="Cancel send">${icon("x")}</button></div>
+    <dl class="send-review"><div><dt>To</dt><dd>${escapeHtml(draft.to.join(", "))}</dd></div>${draft.cc.length ? `<div><dt>Cc</dt><dd>${escapeHtml(draft.cc.join(", "))}</dd></div>` : ""}<div><dt>Subject</dt><dd>${escapeHtml(draft.subject)}</dd></div></dl>
+    <label>Message<textarea id="confirmed-body" class="reply-editor">${escapeHtml(draft.bodyText)}</textarea></label>
+    <p>RevoMail will contact Gmail only after you choose “Confirm and send”.</p>
+    <div class="modal-footer"><button class="secondary-button" data-cancel-send ${state.sendBusy ? "disabled" : ""}>Keep editing</button><button class="primary-button" data-confirm-send ${state.sendBusy ? "disabled" : ""}>${state.sendBusy ? "Sending…" : "Confirm and send"}</button></div>
+  </section></div>`;
 }
 
 function placeholderView(title, navIcon) {
@@ -419,14 +439,24 @@ function render() {
     else if (state.view === "starred") content = placeholderView("Starred", "star");
     else if (state.view === "drafts") content = placeholderView("Drafts", "file");
     else content = placeholderView("Sent", "send");
-    app.innerHTML = content + voiceModal() + toast();
+    app.innerHTML = content + voiceModal() + sendConfirmationModal() + toast();
   }
   createIcons({ icons: demoIcons });
   bindEvents();
+  hydrateSafeMessageFrame();
+}
+
+function hydrateSafeMessageFrame() {
+  const frame = document.querySelector("[data-message-frame]");
+  const safeHtml = state.selectedEmail?.bodyHtmlSafe || state.selectedEmail?.body_html || "";
+  if (!frame || !safeHtml) return;
+  frame.srcdoc = `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'"><style>body{margin:0;font:14px/1.65 system-ui;color:#172033;overflow-wrap:anywhere}img{max-width:100%}table{max-width:100%;border-collapse:collapse}</style>${safeHtml}`;
 }
 
 let toastTimer;
 let voiceTimer;
+let searchTimer;
+let syncTimer;
 function showToast(message) {
   state.toast = message;
   clearTimeout(toastTimer);
@@ -452,7 +482,7 @@ function bindEvents() {
   document.querySelectorAll("[data-login]").forEach((button) => button.addEventListener("click", () => {
     button.disabled = true;
     button.lastChild.textContent = " Redirecting…";
-    window.location.assign(`/api/v1/auth/${button.dataset.login}/start?returnTo=${encodeURIComponent(window.location.pathname)}`);
+    window.location.assign(`/api/v1/auth/google/start?returnTo=${encodeURIComponent(window.location.pathname)}`);
   }));
   document.querySelector("[data-clear-auth-error]")?.addEventListener("click", () => { state.authError = ""; render(); });
   document.querySelectorAll("[data-logout]").forEach((button) => button.addEventListener("click", async () => {
@@ -461,7 +491,9 @@ function bindEvents() {
   }));
   document.querySelectorAll("[data-nav]").forEach((button) => button.addEventListener("click", () => { state.view = button.dataset.nav; render(); }));
   document.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => { state.view = button.dataset.view; render(); }));
-  document.querySelectorAll("[data-email]").forEach((row) => row.addEventListener("click", async (event) => {
+  document.querySelectorAll("[data-email]").forEach((row) => {
+    row.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); row.click(); } });
+    row.addEventListener("click", async (event) => {
     if (event.target.closest("button")) return;
     const selected = emails.find((email) => String(email.id) === row.dataset.email);
     if (!selected) return;
@@ -475,24 +507,35 @@ function bindEvents() {
     if (!state.selectedEmail._loading) return;
     try {
       state.selectedEmail = await api(`/api/v1/emails/${encodeURIComponent(selected.id)}`);
+      const cached = emails.find((item) => String(item.id) === String(selected.id));
+      if (cached?.unread) void updateMessageState(cached, { unread: false });
       render();
     } catch (error) {
       state.selectedEmail._loading = false;
       showToast(error.message);
     }
-  }));
-  document.querySelectorAll("[data-star]").forEach((button) => button.addEventListener("click", (event) => { event.stopPropagation(); const email = emails.find((item) => String(item.id) === button.dataset.star); if (email) email.starred = !email.starred; render(); }));
-  document.querySelectorAll("[data-category]").forEach((button) => button.addEventListener("click", () => { state.category = button.dataset.category; render(); }));
-  document.querySelector("#search")?.addEventListener("input", (event) => { state.search = event.target.value; render(); document.querySelector("#search")?.focus(); });
+    });
+  });
+  document.querySelectorAll("[data-star]").forEach((button) => button.addEventListener("click", (event) => { event.stopPropagation(); const email = emails.find((item) => String(item.id) === button.dataset.star); if (email) void updateMessageState(email, { starred: !email.starred }); }));
+  document.querySelectorAll("[data-category]").forEach((button) => button.addEventListener("click", () => { state.category = button.dataset.category; void fetchEmails(); }));
+  document.querySelector("#search")?.addEventListener("input", (event) => {
+    state.search = event.target.value;
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => void fetchEmails(), 350);
+  });
   document.querySelector("[data-compose]")?.addEventListener("click", () => { state.view = "compose"; render(); });
   document.querySelector("[data-reply]")?.addEventListener("click", () => { state.view = "reply"; if (!state.aiDraft) void aiDraftReply(state.aiDraftTone); else render(); });
   document.querySelector("[data-regenerate]")?.addEventListener("click", () => void aiDraftReply(state.aiDraftTone));
   document.querySelectorAll("[data-tone]").forEach((button) => button.addEventListener("click", () => void aiDraftReply(button.dataset.tone)));
   document.querySelector("[data-discard]")?.addEventListener("click", () => { state.view = "reading"; render(); });
-  document.querySelectorAll("[data-send]").forEach((button) => button.addEventListener("click", () => { state.view = "sent"; showToast("Message sent — human review complete"); }));
+  document.querySelectorAll("[data-send]").forEach((button) => button.addEventListener("click", () => prepareSendConfirmation()));
+  document.querySelectorAll("[data-cancel-send]").forEach((button) => button.addEventListener("click", closeSendConfirmation));
+  document.querySelector("[data-confirm-send]")?.addEventListener("click", () => void confirmSend());
+  document.querySelectorAll("[data-body-mode]").forEach((button) => button.addEventListener("click", () => { state.bodyMode = button.dataset.bodyMode; render(); }));
   document.querySelector("[data-ai-compose]")?.addEventListener("click", () => { const field = document.querySelector("#compose-body"); field.value = "Hi,\n\nI’m following up with a quick update on our project progress. The team has completed the initial planning and is now preparing the interactive prototype.\n\nBest regards,\nAnon User"; showToast("AI draft inserted — review before sending"); });
   document.querySelector("[data-summarize-all]")?.addEventListener("click", () => showToast(`${emails.length} emails ready to summarise`));
   document.querySelector("[data-load-more]")?.addEventListener("click", () => void fetchEmails(state.nextPageToken));
+  document.querySelector("[data-retry-mailbox]")?.addEventListener("click", () => void startMailboxSync());
   document.querySelector("[data-ai-summarise]")?.addEventListener("click", () => void aiSummarise());
   document.querySelector("[data-ai-extract]")?.addEventListener("click", () => void aiExtract());
   document.querySelectorAll("[data-add-event]").forEach((button) => button.addEventListener("click", () => { state.eventAdded = true; showToast("Project Meeting added to calendar"); }));
@@ -519,30 +562,151 @@ function bindEvents() {
   document.querySelector("[data-run-command]")?.addEventListener("click", () => { state.voiceOpen = false; state.view = state.transcript.toLowerCase().includes("task") ? "tasks" : "reading"; showToast("Voice command completed"); });
 }
 
-async function fetchEmails(pageToken = null) {
-  if (!pageToken) resetMailbox();
-  state.emailsLoading = true;
+function activeAccount() {
+  return state.accounts[0] || null;
+}
+
+async function updateMessageState(email, change) {
+  const account = activeAccount();
+  if (!account) return;
+  const previous = { unread: email.unread, starred: email.starred };
+  Object.assign(email, change);
+  if (state.selectedEmail && String(state.selectedEmail.id) === String(email.id)) Object.assign(state.selectedEmail, change);
   render();
+  try {
+    await api(`/api/v1/emails/${encodeURIComponent(email.id)}`, { method: "PATCH", body: JSON.stringify(change) });
+  } catch (error) {
+    Object.assign(email, previous);
+    if (state.selectedEmail && String(state.selectedEmail.id) === String(email.id)) Object.assign(state.selectedEmail, previous);
+    showToast(error.status === 401 ? "Mailbox authorization expired. Reconnect in Settings." : error.message);
+  }
+}
+
+function prepareSendConfirmation() {
+  const account = activeAccount();
+  if (!account) return;
+  if (state.view === "reply") {
+    const bodyText = document.querySelector("#reply-text")?.value.trim() || "";
+    state.sendConfirmation = {
+      to: [state.selectedEmail?.sender || ""], cc: [], bcc: [], subject: `Re: ${state.selectedEmail?.subject || ""}`,
+      bodyText, inReplyToMessageId: String(state.selectedEmail?.id || ""), idempotencyKey: crypto.randomUUID(),
+    };
+  } else {
+    const to = (document.querySelector("#compose-to")?.value || "").split(",").map((value) => value.trim()).filter(Boolean);
+    state.sendConfirmation = {
+      to, cc: [], bcc: [], subject: (document.querySelector("#compose-subject")?.value || "").trim(),
+      bodyText: (document.querySelector("#compose-body")?.value || "").trim(), idempotencyKey: crypto.randomUUID(),
+    };
+  }
+  if (!state.sendConfirmation.to.length || !state.sendConfirmation.subject || !state.sendConfirmation.bodyText) {
+    state.sendConfirmation = null;
+    showToast("Add a recipient, subject, and message before sending.");
+    return;
+  }
+  render();
+  setTimeout(() => document.querySelector("#confirmed-body")?.focus(), 0);
+}
+
+function closeSendConfirmation() {
+  if (state.sendBusy) return;
+  state.sendConfirmation = null;
+  render();
+  setTimeout(() => document.querySelector("[data-send]")?.focus(), 0);
+}
+
+async function confirmSend() {
+  const account = activeAccount();
+  if (!account || !state.sendConfirmation || state.sendBusy) return;
+  state.sendConfirmation.bodyText = document.querySelector("#confirmed-body")?.value.trim() || "";
+  state.sendBusy = true;
+  render();
+  try {
+    const result = await api("/api/v1/emails/send", {
+      method: "POST", body: JSON.stringify({ ...state.sendConfirmation, confirmed: true })
+    });
+    state.sendConfirmation = null;
+    if (result.status === "sent") {
+      state.view = "sent";
+      showToast("Message sent after final confirmation.");
+    } else if (result.status === "unknown") {
+      showToast("Delivery is unknown. RevoMail will not resend automatically.");
+    } else {
+      showToast("Gmail rejected the message. It was not marked as sent.");
+    }
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    state.sendBusy = false;
+    render();
+  }
+}
+
+async function fetchEmails(pageToken = null, { background = false } = {}) {
+  const account = activeAccount();
+  if (!account) return;
+  if (!pageToken && !background) resetMailbox();
+  if (!background) state.emailsLoading = true;
+  state.emailsError = "";
+  if (!background) render();
   try {
     const query = new URLSearchParams({ max_results: "20" });
     if (pageToken) query.set("page_token", pageToken);
+    if (state.search.trim()) query.set("query", state.search.trim());
+    if (state.category !== "All") query.set("category", state.category);
     const payload = await api(`/api/v1/emails?${query}`);
     const mailbox = applyMailboxPage(emails, payload, { append: Boolean(pageToken) });
     emails = mailbox.messages;
     state.nextPageToken = mailbox.nextPageToken;
-    if (!pageToken) state.selectedEmail = mailbox.selectedMessage;
+    state.sync = mailbox.sync;
+    if (!pageToken) {
+      state.selectedEmail = selectAfterMailboxRefresh(state.selectedEmail, emails, { background });
+    }
   } catch (error) {
-    showToast(error.message);
+    state.emailsError = error.status === 401 ? "Your mailbox session expired. Reconnect the account in Settings." : error.message;
   } finally {
-    state.emailsLoading = false;
+    if (!background) state.emailsLoading = false;
     render();
   }
+}
+
+async function startMailboxSync() {
+  const account = activeAccount();
+  if (!account) return;
+  state.emailsError = "";
+  try {
+    const started = await api("/api/v1/emails/sync", { method: "POST" });
+    state.sync = { ...(state.sync || {}), status: started.status, jobId: started.jobId };
+    render();
+    pollMailboxSync(started.jobId);
+  } catch (error) {
+    state.emailsError = error.message;
+    render();
+  }
+}
+
+function pollMailboxSync(jobId) {
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(async () => {
+    try {
+      const result = await api(`/api/v1/emails/sync/${encodeURIComponent(jobId)}`);
+      state.sync = result.sync;
+      if (result.sync.status === "syncing" && result.sync.jobId) {
+        pollMailboxSync(result.sync.jobId);
+      } else {
+        await fetchEmails(null, { background: true });
+      }
+    } catch (error) {
+      state.emailsError = error.message;
+      render();
+    }
+  }, 700);
 }
 
 function resetMailbox() {
   emails = [];
   state.selectedEmail = null;
   state.nextPageToken = null;
+  state.sync = null;
   state.aiSummary = null;
   state.aiExtraction = null;
   state.aiDraft = "";
@@ -604,7 +768,8 @@ async function bootstrap() {
   const errorMessages = {
     AUTHORIZATION_DENIED: "Authorization was cancelled. You can try again.",
     INVALID_OAUTH_STATE: "The sign-in request expired or could not be verified. Please try again.",
-    INSUFFICIENT_PERMISSIONS: "The required mailbox or calendar permissions were not granted.",
+    INSUFFICIENT_PERMISSIONS: "The required Gmail permissions were not granted.",
+    AUTHORIZATION_SCOPE_MISMATCH: "Google returned permissions from an older RevoMail authorization. Remove RevoMail access from your Google account, then try again.",
     AUTHORIZATION_FAILED: "Sign-in could not be completed. Please try again."
   };
   if (params.has("authError")) state.authError = errorMessages[params.get("authError")] || "Sign-in could not be completed. Please try again.";
@@ -620,7 +785,7 @@ async function bootstrap() {
       if (requestedView === "settings") state.view = "settings";
       const accounts = await api("/api/v1/accounts");
       state.accounts = accounts.accounts;
-      if (state.accounts.length) await fetchEmails();
+      if (state.accounts.length) { await fetchEmails(); void startMailboxSync(); }
       else resetMailbox();
     }
   } catch (error) {

@@ -2,7 +2,7 @@ import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 
 
-const REQUIRED_DISCOVERY_DOCUMENTS = new Set(["gmail.v1.json"]);
+const REQUIRED_DISCOVERY_DOCUMENTS = new Set(["gmail.v1.json", "oauth2.v2.json"]);
 
 
 export function pruneGoogleDiscoveryDocuments(backendDirectory) {
@@ -29,7 +29,9 @@ export function pruneGoogleDiscoveryDocuments(backendDirectory) {
     removedFiles += 1;
   }
 
-  const gmailDocument = path.join(documentsDirectory, "gmail.v1.json");
-  if (!existsSync(gmailDocument)) throw new Error("The required Gmail v1 discovery document is missing.");
-  return { removedFiles, removedBytes, keptFiles: [gmailDocument] };
+  const keptFiles = [...REQUIRED_DISCOVERY_DOCUMENTS].map((name) => path.join(documentsDirectory, name));
+  for (const requiredDocument of keptFiles) {
+    if (!existsSync(requiredDocument)) throw new Error(`A required Google discovery document is missing: ${path.basename(requiredDocument)}.`);
+  }
+  return { removedFiles, removedBytes, keptFiles };
 }
