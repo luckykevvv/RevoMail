@@ -1,3 +1,27 @@
+export class LatestRequestCoordinator {
+  constructor() {
+    this.controllers = new Map();
+  }
+
+  begin(key) {
+    this.controllers.get(key)?.abort();
+    const controller = new AbortController();
+    this.controllers.set(key, controller);
+    return controller;
+  }
+
+  finish(key, controller) {
+    if (this.controllers.get(key) !== controller) return false;
+    this.controllers.delete(key);
+    return true;
+  }
+
+  cancel(key) {
+    this.controllers.get(key)?.abort();
+    this.controllers.delete(key);
+  }
+}
+
 export function matchesMailboxCategory(message, category) {
   if (category === "All") return true;
   if (category === "Primary") return !["Social", "Promotions"].includes(message?.category);

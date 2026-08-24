@@ -1,9 +1,30 @@
 import { describe, expect, it } from "vitest";
 
-import { applyMailboxPage, matchesMailboxCategory, selectAfterMailboxRefresh } from "./mailbox-state.js";
+import { applyMailboxPage, LatestRequestCoordinator, matchesMailboxCategory, selectAfterMailboxRefresh } from "./mailbox-state.js";
 
 
 describe("mailbox state", () => {
+  it("cancels stale requests and accepts completion only from the latest request", () => {
+    const requests = new LatestRequestCoordinator();
+    const first = requests.begin("mailbox");
+    const second = requests.begin("mailbox");
+
+    expect(first.signal.aborted).toBe(true);
+    expect(second.signal.aborted).toBe(false);
+    expect(requests.finish("mailbox", first)).toBe(false);
+    expect(requests.finish("mailbox", second)).toBe(true);
+  });
+
+  it("cancels an active request when its view is left", () => {
+    const requests = new LatestRequestCoordinator();
+    const active = requests.begin("message-detail");
+
+    requests.cancel("message-detail");
+
+    expect(active.signal.aborted).toBe(true);
+    expect(requests.finish("message-detail", active)).toBe(false);
+  });
+
   it("treats Primary as the main inbox without Social or Promotions", () => {
     expect(matchesMailboxCategory({ category: "Primary" }, "Primary")).toBe(true);
     expect(matchesMailboxCategory({ category: "Updates" }, "Primary")).toBe(true);
