@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyClassifications, applyMailboxPage } from "./mailbox-state.js";
+import { applyClassifications, applyMailboxPage, setMessageUnread } from "./mailbox-state.js";
 
 
 describe("mailbox state", () => {
@@ -60,5 +60,21 @@ describe("priority classification", () => {
   it("matches numeric provider ids against string keys", () => {
     const result = applyClassifications([{ id: 7 }], { 7: { priority: "medium", reason: "" } });
     expect(result[0].priority).toBe("medium");
+  });
+});
+
+describe("read state", () => {
+  const inbox = [{ id: "a", unread: true }, { id: "b", unread: true }];
+
+  it("updates only the matching message without mutating the original", () => {
+    const result = setMessageUnread(inbox, "a", false);
+    expect(result).toEqual([{ id: "a", unread: false }, { id: "b", unread: true }]);
+    expect(inbox[0].unread).toBe(true);
+  });
+
+  it("can restore unread state and matches numeric ids against strings", () => {
+    const read = setMessageUnread(inbox, "b", false);
+    expect(setMessageUnread(read, "b", true)[1].unread).toBe(true);
+    expect(setMessageUnread([{ id: 7, unread: true }], "7", false)[0].unread).toBe(false);
   });
 });

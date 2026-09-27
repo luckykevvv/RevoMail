@@ -1,5 +1,5 @@
 import "./style.css";
-import { applyClassifications, applyMailboxPage } from "./mailbox-state.js";
+import { applyClassifications, applyMailboxPage, setMessageUnread } from "./mailbox-state.js";
 import {
   AlignLeft,
   Archive,
@@ -115,6 +115,7 @@ const state = {
   selectedEmail: null,
   category: "All",
   priority: "All",
+  readSyncNotified: false,
   classifying: false,
   classifyNote: "",
   search: "",
@@ -294,14 +295,14 @@ function priorityStatus() {
 }
 
 function emailRow(email) {
-  return `<article class="email-row ${email.unread ? "unread" : ""}" data-email="${email.id}" tabindex="0">
+  return `<article class="email-row ${email.unread ? "unread" : "read"}" data-email="${email.id}" tabindex="0">
     <button class="check-button" aria-label="Select email"><span></span></button>
     <button class="star-button ${email.starred ? "starred" : ""}" data-star="${email.id}" aria-label="Star email">${icon("star")}</button>
     <span class="avatar avatar-sm avatar-soft">${email.sender.split(/\s|@/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</span>
-    <div class="email-sender">${email.sender}</div>
+    <div class="email-sender"><span class="sr-only">${email.unread ? "Unread. " : "Read. "}</span>${email.sender}</div>
     <div class="email-content">${priorityBadge(email)}<strong>${email.subject}</strong><span>${email.preview}</span></div>
     <time>${escapeHtml(email.time || email.date || "")}</time>
-    ${email.unread ? '<span class="unread-dot" aria-label="Unread"></span>' : ""}
+    ${email.unread ? '<span class="unread-dot" role="img" aria-label="Unread"></span>' : ""}
   </article>`;
 }
 
@@ -503,11 +504,14 @@ function bindEvents() {
     state.aiDraft = "";
     state.selectedEmail = { ...selected, _loading: !selected.body_plain && !selected.body_html };
     state.selectedEmail.unread = false;
+    const wasUnread = selected.unread;
+    if (wasUnread) emails = setMessageUnread(emails, selected.id, false);
     state.view = "reading";
     render();
+    if (wasUnread) void syncReadState(selected.id);
     if (!state.selectedEmail._loading) return;
     try {
-      state.selectedEmail = await api(`/api/v1/emails/${encodeURIComponent(selected.id)}`);
+      state.selectedEmail = { ...(await api(`/api/v1/emails/${encodeURIComponent(selected.id)}`)), unread: false };
       render();
     } catch (error) {
       state.selectedEmail._loading = false;
@@ -553,6 +557,25 @@ function bindEvents() {
   document.querySelector("[data-toggle-listening]")?.addEventListener("click", () => { state.voiceListening = !state.voiceListening; render(); });
   document.querySelectorAll("[data-command]").forEach((button) => button.addEventListener("click", () => { state.transcript = button.dataset.command; state.voiceListening = false; render(); }));
   document.querySelector("[data-run-command]")?.addEventListener("click", () => { state.voiceOpen = false; state.view = state.transcript.toLowerCase().includes("task") ? "tasks" : "reading"; showToast("Voice command completed"); });
+}
+
+// The row is already shown as read (optimistic). Tell Gmail; if that fails, put the row back to unread so
+// RevoMail never claims a state that Gmail does not have.
+async function syncReadState(id) {
+  try {
+    await api(`/api/v1/emails/${encodeURIComponent(id)}/read`, { method: "POST" });
+  } catch (error) {
+    emails = setMessageUnread(emails, id, true);
+    let message = "";
+    if (error.code === "INSUFFICIENT_PERMISSIONS") {
+      if (!state.readSyncNotified) message = error.message; // explain once per session; later failures just stay unread
+      state.readSyncNotified = true;
+    } else {
+      message = "Could not mark the email as read in Gmail.";
+    }
+    if (message) showToast(message);
+    else render();
+  }
 }
 
 async function fetchEmails(pageToken = null) {

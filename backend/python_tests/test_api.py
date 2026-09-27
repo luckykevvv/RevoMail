@@ -96,7 +96,7 @@ def test_google_callback_preserves_account_ui_contract(client):
     accounts = client.get("/api/v1/accounts").json()["accounts"]
     assert accounts[0]["provider"] == "google"
     assert accounts[0]["email"] == "tester@example.com"
-    assert "https://www.googleapis.com/auth/gmail.readonly" in accounts[0]["scopes"]
+    assert "https://www.googleapis.com/auth/gmail.modify" in accounts[0]["scopes"]
 
 
 def test_disconnect_and_logout(client):
@@ -316,3 +316,48 @@ def test_classify_provider_failure_uses_safe_error(client, monkeypatch):
     assert response.status_code == 502
     assert response.json()["error"]["code"] == "AI_PROVIDER_FAILED"
     assert "secret-key" not in response.text
+
+
+def _http_error(status):
+    import httplib2
+    from googleapiclient.errors import HttpError
+
+    return HttpError(httplib2.Response({"status": status}), b'{"error": {"message": "provider detail"}}')
+
+
+def test_mark_read_route_updates_gmail(client, monkeypatch):
+    from backend.app.routers import emails
+
+    authenticate(client)
+    calls = []
+    monkeypatch.setattr(emails.gmail_service, "mark_read", lambda _tokens, message_id: calls.append(message_id) or {"id": message_id, "unread": False})
+    response = client.post("/api/v1/emails/gmail-1/read")
+    assert response.status_code == 200
+    assert response.json() == {"id": "gmail-1", "unread": False}
+    assert calls == ["gmail-1"]
+
+
+def test_mark_read_route_requires_a_session(client):
+    assert client.post("/api/v1/emails/gmail-1/read").status_code == 401
+
+
+def test_mark_read_without_modify_scope_asks_user_to_reconnect(client, monkeypatch):
+    from backend.app.routers import emails
+
+    authenticate(client)
+    monkeypatch.setattr(emails.gmail_service, "mark_read", lambda *_args: (_ for _ in ()).throw(_http_error(403)))
+    response = client.post("/api/v1/emails/gmail-1/read")
+    assert response.status_code == 403
+    error = response.json()["error"]
+    assert error["code"] == "INSUFFICIENT_PERMISSIONS" and error["retryable"] is False
+    assert "Reconnect" in error["message"] and "provider detail" not in response.text
+
+
+def test_mark_read_provider_failure_uses_safe_error(client, monkeypatch):
+    from backend.app.routers import emails
+
+    authenticate(client)
+    monkeypatch.setattr(emails.gmail_service, "mark_read", lambda *_args: (_ for _ in ()).throw(_http_error(500)))
+    response = client.post("/api/v1/emails/gmail-1/read")
+    assert response.status_code == 502
+    assert response.json()["error"]["code"] == "EMAIL_PROVIDER_FAILED" and "provider detail" not in response.text

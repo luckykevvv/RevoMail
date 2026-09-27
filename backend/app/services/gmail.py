@@ -3,8 +3,9 @@ Gmail service — wraps the Google Gmail API.
 
 Responsibilities:
 - Build an authenticated Gmail API client from the session tokens.
-- List messages (with basic metadata) for the inbox.
+- List messages (with basic metadata, including unread/starred state) for the inbox.
 - Fetch and parse a single message body (plain-text and HTML).
+- Mark a message as read in Gmail.
 - Sanitise HTML bodies so scripts / tracking pixels cannot execute.
 """
 
@@ -196,6 +197,20 @@ def get_message(tokens: dict, message_id: str) -> dict:
         "body_html": _sanitise_html(html) if html else None,
         "body_html_clean": _sanitise_html(html) if html else None,
     }
+
+
+def mark_read(tokens: dict, message_id: str) -> dict:
+    """Remove Gmail's UNREAD label from a message so it shows as read in Gmail as well.
+
+    Requires the gmail.modify scope. Removing an absent label is a no-op, so this is idempotent.
+    """
+    gmail = _build_gmail(tokens)
+    detail = gmail.users().messages().modify(
+        userId="me",
+        id=message_id,
+        body={"removeLabelIds": ["UNREAD"]},
+    ).execute()
+    return {"id": detail.get("id", message_id), "unread": "UNREAD" in detail.get("labelIds", [])}
 
 
 def _category(label_ids: list[str]) -> str:

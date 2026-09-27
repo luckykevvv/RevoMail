@@ -47,6 +47,12 @@ The implemented Gmail compatibility route is `GET /api/v1/emails?max_results=20&
 }
 ```
 
+## Read state
+
+Each message in `GET /api/v1/emails` and `GET /api/v1/emails/{id}` carries `unread` (true when Gmail still has the `UNREAD` label on it).
+
+`POST /api/v1/emails/{id}/read` removes the `UNREAD` label in Gmail and returns `{ "id": "...", "unread": false }`. It is idempotent, needs an authenticated session with a connected mailbox, and requires the `gmail.modify` scope. Accounts connected before that scope was requested receive `403 INSUFFICIENT_PERMISSIONS` (not retryable) until the user reconnects the Google account in Settings. Other provider failures return `502 EMAIL_PROVIDER_FAILED`. The frontend marks the row read immediately, then restores it to unread if this call fails, so RevoMail never shows a state that Gmail does not have.
+
 ## AI operations
 
 The implemented endpoints are `POST /api/v1/ai/summarise`, `POST /api/v1/ai/extract`, `POST /api/v1/ai/draft-reply`, and `POST /api/v1/ai/classify`. The first three accept a mailbox `message_id`; reply drafting also accepts `professional`, `concise`, or `friendly` tone. Output remains a draft for human review.

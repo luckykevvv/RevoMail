@@ -17,3 +17,7 @@ export function applyClassifications(messages, classifications) {
     return { ...message, priority: label.priority, priorityReason: String(label.reason || "") };
   });
 }
+
+export function setMessageUnread(messages, id, unread) {
+  return messages.map((message) => (String(message.id) === String(id) ? { ...message, unread: Boolean(unread) } : message));
+}
