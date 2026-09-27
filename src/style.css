@@ -16,6 +16,7 @@
   --blue-light: #e8f1ff;
   --green: #11845b;
   --amber: #dc7b13;
+  --red: #d13b3b;
   --shadow-sm: 0 2px 12px rgba(33, 55, 94, 0.06);
   --shadow-lg: 0 28px 80px rgba(25, 50, 94, 0.16);
 }
@@ -361,4 +362,24 @@ input.input-shell { padding: 0; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+
+/* AI priority classification */
+.priority-filter { max-width: 1180px; margin: 14px auto 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.priority-chip { min-height: 32px; padding: 0 12px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 12px; cursor: pointer; }
+.priority-chip span { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--surface-soft); font-size: 11px; }
+.priority-chip:hover { color: var(--ink); }
+.priority-chip.active { color: var(--ink); font-weight: 600; border-color: var(--blue); background: var(--blue-light); }
+.priority-chip.priority-high.active { border-color: var(--red); background: rgba(209, 59, 59, .12); }
+.priority-chip.priority-medium.active { border-color: var(--amber); background: rgba(220, 123, 19, .14); }
+.priority-chip.priority-low.active { border-color: var(--line-strong); background: var(--surface-soft); }
+.priority-badge { flex: none; align-self: center; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-style: normal; font-weight: 700; line-height: 1.5; }
+.priority-badge.priority-high { color: var(--red); background: rgba(209, 59, 59, .12); }
+.priority-badge.priority-medium { color: var(--amber); background: rgba(220, 123, 19, .14); }
+.priority-badge.priority-low { color: var(--muted); background: var(--surface-soft); border: 1px solid var(--line); }
+.priority-status { color: var(--muted); font-weight: 400; }
+.priority-status.warn { color: var(--amber); }
+@media (max-width: 720px) {
+  .priority-filter { margin-top: 12px; padding: 0 12px; }
+  .email-content .priority-badge { justify-self: start; }
 }

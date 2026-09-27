@@ -9,7 +9,7 @@ RevoMail is an AI-assisted email client for email summarization, reply drafting,
 The frontend currently demonstrates:
 
 - Google and Microsoft sign-in states backed by the authentication API.
-- Searchable and filterable inbox.
+- Searchable and filterable inbox with AI priority labels (High, Medium, Low) and priority filters.
 - Email reading with an AI summary and extracted information.
 - Editable and regeneratable AI reply drafts.
 - Voice-command simulation.

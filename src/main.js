@@ -1,5 +1,5 @@
 import "./style.css";
-import { applyMailboxPage } from "./mailbox-state.js";
+import { applyClassifications, applyMailboxPage } from "./mailbox-state.js";
 import {
   AlignLeft,
   Archive,
@@ -114,6 +114,9 @@ const state = {
   view: "inbox",
   selectedEmail: null,
   category: "All",
+  priority: "All",
+  classifying: false,
+  classifyNote: "",
   search: "",
   theme: "light",
   voiceOpen: false,
@@ -236,8 +239,9 @@ function inboxView() {
   const firstName = escapeHtml(state.user?.displayName?.split(/\s+/)[0] || "there");
   const visible = emails.filter((email) => {
     const matchesCategory = state.category === "All" || email.category === state.category;
+    const matchesPriority = state.priority === "All" || email.priority === state.priority;
     const haystack = `${email.sender} ${email.subject} ${email.preview}`.toLowerCase();
-    return matchesCategory && haystack.includes(state.search.toLowerCase());
+    return matchesCategory && matchesPriority && haystack.includes(state.search.toLowerCase());
   });
   return shell(`<header class="page-header">
     <div><span class="eyebrow">Good morning, ${firstName}</span><h1>Inbox</h1><p>AI has highlighted what needs your attention.</p></div>
@@ -250,8 +254,9 @@ function inboxView() {
   <div class="category-tabs" role="tablist">
     ${["All", "Primary", "Social", "Promotions"].map((category) => `<button class="tab ${state.category === category ? "active" : ""}" data-category="${category}">${category}</button>`).join("")}
   </div>
+  ${priorityFilter()}
   <section class="mail-panel">
-    <div class="mail-panel-heading"><span>${state.emailsLoading && !emails.length ? "Loading conversations" : `${visible.length} conversations`}</span><button class="text-button" data-summarize-all ${emails.length && !state.emailsLoading ? "" : "disabled"}>${icon("sparkles")} Summarise inbox</button></div>
+    <div class="mail-panel-heading"><span>${state.emailsLoading && !emails.length ? "Loading conversations" : `${visible.length} conversations`}${priorityStatus()}</span><button class="text-button" data-summarize-all ${emails.length && !state.emailsLoading ? "" : "disabled"}>${icon("sparkles")} Summarise inbox</button></div>
     <div class="email-list">
       ${state.emailsLoading && !emails.length ? '<div class="empty-state"><h3>Loading your inbox…</h3><p>Fetching messages from your connected account.</p></div>' : visible.length ? visible.map(emailRow).join("") : emails.length ? `<div class="empty-state">${icon("search-x")}<h3>No emails found</h3><p>Try a different search or category.</p></div>` : `<div class="empty-state">${icon("inbox")}<h3>Your inbox is empty</h3><p>No messages were returned by your connected account.</p></div>`}
     </div>
@@ -260,13 +265,41 @@ function inboxView() {
   <button class="floating-mic" data-voice title="Voice input">${icon("mic")}</button>`);
 }
 
+const priorityMeta = {
+  high: { label: "High", hint: "Needs an urgent reply or action" },
+  medium: { label: "Medium", hint: "Updates and routine communication" },
+  low: { label: "Low", hint: "Advertisements and low-relevance mail" }
+};
+
+function priorityBadge(email) {
+  const meta = priorityMeta[email.priority];
+  if (!meta) return "";
+  const reason = email.priorityReason ? `${meta.hint}. AI reason: ${email.priorityReason}` : meta.hint;
+  return `<em class="priority-badge priority-${email.priority}" title="${escapeHtml(reason)}">${meta.label}</em>`;
+}
+
+function priorityFilter() {
+  const counts = { High: 0, Medium: 0, Low: 0 };
+  emails.forEach((email) => { if (priorityMeta[email.priority]) counts[priorityMeta[email.priority].label] += 1; });
+  const chips = [["All", "All priorities", ""], ...Object.entries(priorityMeta).map(([key, meta]) => [key, `${meta.label} priority`, meta.hint])];
+  return `<div class="priority-filter" role="group" aria-label="Filter by AI priority">
+    ${chips.map(([key, label, hint]) => `<button class="priority-chip ${key !== "All" ? `priority-${key}` : ""} ${state.priority === key ? "active" : ""}" data-priority="${key}" aria-pressed="${state.priority === key}" ${hint ? `title="${escapeHtml(hint)}"` : ""}>${label}${key !== "All" ? `<span>${counts[priorityMeta[key].label]}</span>` : ""}</button>`).join("")}
+  </div>`;
+}
+
+function priorityStatus() {
+  if (state.classifying) return ' · <span class="priority-status" role="status">Classifying priority…</span>';
+  if (state.classifyNote) return ` · <span class="priority-status warn" role="status">${escapeHtml(state.classifyNote)}</span>`;
+  return "";
+}
+
 function emailRow(email) {
   return `<article class="email-row ${email.unread ? "unread" : ""}" data-email="${email.id}" tabindex="0">
     <button class="check-button" aria-label="Select email"><span></span></button>
     <button class="star-button ${email.starred ? "starred" : ""}" data-star="${email.id}" aria-label="Star email">${icon("star")}</button>
     <span class="avatar avatar-sm avatar-soft">${email.sender.split(/\s|@/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</span>
     <div class="email-sender">${email.sender}</div>
-    <div class="email-content"><strong>${email.subject}</strong><span>${email.preview}</span></div>
+    <div class="email-content">${priorityBadge(email)}<strong>${email.subject}</strong><span>${email.preview}</span></div>
     <time>${escapeHtml(email.time || email.date || "")}</time>
     ${email.unread ? '<span class="unread-dot" aria-label="Unread"></span>' : ""}
   </article>`;
@@ -483,6 +516,7 @@ function bindEvents() {
   }));
   document.querySelectorAll("[data-star]").forEach((button) => button.addEventListener("click", (event) => { event.stopPropagation(); const email = emails.find((item) => String(item.id) === button.dataset.star); if (email) email.starred = !email.starred; render(); }));
   document.querySelectorAll("[data-category]").forEach((button) => button.addEventListener("click", () => { state.category = button.dataset.category; render(); }));
+  document.querySelectorAll("[data-priority]").forEach((button) => button.addEventListener("click", () => { state.priority = button.dataset.priority; render(); }));
   document.querySelector("#search")?.addEventListener("input", (event) => { state.search = event.target.value; render(); document.querySelector("#search")?.focus(); });
   document.querySelector("[data-compose]")?.addEventListener("click", () => { state.view = "compose"; render(); });
   document.querySelector("[data-reply]")?.addEventListener("click", () => { state.view = "reply"; if (!state.aiDraft) void aiDraftReply(state.aiDraftTone); else render(); });
@@ -497,7 +531,9 @@ function bindEvents() {
   document.querySelector("[data-ai-extract]")?.addEventListener("click", () => void aiExtract());
   document.querySelectorAll("[data-add-event]").forEach((button) => button.addEventListener("click", () => { state.eventAdded = true; showToast("Project Meeting added to calendar"); }));
   document.querySelector("[data-add-assignment]")?.addEventListener("click", () => { state.assignmentAdded = true; showToast("Assignment deadline added to calendar"); });
-  document.querySelectorAll("[data-theme]").forEach((button) => button.addEventListener("click", () => { state.theme = button.dataset.theme; render(); }));
+  // Scope to buttons: render() also sets data-theme on <body>, which never gets replaced, so an unscoped
+  // selector attached a new click->render() listener to <body> on every render (exponential slowdown).
+  document.querySelectorAll("button[data-theme]").forEach((button) => button.addEventListener("click", () => { state.theme = button.dataset.theme; render(); }));
   document.querySelectorAll(".toggle").forEach((button) => button.addEventListener("click", () => { button.classList.toggle("active"); button.setAttribute("aria-checked", button.classList.contains("active")); }));
   document.querySelectorAll("[data-disconnect]").forEach((button) => button.addEventListener("click", async () => {
     const confirmed = window.confirm(`Disconnect ${button.dataset.providerName} account ${button.dataset.accountEmail}? RevoMail will revoke provider access where supported and permanently remove its stored credentials and active connection.`);
@@ -531,6 +567,7 @@ async function fetchEmails(pageToken = null) {
     emails = mailbox.messages;
     state.nextPageToken = mailbox.nextPageToken;
     if (!pageToken) state.selectedEmail = mailbox.selectedMessage;
+    void classifyEmails(payload?.messages || []);
   } catch (error) {
     showToast(error.message);
   } finally {
@@ -539,8 +576,36 @@ async function fetchEmails(pageToken = null) {
   }
 }
 
+// Ask the AI to label a page of inbox messages. Runs after the list has rendered so a slow or
+// failed classification never blocks reading mail; unlabelled messages simply show no badge.
+async function classifyEmails(messages) {
+  const pending = messages.filter((message) => !message.priority);
+  if (!pending.length) return;
+  state.classifying = true;
+  state.classifyNote = "";
+  render();
+  try {
+    const payload = await api("/api/v1/ai/classify", {
+      method: "POST",
+      body: JSON.stringify({ messages: pending.map((message) => ({ id: String(message.id), sender: message.sender || "", subject: message.subject || "", preview: message.preview || "" })) })
+    });
+    emails = applyClassifications(emails, payload?.classifications);
+    const labelled = Object.keys(payload?.classifications || {}).length;
+    if (payload?.warning === "unreadable_reply") state.classifyNote = "Priority labels unavailable (the AI reply could not be read)";
+    else if (payload?.warning === "no_valid_labels") state.classifyNote = "Priority labels unavailable (the AI returned no usable labels)";
+    else if (labelled < pending.length) state.classifyNote = `${pending.length - labelled} email${pending.length - labelled === 1 ? "" : "s"} could not be classified`;
+  } catch (error) {
+    state.classifyNote = "Priority labels unavailable";
+  } finally {
+    state.classifying = false;
+    render();
+  }
+}
+
 function resetMailbox() {
   emails = [];
+  state.priority = "All";
+  state.classifyNote = "";
   state.selectedEmail = null;
   state.nextPageToken = null;
   state.aiSummary = null;

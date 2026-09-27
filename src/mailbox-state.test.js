@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyMailboxPage } from "./mailbox-state.js";
+import { applyClassifications, applyMailboxPage } from "./mailbox-state.js";
 
 
 describe("mailbox state", () => {
@@ -33,5 +33,32 @@ describe("mailbox state", () => {
 
     expect(result.messages.map((message) => message.id)).toEqual(["first", "second"]);
     expect(result.selectedMessage.id).toBe("first");
+  });
+});
+
+describe("priority classification", () => {
+  const inbox = [{ id: "a", subject: "Deadline" }, { id: "b", subject: "Sale" }, { id: "c", subject: "Hello" }];
+
+  it("attaches priority and reason to matching messages without mutating the originals", () => {
+    const result = applyClassifications(inbox, {
+      a: { priority: "high", reason: "Deadline tomorrow" },
+      b: { priority: "low", reason: "Promotional" }
+    });
+
+    expect(result[0]).toMatchObject({ id: "a", priority: "high", priorityReason: "Deadline tomorrow" });
+    expect(result[1]).toMatchObject({ id: "b", priority: "low" });
+    expect(result[2]).toEqual({ id: "c", subject: "Hello" });
+    expect(inbox[0].priority).toBeUndefined();
+  });
+
+  it("ignores unknown priorities and missing or malformed payloads", () => {
+    expect(applyClassifications(inbox, { a: { priority: "urgent!!" } })[0].priority).toBeUndefined();
+    expect(applyClassifications(inbox, null)).toEqual(inbox);
+    expect(applyClassifications(inbox, undefined)).toEqual(inbox);
+  });
+
+  it("matches numeric provider ids against string keys", () => {
+    const result = applyClassifications([{ id: 7 }], { 7: { priority: "medium", reason: "" } });
+    expect(result[0].priority).toBe("medium");
   });
 });

@@ -245,7 +245,7 @@ Acceptance criteria:
 - [ ] Add release signing, macOS notarization, and a reviewed automatic-update channel.
 
 - [ ] Add Apple account sign-in.
-- [ ] Improve priority detection and automatic email classification.
+- [ ] Improve priority detection and automatic email classification. (AI High/Medium/Low labels and inbox filters are implemented and tested with simulated provider responses; real OpenAI accuracy is unverified and no user correction or feedback loop exists yet.)
 - [ ] Add user-defined reply templates and signatures.
 - [ ] Add attachment summaries and attachment risk warnings.
 - [ ] Add multilingual summaries, replies, and voice commands.

@@ -272,3 +272,47 @@ def test_lost_encryption_key_returns_401_not_500(tmp_path, monkeypatch):
         response = lost_client.get("/api/v1/emails")
         assert response.status_code == 401
         assert response.json()["error"]["code"] == "NOT_AUTHENTICATED"
+
+
+def test_classify_route_returns_labels_for_authenticated_user(client, monkeypatch):
+    from backend.app.routers import ai
+
+    authenticate(client)
+    captured = {}
+
+    def fake_classify(items):
+        captured["items"] = items
+        return {"classifications": {"m1": {"priority": "high", "reason": "Reply needed"}}, "warning": None}
+
+    monkeypatch.setattr(ai.ai_service, "classify", fake_classify)
+    response = client.post(
+        "/api/v1/ai/classify",
+        json={"messages": [{"id": "m1", "sender": "a@example.com", "subject": "Urgent", "preview": "Please reply"}]},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"classifications": {"m1": {"priority": "high", "reason": "Reply needed"}}, "warning": None}
+    assert captured["items"][0]["subject"] == "Urgent"
+
+
+def test_classify_route_requires_session_and_valid_batch(client, monkeypatch):
+    from backend.app.routers import ai
+
+    body = {"messages": [{"id": "m1", "subject": "Hi"}]}
+    assert client.post("/api/v1/ai/classify", json=body).status_code == 401
+
+    authenticate(client)
+    monkeypatch.setattr(ai.ai_service, "classify", lambda _items: {"classifications": {}, "warning": None})
+    assert client.post("/api/v1/ai/classify", json={"messages": []}).status_code == 422
+    too_many = {"messages": [{"id": str(i)} for i in range(ai.ai_service.MAX_CLASSIFY_BATCH + 1)]}
+    assert client.post("/api/v1/ai/classify", json=too_many).status_code == 422
+
+
+def test_classify_provider_failure_uses_safe_error(client, monkeypatch):
+    from backend.app.routers import ai
+
+    authenticate(client)
+    monkeypatch.setattr(ai.ai_service, "classify", lambda _items: (_ for _ in ()).throw(RuntimeError("secret-key detail")))
+    response = client.post("/api/v1/ai/classify", json={"messages": [{"id": "m1"}]})
+    assert response.status_code == 502
+    assert response.json()["error"]["code"] == "AI_PROVIDER_FAILED"
+    assert "secret-key" not in response.text

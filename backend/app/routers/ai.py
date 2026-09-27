@@ -2,7 +2,7 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.app.dependencies import require_tokens
 from backend.app.errors import ProviderError
@@ -74,6 +74,29 @@ async def extract(payload: EmailRef, tokens: dict = Depends(require_tokens)):
     try:
         email = await run_in_threadpool(_get_email_text, tokens, payload.message_id)
         return await run_in_threadpool(ai_service.extract, email["subject"], email["sender"], email["body"])
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _provider_failure(exc) from exc
+
+
+class ClassifyItem(BaseModel):
+    id: str = Field(min_length=1, max_length=128)
+    sender: str = Field(default="", max_length=500)
+    subject: str = Field(default="", max_length=1000)
+    preview: str = Field(default="", max_length=2000)
+
+
+class ClassifyRequest(BaseModel):
+    messages: list[ClassifyItem] = Field(min_length=1, max_length=ai_service.MAX_CLASSIFY_BATCH)
+
+
+@router.post("/classify")
+async def classify(payload: ClassifyRequest, tokens: dict = Depends(require_tokens)):
+    """Label inbox messages high / medium / low priority from list metadata (no bodies fetched)."""
+    try:
+        results = await run_in_threadpool(ai_service.classify, [item.model_dump() for item in payload.messages])
+        return results
     except HTTPException:
         raise
     except Exception as exc:
