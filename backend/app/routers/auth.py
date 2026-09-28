@@ -1,3 +1,6 @@
+import logging
+import os
+
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from google_auth_oauthlib.flow import Flow
@@ -5,8 +8,18 @@ from googleapiclient.discovery import build
 
 from backend.app.config import settings
 
+# Google's token response almost never echoes back the exact scope string we requested: it
+# normalises "https://www.googleapis.com/auth/userinfo.email" to "email" (and similarly for
+# "profile"), and with include_granted_scopes=true it also re-lists any scope the user granted
+# in an earlier authorization (e.g. a leftover gmail.readonly from before this app requested
+# gmail.modify). oauthlib treats that mismatch as fatal by default and raises, which the bare
+# except below turns into a generic AUTHORIZATION_FAILED with no clue why. This relaxes that
+# check to match Google's documented, expected behaviour. Must be set before Flow.fetch_token()
+# runs; module import time is early enough since fetch_token only happens inside a request.
+os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 
 router = APIRouter()
+logger = logging.getLogger("revomail.auth")
 
 SCOPES = [
     "openid",
@@ -88,7 +101,9 @@ async def google_callback(request: Request, code: str = "", state: str = "", err
         flow.fetch_token(code=code)
         credentials = flow.credentials
         profile = build("oauth2", "v2", credentials=credentials).userinfo().get().execute()
-    except Exception:
+    except Exception as exc:
+        # Never log the exception message: it can carry the authorization code or token contents.
+        logger.warning("Google OAuth callback failed (error_type=%s)", type(exc).__name__)
         return RedirectResponse("/?authError=AUTHORIZATION_FAILED")
 
     user = {

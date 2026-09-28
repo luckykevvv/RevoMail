@@ -361,3 +361,22 @@ def test_mark_read_provider_failure_uses_safe_error(client, monkeypatch):
     response = client.post("/api/v1/emails/gmail-1/read")
     assert response.status_code == 502
     assert response.json()["error"]["code"] == "EMAIL_PROVIDER_FAILED" and "provider detail" not in response.text
+
+
+def test_google_callback_logs_error_type_not_message_on_failure(client, monkeypatch, caplog):
+    from backend.app.routers import auth as auth_module
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("token=super-secret-should-never-be-logged")
+
+    monkeypatch.setattr(auth_module, "_build_flow", FakeFlow)
+    client.get("/api/v1/auth/google/start", follow_redirects=False)
+    monkeypatch.setattr(FakeFlow, "fetch_token", _boom)
+    with caplog.at_level("WARNING", logger="revomail.auth"):
+        response = client.get(
+            "/api/v1/auth/google/callback?code=valid-code&state=test-state",
+            follow_redirects=False,
+        )
+    assert response.headers["location"] == "/?authError=AUTHORIZATION_FAILED"
+    assert "RuntimeError" in caplog.text
+    assert "super-secret-should-never-be-logged" not in caplog.text

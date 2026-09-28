@@ -1,43 +1,31 @@
-# Show read/unread state and mark emails read in Gmail
+# Fix real Google sign-in always failing with AUTHORIZATION_FAILED
 
-Date: 2026-09-27
+Date: 2026-09-28
 
 ## Task Scope
 
-Every retrieved email shows whether it is read or unread, and opening an email in RevoMail marks it read in Gmail as well.
+Joel connected a real Google account (not a test fixture) and every sign-in attempt redirected to `/?authError=AUTHORIZATION_FAILED`, even though Google's own logs showed the authorization succeeding and redirecting back to RevoMail with a valid `code`.
+
+## Root Cause
+
+`backend/app/routers/auth.py` exchanges the authorization code with `google_auth_oauthlib.flow.Flow.fetch_token()`, which compares the scope string Google returns against the scope string RevoMail requested. Google's response is essentially never an exact match: it normalises `https://www.googleapis.com/auth/userinfo.email` and `.../userinfo.profile` to the short forms `email` and `profile`, and because the authorization request sets `include_granted_scopes=true`, Google also re-lists any scope already granted from an earlier authorization (here, a leftover `gmail.readonly` from before this app requested `gmail.modify`). The underlying `oauthlib` library treats any such scope mismatch as fatal by default and raises an exception. The callback's `except Exception:` caught that and always redirected to the generic `AUTHORIZATION_FAILED`, with nothing logged, so the real cause was invisible. This is unrelated to the priority classifier, the slowdown fix, or the read/unread feature; it is a pre-existing gap in real Google sign-in, which the project's own README already flagged as unverified.
 
 ## Changes
 
-- `backend/app/routers/auth.py`: the Google scope `gmail.readonly` is replaced by `gmail.modify`, which includes read access plus label changes (no permanent delete). `backend/python_tests/test_api.py` was updated for the new scope.
-- `backend/app/services/gmail.py`: new `mark_read()` removes the `UNREAD` label through `users.messages.modify`. Unread state on retrieval was already returned from Gmail's labels (`unread` in the list and single-message responses).
-- `backend/app/routers/emails.py`: new `POST /api/v1/emails/{message_id}/read`. A 403 from Google returns `403 INSUFFICIENT_PERMISSIONS` with a "reconnect in Settings" message; any other provider failure returns the standard `502 EMAIL_PROVIDER_FAILED`. No provider text is exposed.
-- `src/mailbox-state.js`: new `setMessageUnread()`.
-- `src/main.js`: opening an unread email now marks the row read in the inbox list (previously only a copy of the message was changed, so the row became unread again on return, and the sidebar count did not drop) and calls the new endpoint in the background. If the call fails the row is restored to unread; the permission explanation is shown once per session. Rows carry a `read`/`unread` class and screen-reader text. Already-read emails and re-opens make no call.
-- `src/style.css`: unread rows keep the tinted background, blue dot and bold text; read rows are muted with normal weight; added `.sr-only`.
-- Tests: `backend/python_tests/test_gmail_read_state.py` (new, 2), 4 route tests appended to `backend/python_tests/test_api.py`, and 2 tests appended to `src/mailbox-state.test.js`.
-- Docs: `docs/api/v1-contracts.md` (new "Read state" section) and `README.md` (scope note).
-- Archived the previous task record as `change/change-17.md`.
-
-## Reason
-
-Gmail read state could not be written with the read-only scope, so a new permission was required. The optimistic update-then-revert keeps the interface responsive while never leaving the UI in a state Gmail did not accept.
+- `backend/app/routers/auth.py`: set `OAUTHLIB_RELAX_TOKEN_SCOPE=1` (via `os.environ.setdefault`, so it never overrides a value the environment already sets) at module import time, before any token exchange can run, with a comment explaining why. This is the documented way to tell `oauthlib` that Google's returned scope differing from the requested one is expected, not an error. Added a `revomail.auth` logger; the callback's exception handler now logs `type(exc).__name__` before redirecting, so a genuine future failure leaves a trace without ever logging the exception message (which can contain the authorization code or token).
+- Tests: `backend/python_tests/test_oauth_scope_normalisation.py` (new) exercises the real `oauthlib` scope-comparison function directly, with the exact scope strings from Joel's failing request: one test proves Google's own (correct) response is rejected without the fix, another proves it is accepted with it, and a third checks the fix is active by default. One test appended to `backend/python_tests/test_api.py` checks the callback logs the exception type and never the message.
 
 ## Key Commands
 
 - `pip install` of the pinned `backend/requirements.txt` packages in a throwaway directory outside the repository, then `python -m pytest`.
-- `node --test` against a minimal stand-in for the `vitest` API, and `node --check` on `src/main.js`.
-- Vite dev server with a mock `/api/v1` and headless Chromium (Playwright), driving the real `src/` files.
 
 ## Validation
 
-- Python: all 43 tests passed (Python 3.10 in the throwaway environment; the project targets 3.11+). Gmail is faked in every test.
-- JavaScript: the 8 tests in `src/mailbox-state.test.js` passed under the vitest stand-in, not real vitest.
-- Browser (mock API): opening an unread email turned its row to read and dropped the sidebar count from 14 to 13 with exactly one POST; re-opening it and opening an already-read email made no call; a 403 response restored the row to unread and showed the permission message once, and a second 403 restored the row silently. A screenshot showed the unread row bold with a tinted background and dot, and read rows muted.
+- All 47 backend tests passed (Python 3.10 in the throwaway environment; the project targets 3.11+), including the three new scope tests run against the real `oauthlib` package (not a fake), using the exact scope strings from the failing request in Joel's message.
+- Not run against Joel's real Google account in this session (no network to Google from here). The fix addresses a documented, general behaviour of Google's OAuth response, not something specific to one account, and the new tests reproduce the exact failure mode with the real library.
 
 ## Known Issues and Remaining Work
 
-- Not verified against real Gmail. The existing connected account holds a read-only token, so the first open will fail with the reconnect message until the user chooses Reconnect in Settings and approves the new permission. If Google's consent screen is in testing mode and rejects the scope, add `gmail.modify` to the OAuth consent screen's scopes in Google Cloud Console.
-- Not run: `npm test`, `npm run build`, or the Electron window. Rebuild with `npm run build` and restart the server.
-- The sidebar unread number counts the loaded page of messages, not the total unread count in Gmail.
-- Marking a message unread again, and starring, are not synced to Gmail (starring is still local only).
-- Unescaped sender/subject/preview HTML in the inbox rows (recorded in the previous task) is still unfixed.
+- Joel should retry Google sign-in after rebuilding and restarting (`npm run build`, `npm run start`). If it still fails, the backend log now has a line under `revomail.auth` naming the exception type, which narrows down any different remaining cause.
+- Not run: `npm test`, `npm run build`.
+- Unescaped sender/subject/preview HTML in inbox rows (recorded in an earlier task) is still unfixed.
