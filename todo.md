@@ -39,7 +39,7 @@ Target users:
 
 - [ ] Verify the merged OAuth, Gmail, and OpenAI implementations with provider test credentials; speech recognition and calendar APIs are not implemented.
 - [ ] Verify Google OAuth authorization, refresh, and revocation end to end with a provider test application and test account.
-- [ ] Microsoft OAuth and Microsoft Graph support is pending and is not part of the currently supported MVP provider path.
+- [ ] Plan multi-user and additional-provider support as a dedicated future module with child issues; neither is part of the current Gmail-only MVP.
 - [x] Add Python SQLite persistence, encrypted credentials, durable user sessions, ordered migrations, and a recoverable job foundation. The retained Node implementation remains regression-only migration reference.
 - [ ] Add automated tests, security review, monitoring, and production deployment.
 - [ ] Verify signed and installed desktop releases on macOS and Linux; code signing, notarization, and auto-update remain future work.
@@ -49,7 +49,6 @@ Target users:
 ### FR-01 Authentication and Authorization
 
 - [ ] Integrate Google OAuth 2.0.
-- [ ] Integrate Microsoft OAuth 2.0. **Status: pending; retain the adapter but defer provider setup and release validation.**
 - [ ] Request only the email and calendar permissions required by enabled features.
 - [ ] Support secure sign-out, token refresh, token expiration, and authorization revocation.
 - [ ] Show understandable error messages and a retry option when authentication fails.
@@ -205,9 +204,8 @@ Acceptance criteria:
 
 ### P0: External Services
 
-- [ ] Implement a Google Gmail API adapter.
-- [ ] Implement a Microsoft Graph Mail adapter. **Status: pending.**
-- [ ] Implement Google Calendar and Microsoft Calendar adapters.
+- [x] Implement a Google Gmail API adapter. **Automated fixtures pass; dedicated provider-account validation remains pending.**
+- [ ] Implement a Google Calendar adapter.
 - [ ] Define a replaceable LLM provider interface.
 - [ ] Define a Speech-to-Text provider interface.
 - [ ] Add timeouts, retries, and rate-limit handling for every external service.
@@ -215,14 +213,14 @@ Acceptance criteria:
 ### P0: Frontend and Backend Integration
 
 - [ ] Replace the simulated login with a real authenticated session.
-- [ ] Replace the static emails in `src/main.js` with API data.
+- [x] Replace the static emails in `src/main.js` with synchronized Gmail data from `/api/v1/emails`.
 - [ ] Convert summaries, drafts, extraction, and voice actions to asynchronous API states.
 - [ ] Add loading skeletons, empty states, error states, and cancellation.
 - [ ] Add session-expiration and reauthorization flows.
 
 ### P0: Testing
 
-- [ ] Add unit tests for date parsing, permission checks, HTML sanitization, and idempotency.
+- [x] Add unit tests for permission checks, MIME/HTML sanitization, synchronization, and send idempotency. **Additional date edge cases remain follow-up coverage.**
 - [ ] Add integration tests for OAuth callbacks, email reading, AI calls, and calendar creation.
 - [ ] Add end-to-end tests for sign-in, reading, summaries, replies, sending, and calendar creation.
 - [ ] Add keyboard workflow tests and basic automated accessibility checks.
@@ -254,6 +252,7 @@ Acceptance criteria:
 
 ### P2: Future Exploration
 
+- [ ] Implement multi-user isolation under future Module [#62](https://github.com/luckykevvv/RevoMail/issues/62) and child issue [#63](https://github.com/luckykevvv/RevoMail/issues/63); additional mailbox providers remain separately deferred.
 - [ ] Explore offline drafts and poor-network support.
 - [ ] Explore shared team rules and administrator policies.
 - [ ] Add more granular cost, model, and privacy controls.
@@ -269,7 +268,7 @@ Acceptance criteria:
 
 ## 7. MVP Definition of Done
 
-- [ ] At least one provider, Google or Microsoft, has a working end-to-end mailbox integration.
+- [ ] Gmail has a working end-to-end mailbox integration.
 - [ ] Users can sign in securely, read email, generate a summary, and inspect the original content.
 - [ ] Users can generate, edit, confirm, and send an AI-assisted reply.
 - [ ] Users can review extracted information and create a calendar event.

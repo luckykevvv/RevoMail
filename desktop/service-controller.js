@@ -34,7 +34,7 @@ export class ServiceController extends EventEmitter {
     this.child = null;
     this.intentionalStop = false;
     this.backendOutput = "";
-    this.state = { phase: "stopped", pid: null, url: null, startedAt: null, error: null };
+    this.state = { phase: "stopped", pid: null, url: null, startedAt: null, error: null, managed: false };
   }
 
   snapshot() {
@@ -46,7 +46,15 @@ export class ServiceController extends EventEmitter {
     const url = `http://${publicHost(settings.host)}:${settings.port}`;
     this.intentionalStop = false;
     this.backendOutput = "";
-    this.#setState({ phase: "starting", pid: null, url, startedAt: null, error: null });
+    this.#setState({ phase: "starting", pid: null, url, startedAt: null, error: null, managed: false });
+
+    // Development workflows may already have RevoMail running through `npm run start`.
+    // Adopt only a verified RevoMail health endpoint instead of spawning a second
+    // process that immediately loses the port race and is reported as a failure.
+    if (await this.#isHealthyRevoMail(url)) {
+      this.#setState({ phase: "running", pid: null, startedAt: null, error: null, managed: false });
+      return this.snapshot();
+    }
 
     const child = this.spawn(this.command, this.commandArgs, {
       cwd: this.projectRoot,
@@ -62,7 +70,7 @@ export class ServiceController extends EventEmitter {
       windowsHide: true
     });
     this.child = child;
-    this.#setState({ pid: child.pid ?? null });
+    this.#setState({ pid: child.pid ?? null, managed: true });
 
     const captureOutput = (chunk) => {
       this.backendOutput = `${this.backendOutput}${String(chunk)}`.slice(-4_000);
@@ -73,7 +81,7 @@ export class ServiceController extends EventEmitter {
     child.once("error", (error) => {
       if (this.child !== child) return;
       this.child = null;
-      this.#setState({ phase: "failed", pid: null, startedAt: null, error: safeMessage(error) });
+      this.#setState({ phase: "failed", pid: null, startedAt: null, error: safeMessage(error), managed: false });
     });
     child.once("exit", (code, signal) => {
       if (this.child !== child) return;
@@ -84,14 +92,15 @@ export class ServiceController extends EventEmitter {
         phase: stoppedNormally ? "stopped" : "failed",
         pid: null,
         startedAt: null,
-        error: stoppedNormally ? null : `The service exited before it became healthy (${signal || `code ${code ?? "unknown"}`}).${detail ? ` Backend error: ${detail}` : " Check local file access, then try again."}`
+        error: stoppedNormally ? null : `The service exited before it became healthy (${signal || `code ${code ?? "unknown"}`}).${detail ? ` Backend error: ${detail}` : " Check local file access, then try again."}`,
+        managed: false
       });
     });
 
     try {
       await this.#waitForHealth(url, child);
       if (this.child !== child) return this.snapshot();
-      this.#setState({ phase: "running", startedAt: new Date().toISOString(), error: null });
+      this.#setState({ phase: "running", startedAt: new Date().toISOString(), error: null, managed: true });
     } catch (error) {
       if (this.child !== child && this.state.phase === "failed") return this.snapshot();
       if (this.child === child) {
@@ -99,7 +108,7 @@ export class ServiceController extends EventEmitter {
         child.kill("SIGTERM");
         this.child = null;
       }
-      this.#setState({ phase: "failed", pid: null, startedAt: null, error: safeMessage(error) });
+      this.#setState({ phase: "failed", pid: null, startedAt: null, error: safeMessage(error), managed: false });
     }
     return this.snapshot();
   }
@@ -107,7 +116,7 @@ export class ServiceController extends EventEmitter {
   async stop() {
     const child = this.child;
     if (!child) {
-      this.#setState({ phase: "stopped", pid: null, startedAt: null, error: null });
+      this.#setState({ phase: "stopped", pid: null, startedAt: null, error: null, managed: false });
       return this.snapshot();
     }
     this.intentionalStop = true;
@@ -128,7 +137,7 @@ export class ServiceController extends EventEmitter {
       child.kill("SIGTERM");
     });
     if (this.child === child) this.child = null;
-    this.#setState({ phase: "stopped", pid: null, startedAt: null, error: null });
+    this.#setState({ phase: "stopped", pid: null, startedAt: null, error: null, managed: false });
     return this.snapshot();
   }
 
@@ -141,15 +150,21 @@ export class ServiceController extends EventEmitter {
     const deadline = Date.now() + this.startTimeoutMs;
     while (Date.now() < deadline) {
       if (this.child !== child) throw new Error("The service exited before it became healthy.");
-      try {
-        const response = await this.fetch(`${url}/api/v1/health`, { signal: AbortSignal.timeout(1_500) });
-        if (response.ok) return;
-      } catch {
-        // The service may still be applying local migrations or opening its database.
-      }
+      if (await this.#isHealthyRevoMail(url)) return;
       await new Promise((resolve) => setTimeout(resolve, HEALTH_INTERVAL_MS));
     }
     throw new Error("RevoMail did not become healthy within 15 seconds. Check local file access and application configuration.");
+  }
+
+  async #isHealthyRevoMail(url) {
+    try {
+      const response = await this.fetch(`${url}/api/v1/health`, { signal: AbortSignal.timeout(1_500) });
+      if (!response.ok) return false;
+      const body = await response.json();
+      return body?.status === "ok" && body?.service === "revomail-api";
+    } catch {
+      return false;
+    }
   }
 
   #setState(patch) {

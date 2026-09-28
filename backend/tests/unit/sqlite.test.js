@@ -20,9 +20,10 @@ describe("SQLite database initialization", () => {
     const secondPath = initializeSqliteDatabase(options);
     expect(secondPath).toBe(firstPath);
     const database = openSqliteDatabase(databaseUrl);
-    expect(database.prepare("PRAGMA user_version").get().user_version).toBe(2);
+    expect(database.prepare("PRAGMA user_version").get().user_version).toBe(3);
     expect(database.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'User'`).get().name).toBe("User");
     expect(database.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'Job'`).get().name).toBe("Job");
+    expect(database.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'MailboxMessage'`).get().name).toBe("MailboxMessage");
     database.close();
   });
 

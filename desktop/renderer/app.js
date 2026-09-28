@@ -11,7 +11,7 @@ function setBusy(busy) {
   const active = ["starting", "running", "stopping"].includes(service?.phase);
   elements["start-button"].disabled = busy || active;
   elements["open-button"].disabled = busy || service?.phase !== "running";
-  elements["restart-button"].disabled = busy || service?.phase === "stopped";
+  elements["restart-button"].disabled = busy || !service?.pid;
   elements["stop-button"].disabled = busy || !service?.pid;
 }
 
@@ -31,13 +31,13 @@ function render(nextSnapshot) {
   elements["status-pulse"].dataset.phase = service.phase;
   elements["status-track-fill"].dataset.phase = service.phase;
   elements["service-url"].textContent = service.url || "Not running";
-  elements["service-pid"].textContent = service.pid ? `PID ${service.pid}` : "—";
+  elements["service-pid"].textContent = service.pid ? `PID ${service.pid}` : service.phase === "running" && service.managed === false ? "Existing service" : "—";
   elements["service-error"].hidden = !service.error;
   elements["service-error"].textContent = service.error || "";
   elements["start-button"].textContent = service.phase === "failed" ? "Try again" : service.phase === "running" ? "Service running" : "Start service";
   elements["start-button"].disabled = active;
   elements["open-button"].disabled = service.phase !== "running";
-  elements["restart-button"].disabled = busy || service.phase === "stopped";
+  elements["restart-button"].disabled = busy || !service.pid;
   elements["stop-button"].disabled = busy || !service.pid;
   elements["platform-chip"].textContent = snapshot.platform === "win32" ? "Windows" : snapshot.platform === "darwin" ? "macOS" : "Linux";
   elements["app-version"].textContent = `RevoMail Desktop v${snapshot.version}`;

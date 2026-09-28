@@ -33,41 +33,41 @@ function fixture() {
   };
   const provider = {
     configured: true,
-    scopes: ["openid", "Mail.ReadWrite"],
+    scopes: ["openid", "https://www.googleapis.com/auth/gmail.modify"],
     authorizationUrl: vi.fn(({ state, challenge }) => `https://provider.example/authorize?state=${state}&challenge=${challenge}`),
-    exchangeCode: vi.fn(async () => ({ access_token: "access-secret", refresh_token: "refresh-secret", expires_in: 3600, scope: "openid Mail.ReadWrite" })),
+    exchangeCode: vi.fn(async () => ({ access_token: "access-secret", refresh_token: "refresh-secret", expires_in: 3600, scope: "openid https://www.googleapis.com/auth/gmail.modify" })),
     profile: vi.fn(async () => ({ id: "provider-user", email: "user@example.com", displayName: "Test User", avatarUrl: null })),
     refresh: vi.fn(async () => ({ access_token: "new-secret", expires_in: 3600 })),
     revoke: vi.fn(async () => ({ supported: true }))
   };
   const now = () => new Date("2026-08-03T00:00:00Z");
-  const service = new AuthService({ repository, providers: { microsoft: provider }, cipher: createCipher(crypto.randomBytes(32).toString("base64")), now });
+  const service = new AuthService({ repository, providers: { google: provider }, cipher: createCipher(crypto.randomBytes(32).toString("base64")), now });
   return { service, repository, provider, accounts };
 }
 
 describe("AuthService", () => {
   it("completes PKCE authorization once and creates a server-side session", async () => {
     const { service, repository } = fixture();
-    const authorizationUrl = new URL(await service.beginAuthorization("microsoft", "/?view=settings"));
+    const authorizationUrl = new URL(await service.beginAuthorization("google", "/?view=settings"));
     const state = authorizationUrl.searchParams.get("state");
-    const result = await service.completeAuthorization("microsoft", { code: "valid-code", state });
+    const result = await service.completeAuthorization("google", { code: "valid-code", state });
     expect(result.returnTo).toBe("/?view=settings");
     expect(result.sessionToken).toBeTruthy();
     expect(repository.createSession.mock.calls[0][0].tokenHash).toBe(digest(result.sessionToken));
-    await expect(service.completeAuthorization("microsoft", { code: "replay", state })).rejects.toMatchObject({ code: "INVALID_OAUTH_STATE" });
+    await expect(service.completeAuthorization("google", { code: "replay", state })).rejects.toMatchObject({ code: "INVALID_OAUTH_STATE" });
   });
 
   it("rejects callbacks missing required provider permissions", async () => {
     const { service, provider } = fixture();
     provider.exchangeCode.mockResolvedValue({ access_token: "secret", scope: "openid" });
-    const state = new URL(await service.beginAuthorization("microsoft")).searchParams.get("state");
-    await expect(service.completeAuthorization("microsoft", { code: "code", state })).rejects.toMatchObject({ code: "INSUFFICIENT_PERMISSIONS" });
+    const state = new URL(await service.beginAuthorization("google")).searchParams.get("state");
+    await expect(service.completeAuthorization("google", { code: "code", state })).rejects.toMatchObject({ code: "INSUFFICIENT_PERMISSIONS" });
   });
 
   it("requires a valid CSRF token and invalidates logout sessions", async () => {
     const { service } = fixture();
-    const state = new URL(await service.beginAuthorization("microsoft")).searchParams.get("state");
-    const { sessionToken } = await service.completeAuthorization("microsoft", { code: "code", state });
+    const state = new URL(await service.beginAuthorization("google")).searchParams.get("state");
+    const { sessionToken } = await service.completeAuthorization("google", { code: "code", state });
     const session = await service.authenticate(sessionToken);
     const csrf = await service.issueCsrf(session);
     expect(() => service.assertCsrf(session, csrf)).not.toThrow();
@@ -78,7 +78,7 @@ describe("AuthService", () => {
 
   it("disconnects only an account owned by the session user", async () => {
     const { service, accounts, provider } = fixture();
-    accounts.push({ id: "account-1", userId: "user-1", provider: "microsoft", credential: { accessTokenEncrypted: service.cipher.encrypt("token") } });
+    accounts.push({ id: "account-1", userId: "user-1", provider: "google", credential: { accessTokenEncrypted: service.cipher.encrypt("token") } });
     await service.disconnect("user-1", "account-1");
     expect(provider.revoke).toHaveBeenCalledWith("token");
     expect(accounts).toHaveLength(0);
@@ -88,7 +88,7 @@ describe("AuthService", () => {
   it("prevents concurrent provider refresh calls with a database lease", async () => {
     const { service, accounts, provider, repository } = fixture();
     accounts.push({
-      id: "account-1", userId: "user-1", provider: "microsoft",
+      id: "account-1", userId: "user-1", provider: "google",
       credential: { accessTokenEncrypted: service.cipher.encrypt("expired"), refreshTokenEncrypted: service.cipher.encrypt("refresh"), expiresAt: new Date("2026-08-02T00:00:00Z"), version: 0 }
     });
     repository.acquireRefreshLease.mockResolvedValue(false);

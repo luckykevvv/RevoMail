@@ -77,6 +77,47 @@
         "idempotencyKey": { "type": "string", "minLength": 1 }
       },
       "additionalProperties": false
+    },
+    "mailboxMessage": {
+      "type": "object",
+      "required": ["id", "sender", "recipients", "subject", "receivedAt", "preview", "unread", "starred", "attachments"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "threadId": { "type": ["string", "null"] },
+        "sender": { "type": "string" },
+        "recipients": { "type": "array", "items": { "type": "string" } },
+        "subject": { "type": "string" },
+        "receivedAt": { "type": "string", "format": "date-time" },
+        "preview": { "type": "string" },
+        "unread": { "type": "boolean" },
+        "starred": { "type": "boolean" },
+        "category": { "type": ["string", "null"] },
+        "attachments": { "type": "array", "items": { "type": "object" } },
+        "bodyText": { "type": "string" },
+        "bodyHtmlSafe": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "messageStateMutation": {
+      "type": "object",
+      "properties": { "unread": { "type": "boolean" }, "starred": { "type": "boolean" } },
+      "minProperties": 1,
+      "additionalProperties": false
+    },
+    "sendEmail": {
+      "type": "object",
+      "required": ["to", "subject", "bodyText", "confirmed", "idempotencyKey"],
+      "properties": {
+        "to": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "type": "string" } },
+        "cc": { "type": "array", "maxItems": 50, "items": { "type": "string" } },
+        "bcc": { "type": "array", "maxItems": 50, "items": { "type": "string" } },
+        "subject": { "type": "string", "minLength": 1, "maxLength": 998 },
+        "bodyText": { "type": "string", "minLength": 1, "maxLength": 500000 },
+        "inReplyToMessageId": { "type": ["string", "null"] },
+        "confirmed": { "const": true },
+        "idempotencyKey": { "type": "string", "minLength": 16, "maxLength": 200 }
+      },
+      "additionalProperties": false
     }
   }
 }

@@ -25,11 +25,11 @@ Checks the FastAPI service. Returns `200` with status, service, and timestamp fi
 
 Returns `200` with provider availability and authentication state. An authenticated response contains user display fields and the value expected by the retained account UI.
 
-### `GET /api/v1/auth/:provider/start?returnTo=/`
+### `GET /api/v1/auth/google/start?returnTo=/`
 
-Google is implemented; Microsoft returns a pending-provider error. The endpoint records a single-use OAuth state and local `returnTo` path for ten minutes before redirecting. The server-side transaction also preserves validation when a loopback callback changes between `127.0.0.1` and `localhost` and the browser cannot send the original host cookie.
+The endpoint records a single-use OAuth state and local `returnTo` path for ten minutes before redirecting to Google. The server-side transaction also preserves validation when a loopback callback changes between `127.0.0.1` and `localhost` and the browser cannot send the original host cookie.
 
-### `GET /api/v1/auth/:provider/callback`
+### `GET /api/v1/auth/google/callback`
 
 Atomically consumes and validates state, exchanges the code, loads the Google profile, stores the encrypted credential and hashed application session in SQLite, and redirects to a clean frontend URL. Expired or replayed states and provider failures redirect with a safe `authError` code.
 
@@ -53,8 +53,7 @@ Requires authentication and removes the Google credential and account from the c
 
 ## Gmail and AI
 
-- `GET /api/v1/emails` lists Gmail inbox metadata and accepts `max_results` and `page_token`.
-- `GET /api/v1/emails/:messageId` returns message metadata, text, and cleaned HTML.
+- `/api/v1/emails` is the sole Gmail mailbox namespace. It provides synchronized pagination, Gmail search, safe message reading, unread/starred mutation, synchronization status, and confirmed idempotent sending.
 - `POST /api/v1/ai/summarise` returns a summary and bullet points for a message.
 - `POST /api/v1/ai/extract` returns explicit tasks and events.
 - `POST /api/v1/ai/draft-reply` returns a human-reviewable reply draft and accepts a tone.

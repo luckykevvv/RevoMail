@@ -53,8 +53,8 @@ describe("SQLite authentication repository", () => {
   it("grants a refresh lease to only one concurrent claimant", async () => {
     const saved = await repository.saveAuthorizedAccount({
       profile: { id: "lease-account", email: "lease@example.test", displayName: "Lease User", avatarUrl: null },
-      provider: "microsoft",
-      scopes: ["openid", "Mail.ReadWrite"],
+      provider: "google",
+      scopes: ["openid", "https://www.googleapis.com/auth/gmail.modify"],
       credential: { accessTokenEncrypted: "encrypted-access", refreshTokenEncrypted: "encrypted-refresh", tokenType: "Bearer", expiresAt: new Date(0) }
     });
     const connection = await repository.getOwnedConnection(saved.connection.id, saved.user.id);
