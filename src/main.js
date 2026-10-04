@@ -1,5 +1,5 @@
 import "./style.css";
-import { applyClassifications, applyMailboxPage, calendarPayload, eventDraftFromExtraction, outgoingProblem, replySubject, setMessageUnread } from "./mailbox-state.js";
+import { applyClassifications, applyMailboxPage, calendarPayload, eventDraftFromExtraction, formatFullMailTime, formatMailTime, outgoingProblem, parseMailDate, replySubject, setMessageUnread } from "./mailbox-state.js";
 import {
   AlignLeft,
   Archive,
@@ -160,7 +160,31 @@ function userTimeZone() {
 }
 
 function initialsOf(text) {
-  return escapeHtml(String(text || "").split(/\s|@/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase());
+  // "Ann Lee <ann@example.com>" -> "AL"; a bare address uses its own letters.
+  const raw = String(text || "");
+  const name = raw.replace(/<[^>]*>/g, " ").replace(/["']/g, "").trim();
+  const source = name || raw.replace(/[<>"']/g, "");
+  return escapeHtml(source.split(/[\s@.]+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase());
+}
+
+// A message's own timestamp, preferring Gmail's internal date over the sender-controlled Date header.
+function mailStamp(email) {
+  return email.internal_date ?? email.date ?? email.time ?? "";
+}
+
+function mailTimeShort(email) {
+  return formatMailTime(mailStamp(email)) || String(email.time || email.date || "");
+}
+
+function mailTimeFull(email) {
+  return formatFullMailTime(mailStamp(email)) || String(email.time || email.date || "");
+}
+
+function mailTimeTag(email, format) {
+  const date = parseMailDate(mailStamp(email));
+  const dateTime = date ? ` datetime="${date.toISOString()}"` : "";
+  const title = date ? ` title="${escapeHtml(mailTimeFull(email))}"` : "";
+  return `<time${dateTime}${title}>${escapeHtml(format(email))}</time>`;
 }
 
 function newIdempotencyKey() {
@@ -325,7 +349,7 @@ function emailRow(email, { sent = false } = {}) {
     <span class="avatar avatar-sm avatar-soft">${initialsOf(person)}</span>
     <div class="email-sender"><span class="sr-only">${sent ? "Sent to " : email.unread ? "Unread. " : "Read. "}</span>${sent ? "To: " : ""}${escapeHtml(person)}</div>
     <div class="email-content">${sent ? "" : priorityBadge(email)}<strong>${escapeHtml(email.subject)}</strong><span>${escapeHtml(email.preview)}</span></div>
-    <time>${escapeHtml(email.time || email.date || "")}</time>
+    ${mailTimeTag(email, mailTimeShort)}
     ${email.unread ? '<span class="unread-dot" role="img" aria-label="Unread"></span>' : ""}
   </article>`;
 }
@@ -343,7 +367,7 @@ function readingView() {
   </header>
   <div class="reading-grid">
     <article class="message-card">
-      <div class="message-from"><span class="avatar">${initialsOf(email.sender)}</span><div><strong>${escapeHtml(email.sender)}</strong><small>${escapeHtml(email.to || email.address || "")}</small></div><time>${escapeHtml(email.time || email.date || "")}</time><button class="star-button">${icon("star")}</button></div>
+      <div class="message-from"><span class="avatar">${initialsOf(email.sender)}</span><div><strong>${escapeHtml(email.sender)}</strong><small>${escapeHtml(email.to || email.address || "")}</small></div>${mailTimeTag(email, mailTimeFull)}<button class="star-button">${icon("star")}</button></div>
       <div class="message-body">${messageBody}</div>
       <div class="message-actions"><button class="secondary-button" data-reply ${email._loading ? "disabled" : ""}>${icon("reply")} Reply</button><button class="secondary-button">${icon("reply-all")} Reply all</button><button class="secondary-button">${icon("forward")} Forward</button></div>
     </article>

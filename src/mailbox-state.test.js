@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyClassifications, applyMailboxPage, calendarPayload, eventDraftFromExtraction, outgoingProblem, replySubject, setMessageUnread } from "./mailbox-state.js";
+import { applyClassifications, applyMailboxPage, calendarPayload, eventDraftFromExtraction, formatFullMailTime, formatMailTime, outgoingProblem, parseMailDate, replySubject, setMessageUnread } from "./mailbox-state.js";
 
 
 describe("mailbox state", () => {
@@ -129,5 +129,57 @@ describe("calendar helpers", () => {
     expect(calendarPayload({ ...ok, startTime: "" }, "UTC").error).toMatch(/start time/);
     expect(calendarPayload({ ...ok, endTime: "09:00" }, "UTC").error).toMatch(/after the start/);
     expect(calendarPayload({ ...ok, endTime: "10:00" }, "UTC").error).toMatch(/after the start/);
+  });
+});
+
+describe("mail dates", () => {
+  const melbourne = { timeZone: "Australia/Melbourne", locale: "en-AU" };
+  const flat = (text) => text.replace(/\s/g, " ").toLowerCase();
+  // 2026-10-04 05:00 UTC is 4:00 pm in Melbourne (daylight saving began that morning).
+  const now = new Date("2026-10-04T06:00:00Z");
+
+  it("accepts Gmail's internal date (number or digit string) and Date headers", () => {
+    expect(parseMailDate(1790528400000).toISOString()).toBe("2026-09-27T17:00:00.000Z");
+    expect(parseMailDate("1790528400000").toISOString()).toBe("2026-09-27T17:00:00.000Z");
+    expect(parseMailDate("Mon, 28 Sep 2026 00:11:12 +1000").toISOString()).toBe("2026-09-27T14:11:12.000Z");
+    expect(parseMailDate("")).toBe(null);
+    expect(parseMailDate(undefined)).toBe(null);
+    expect(parseMailDate("not a date")).toBe(null);
+  });
+
+  it("shows the local time for messages from today", () => {
+    expect(flat(formatMailTime(Date.parse("2026-10-04T05:00:00Z"), { ...melbourne, now }))).toBe("4:00 pm");
+  });
+
+  it("shows day and month for earlier this year, and the year for older mail", () => {
+    const earlier = flat(formatMailTime("Mon, 28 Sep 2026 00:11:12 +1000", { ...melbourne, now }));
+    expect(earlier).toContain("28");
+    expect(earlier).not.toContain("2026");
+    expect(flat(formatMailTime("Tue, 12 Aug 2025 09:00:00 +0000", { ...melbourne, now }))).toContain("2025");
+  });
+
+  it("converts to the viewer's own time zone, including the calendar day", () => {
+    const stamp = "Mon, 28 Sep 2026 00:11:12 +1000";
+    expect(flat(formatFullMailTime(stamp, melbourne))).toContain("28");
+    expect(flat(formatFullMailTime(stamp, melbourne))).toContain("12:11 am");
+    const newYork = flat(formatFullMailTime(stamp, { timeZone: "America/New_York", locale: "en-US" }));
+    expect(newYork).toContain("27");
+    expect(newYork).toContain("10:11 am");
+  });
+
+  it("decides what counts as today in the viewer's time zone", () => {
+    const stamp = Date.parse("2026-10-04T13:30:00Z");
+    const later = new Date("2026-10-05T01:00:00Z");
+    // In UTC the message is from yesterday; in Kiritimati (UTC+14) it arrived this morning.
+    const utc = flat(formatMailTime(stamp, { timeZone: "UTC", locale: "en-GB", now: later }));
+    expect(utc).toContain("4");
+    expect(utc).toContain("oct");
+    expect(utc).not.toContain(":");
+    expect(flat(formatMailTime(stamp, { timeZone: "Pacific/Kiritimati", locale: "en-GB", now: later }))).toBe("3:30");
+  });
+
+  it("returns an empty string when the date cannot be read", () => {
+    expect(formatMailTime("garbage", melbourne)).toBe("");
+    expect(formatFullMailTime(null, melbourne)).toBe("");
   });
 });

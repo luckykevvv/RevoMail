@@ -1,26 +1,33 @@
-# Tell apart the two causes of a Google 403 when adding a calendar event (or sending mail)
+# Show each email's real date and time in the viewer's local time zone
 
 Date: 2026-10-04
 
 ## Task Scope
 
-After the time zone fix, Joel's Add-event dialog showed "RevoMail needs permission to use Google Calendar. Reconnect your Google account in Settings." Google answered the calendar request with HTTP 403.
+Joel asked for the date and time shown on emails to be correct for each email.
 
 ## Root Cause
 
-A 403 from Google has more than one cause and RevoMail reported all of them with the same message. The two likely ones here: (1) the signed-in Google session was not granted the Calendar permission (for example it was connected before Calendar was requested, or the Calendar box was left unticked on Google's consent screen; RevoMail accepts a token with fewer scopes than requested), or (2) the Google Calendar API is not switched on in RevoMail's Google Cloud project, which is a separate setting from the OAuth scopes. Which one applies to Joel could not be determined from here: the project's local database in the folder is an old copy for a different account.
+The inbox rows and message view printed the sender's raw `Date` header (for example `Mon, 28 Sep 2026 00:11:12 +1000`) as text. That header is written by the sender, is in the sender's time zone, can be missing or malformed, and was not converted to the viewer's time. In the list it also wrapped onto two lines.
 
 ## Changes
 
-- `backend/app/once.py`: reads Google's machine-readable error reason (never its message text). `accessNotConfigured` / `SERVICE_DISABLED` now returns `403 GOOGLE_API_NOT_ENABLED` naming the API and the Cloud console page to enable it; other 403s keep `INSUFFICIENT_PERMISSIONS`. The reason codes and status are logged as a warning (`revomail.once`), without message text or content. Applies to both calendar creation and email sending.
-- `backend/app/routers/calendar.py`, `backend/app/routers/emails.py`: API name and enable link added; the reconnect message now says to tick the Calendar / send-email permission on Google's consent screen.
-- `backend/python_tests/test_calendar.py`, `backend/python_tests/test_send_email.py`: tests for both reasons, unreadable error bodies, and that Google's own message (which contains the project number) is not passed through.
+- `backend/app/services/gmail.py`: list and single-message responses now include `internal_date`, Gmail's own timestamp for the message (milliseconds since the epoch, UTC; `null` if absent). The `date` header field is still returned and still used for event extraction.
+- `src/mailbox-state.js`: `parseMailDate`, `formatMailTime` and `formatFullMailTime`. They accept Gmail's timestamp or a `Date` header and format in the viewer's local time zone: the time for today ("4:46 pm"), day and month for earlier this year ("28 Sept"), with the year for older mail ("12 Aug 2025"). The message view shows the full date and time ("Mon, 28 Sept 2026, 2:11 pm"), and each row's time has the full value as a hover tooltip and a machine-readable `datetime` attribute. An unreadable date shows its original text instead of nothing.
+- `src/main.js`: rows (Inbox and Sent) and the message view use these; while in that code I also fixed the sender avatar initials for `Name <address>` senders (it showed a stray "<" for names without a second word).
+- Tests: `backend/python_tests/test_gmail.py` (timestamp present, missing, garbage), and new date cases in `src/mailbox-state.test.js` (formats, time-zone conversion including the calendar day, fallbacks).
+
+## Key Commands
+
+- `python -m pytest` and `node --test src/mailbox-state.test.js` in the throwaway Linux copy outside the repository; Vite and headless Chromium against a mocked API with the browser set to Australia/Melbourne.
 
 ## Validation
 
-- 125 backend tests passed (Python 3.10 in the throwaway environment). Not run against real Google.
+- 126 backend tests and 22 JS tests passed (JS runs on a minimal Vitest stand-in, not the real runner).
+- In the headless browser: a message from an hour ago shows a clock time; one from last year shows day, month and year; a header-only date with a -0400 offset was converted correctly to Melbourne time; an unreadable date shows its raw text; the message view shows the full local date and time.
 
 ## Known Issues and Remaining Work
 
-- Joel must retry: the dialog will now say either that the Calendar API is not enabled (enable it in Google Cloud, wait a minute, try again) or that the Calendar permission is missing (disconnect and reconnect the Google account in Settings and tick every permission box). The backend terminal also logs `reasons=[...]` for the failed call.
-- Not run: `npm test`, `npm run build`. Restart the backend to pick up the change.
+- Gmail's own timestamp is when Gmail received (or, for sent mail, sent) the message, which can differ slightly from the time the sender's mail program wrote in the header; the full header is still returned by the API.
+- Time labels follow the browser's locale and time zone; there is no setting to choose another zone.
+- Not run: `npm test`, `npm run build`. Rebuild and restart the backend to pick up the changes.

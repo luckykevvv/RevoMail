@@ -77,3 +77,34 @@ export function calendarPayload(draft, timeZone) {
     }
   };
 }
+
+// Turns a message timestamp into a Date. Accepts Gmail's internal date (epoch milliseconds, as a number or digit
+// string) or an RFC 2822 Date header. Returns null when the value is missing or unreadable.
+export function parseMailDate(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const date = typeof value === "number" || /^\d{10,}$/.test(String(value)) ? new Date(Number(value)) : new Date(String(value));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function dayKey(date, timeZone) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+}
+
+// Short label for a message list, in the viewer's local time zone, like Gmail: the time for today, "28 Sep" for
+// earlier this year, "28 Sep 2025" for older mail. Returns "" when the value cannot be read.
+export function formatMailTime(value, { now = new Date(), timeZone, locale } = {}) {
+  const date = parseMailDate(value);
+  if (!date) return "";
+  if (dayKey(date, timeZone) === dayKey(now, timeZone)) {
+    return new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit", timeZone }).format(date);
+  }
+  const sameYear = dayKey(date, timeZone).slice(0, 4) === dayKey(now, timeZone).slice(0, 4);
+  return new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", ...(sameYear ? {} : { year: "numeric" }), timeZone }).format(date);
+}
+
+// Full date and time for the message view and tooltips, in the viewer's local time zone.
+export function formatFullMailTime(value, { timeZone, locale } = {}) {
+  const date = parseMailDate(value);
+  if (!date) return "";
+  return new Intl.DateTimeFormat(locale, { weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", timeZone }).format(date);
+}

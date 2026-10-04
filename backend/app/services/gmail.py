@@ -104,6 +104,18 @@ def _header(headers: list[dict], name: str) -> str:
     return ""
 
 
+def _internal_date(detail: dict) -> int | None:
+    """Gmail's own timestamp for the message (milliseconds since the epoch, UTC), or None.
+
+    Unlike the Date header, which the sender controls and which may be missing, malformed or in any time zone,
+    this is always a precise instant, so the UI can show it in the viewer's local time.
+    """
+    try:
+        return int(detail["internalDate"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def _sanitise_html(html: str) -> str:
     """Strip dangerous tags/attributes and block remote images."""
     # Remove <style> and <script> blocks entirely (tag + content).
@@ -173,6 +185,7 @@ def list_messages(
             "to": _header(headers, "To"),
             "subject": _header(headers, "Subject") or "(no subject)",
             "date": _header(headers, "Date"),
+            "internal_date": _internal_date(detail),
             "preview": snippet,
             "unread": "UNREAD" in label_ids,
             "starred": "STARRED" in label_ids,
@@ -204,6 +217,7 @@ def get_message(tokens: dict, message_id: str) -> dict:
         "to": _header(headers, "To"),
         "subject": _header(headers, "Subject") or "(no subject)",
         "date": _header(headers, "Date"),
+        "internal_date": _internal_date(detail),
         "unread": "UNREAD" in label_ids,
         "starred": "STARRED" in label_ids,
         "category": _category(label_ids),
