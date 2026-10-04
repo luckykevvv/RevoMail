@@ -84,6 +84,12 @@ Each message in `GET /api/v1/emails` and `GET /api/v1/emails/{id}` carries `unre
 
 The implemented endpoints are `POST /api/v1/ai/summarise`, `POST /api/v1/ai/extract`, `POST /api/v1/ai/draft-reply`, and `POST /api/v1/ai/classify`. The first three accept a mailbox `message_id`; reply drafting also accepts `professional`, `concise`, or `friendly` tone. Output remains a draft for human review.
 
+### Guided drafting
+
+`POST /api/v1/ai/draft-reply` also accepts optional `instructions` (what the user wants to say, up to 1000 characters) and `current_draft` (up to 20000 characters). With instructions the reply follows them; with `current_draft` as well, that draft is revised rather than rewritten. The original email is treated as untrusted content, so instructions inside it are not followed. The sign-off uses the signed-in user's display name instead of a placeholder.
+
+`POST /api/v1/ai/compose` writes a new email from `instructions` (required, 1-1000 characters), `tone`, and optional `subject` and `current_draft`. It returns `{ "subject", "draft" }`; an existing subject is kept unchanged. Both endpoints only return text for the user to review and edit; sending always goes through `POST /api/v1/emails/send` after explicit confirmation. Provider failures return `502 AI_PROVIDER_FAILED` with no provider detail.
+
 ### Priority classification
 
 `POST /api/v1/ai/classify` labels inbox messages from list metadata only (message bodies are not fetched). It requires an authenticated session with a connected mailbox.

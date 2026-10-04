@@ -138,6 +138,8 @@ const state = {
   aiDraft: "",
   aiDraftLoading: false,
   aiDraftTone: "professional",
+  aiInstructions: { reply: "", compose: "" },
+  aiComposeLoading: false,
   compose: { to: "", subject: "", body: "" },
   returnView: "inbox",
   sentLoaded: false,
@@ -352,6 +354,27 @@ function renderExtraction(extraction) {
   return items.length ? `<ul>${items.join("")}</ul>` : "<p>No explicit tasks or events were found.</p>";
 }
 
+// The "tell Revo AI what to write" box shared by the reply and compose screens. Typing is kept in state;
+// nothing is generated until the user presses the button, and nothing is ever sent from here.
+function aiPromptPanel(mode) {
+  const reply = mode === "reply";
+  const loading = reply ? state.aiDraftLoading : state.aiComposeLoading;
+  const hasDraft = Boolean((reply ? state.aiDraft : state.compose.body).trim());
+  const hasInstructions = Boolean(state.aiInstructions[mode].trim());
+  const label = loading ? "Writing…" : !hasDraft ? "Generate draft" : reply && !hasInstructions ? "Regenerate" : "Update draft";
+  const placeholder = reply ? "e.g. Say yes, but ask if we can move it to 11am" : "e.g. Ask Sam to send the Q3 report by Friday";
+  const hint = hasDraft ? "Your instructions are applied to the draft below. Choose a tone, then update." : "Describe what you want to say, choose a tone, then generate a draft you can edit.";
+  return `<section class="ai-prompt" aria-label="Revo AI writing assistant">
+    <label for="ai-instructions"><span>${icon("sparkles")} Tell Revo AI what to write</span></label>
+    <textarea id="ai-instructions" rows="2" maxlength="1000" placeholder="${placeholder}">${escapeHtml(state.aiInstructions[mode])}</textarea>
+    <div class="ai-prompt-row">
+      <div class="tone-row" role="group" aria-label="Tone"><span>Tone</span>${["professional", "concise", "friendly"].map((tone) => `<button class="tone-chip ${state.aiDraftTone === tone ? "active" : ""}" data-tone="${tone}" aria-pressed="${state.aiDraftTone === tone}">${tone[0].toUpperCase() + tone.slice(1)}</button>`).join("")}</div>
+      <button class="primary-button" data-ai-generate="${mode}" ${loading ? "disabled" : ""}>${icon("sparkles")} ${label}</button>
+    </div>
+    <small>${hint} Nothing is sent until you confirm.</small>
+  </section>`;
+}
+
 function replyView() {
   const email = state.selectedEmail;
   const recipients = Array.isArray(email.reply_to) ? email.reply_to : [];
@@ -364,9 +387,9 @@ function replyView() {
   <section class="composer-card">
     <div class="field-row"><label>To</label><div class="input-shell">${recipients.length ? `<span class="avatar avatar-xs">${initialsOf(recipients[0])}</span> ${escapeHtml(recipients.join(", "))}` : "No reply address found for this message"}</div></div>
     <div class="field-row"><label>Subject</label><div class="input-shell">${escapeHtml(replySubject(email.subject))}</div></div>
-    <div class="ai-draft-label"><span>${icon("sparkles")} AI generated reply</span><small>Edit as needed — nothing is sent until you confirm</small></div>
+    ${aiPromptPanel("reply")}
+    <div class="ai-draft-label"><span>${icon("sparkles")} Reply draft</span><small>Edit as needed</small></div>
     ${state.aiDraftLoading ? '<div class="reply-editor">Generating draft…</div>' : `<textarea id="reply-text" class="reply-editor" placeholder="Write your reply…">${escapeHtml(draft)}</textarea>`}
-    <div class="tone-row"><span>Quick tone</span>${["professional", "concise", "friendly"].map((tone) => `<button class="tone-chip ${state.aiDraftTone === tone ? "active" : ""}" data-tone="${tone}">${tone[0].toUpperCase() + tone.slice(1)}</button>`).join("")}</div>
     <div class="composer-footer"><div class="compose-tools"><button class="icon-button">${icon("paperclip")}</button><button class="icon-button">${icon("smile")}</button><button class="icon-button">${icon("image")}</button><button class="icon-button" data-voice>${icon("mic")}</button></div><div><button class="secondary-button" data-discard>Discard</button><button class="primary-button" data-send ${state.aiDraftLoading || !recipients.length ? "disabled" : ""}>${icon("send")} Review &amp; send</button></div></div>
   </section>`);
 }
@@ -426,8 +449,8 @@ function selectSetting(label, settingIcon, values) {
 }
 
 function composeView() {
-  return shell(`<header class="compact-header"><button class="back-button" data-nav="inbox">${icon("arrow-left")}</button><div><span class="eyebrow">New message</span><h1>Compose</h1></div><button class="text-button" data-ai-compose>${icon("sparkles")} Write with AI</button></header>
-  <section class="composer-card compose-new"><div class="field-row"><label>To</label><input id="compose-to" class="input-shell" placeholder="Recipient" value="${escapeHtml(state.compose.to)}" /></div><div class="field-row"><label>Subject</label><input id="compose-subject" class="input-shell" placeholder="Email subject" value="${escapeHtml(state.compose.subject)}" /></div><textarea id="compose-body" class="reply-editor" placeholder="Write a message, or ask Revo AI for a first draft…">${escapeHtml(state.compose.body)}</textarea><div class="composer-footer"><div class="compose-tools"><button class="icon-button">${icon("paperclip")}</button><button class="icon-button">${icon("smile")}</button><button class="icon-button" data-voice>${icon("mic")}</button></div><button class="primary-button" data-send>${icon("send")} Review &amp; send</button></div></section>`);
+  return shell(`<header class="compact-header"><button class="back-button" data-nav="inbox">${icon("arrow-left")}</button><div><span class="eyebrow">New message</span><h1>Compose</h1></div></header>
+  <section class="composer-card compose-new"><div class="field-row"><label>To</label><input id="compose-to" class="input-shell" placeholder="Recipient" value="${escapeHtml(state.compose.to)}" /></div><div class="field-row"><label>Subject</label><input id="compose-subject" class="input-shell" placeholder="Email subject" value="${escapeHtml(state.compose.subject)}" /></div>${aiPromptPanel("compose")}<textarea id="compose-body" class="reply-editor" ${state.aiComposeLoading ? "disabled" : ""} placeholder="${state.aiComposeLoading ? "Revo AI is writing…" : "Write a message, or describe it above and let Revo AI draft it…"}">${escapeHtml(state.compose.body)}</textarea><div class="composer-footer"><div class="compose-tools"><button class="icon-button">${icon("paperclip")}</button><button class="icon-button">${icon("smile")}</button><button class="icon-button" data-voice>${icon("mic")}</button></div><button class="primary-button" data-send ${state.aiComposeLoading ? "disabled" : ""}>${icon("send")} Review &amp; send</button></div></section>`);
 }
 
 function sentView() {
@@ -559,6 +582,7 @@ function bindEvents() {
     state.aiSummary = null;
     state.aiExtraction = null;
     state.aiDraft = "";
+    state.aiInstructions.reply = "";
     state.selectedEmail = { ...selected, _loading: !selected.body_plain && !selected.body_html };
     state.selectedEmail.unread = false;
     const wasUnread = selected.unread;
@@ -580,9 +604,16 @@ function bindEvents() {
   document.querySelectorAll("[data-priority]").forEach((button) => button.addEventListener("click", () => { state.priority = button.dataset.priority; render(); }));
   document.querySelector("#search")?.addEventListener("input", (event) => { state.search = event.target.value; render(); document.querySelector("#search")?.focus(); });
   document.querySelector("[data-compose]")?.addEventListener("click", () => { state.view = "compose"; render(); });
-  document.querySelector("[data-reply]")?.addEventListener("click", () => { state.view = "reply"; if (!state.aiDraft) void aiDraftReply(state.aiDraftTone); else render(); });
-  document.querySelector("[data-regenerate]")?.addEventListener("click", () => void aiDraftReply(state.aiDraftTone));
-  document.querySelectorAll("[data-tone]").forEach((button) => button.addEventListener("click", () => void aiDraftReply(button.dataset.tone)));
+  document.querySelector("[data-reply]")?.addEventListener("click", () => { state.view = "reply"; if (!state.aiDraft) void aiDraftReply(); else render(); });
+  document.querySelector("[data-regenerate]")?.addEventListener("click", () => void aiDraftReply({ fresh: true }));
+  // Choosing a tone only selects it; the draft changes when the user presses Generate/Update.
+  document.querySelectorAll("[data-tone]").forEach((button) => button.addEventListener("click", () => { state.aiDraftTone = button.dataset.tone; render(); }));
+  document.querySelector("#ai-instructions")?.addEventListener("input", (event) => { state.aiInstructions[state.view === "reply" ? "reply" : "compose"] = event.target.value; });
+  document.querySelector("#ai-instructions")?.addEventListener("keydown", (event) => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) document.querySelector("[data-ai-generate]")?.click(); });
+  document.querySelector("[data-ai-generate]")?.addEventListener("click", (event) => {
+    if (event.currentTarget.dataset.aiGenerate === "reply") void aiDraftReply();
+    else void aiCompose();
+  });
   document.querySelector("[data-discard]")?.addEventListener("click", () => { state.view = "reading"; render(); });
   // Keep what the user types in state so a re-render (toast, dialog, loading) never wipes it.
   document.querySelector("#reply-text")?.addEventListener("input", (event) => { state.aiDraft = event.target.value; });
@@ -594,7 +625,6 @@ function bindEvents() {
   document.querySelector("[data-confirm-send]")?.addEventListener("click", () => void submitSend());
   document.querySelectorAll("[data-sent-refresh]").forEach((button) => button.addEventListener("click", () => void fetchSent()));
   document.querySelector("[data-sent-more]")?.addEventListener("click", () => void fetchSent(state.sentNextPageToken));
-  document.querySelector("[data-ai-compose]")?.addEventListener("click", () => { state.compose.body = "Hi,\n\nI’m following up with a quick update on our project progress. The team has completed the initial planning and is now preparing the interactive prototype.\n\nBest regards,\nAnon User"; showToast("AI draft inserted — review before sending"); });
   document.querySelector("[data-summarize-all]")?.addEventListener("click", () => showToast(`${emails.length} emails ready to summarise`));
   document.querySelector("[data-load-more]")?.addEventListener("click", () => void fetchEmails(state.nextPageToken));
   document.querySelector("[data-ai-summarise]")?.addEventListener("click", () => void aiSummarise());
@@ -730,8 +760,8 @@ async function submitSend() {
   }
   state.sending = false;
   state.sendDraft = null;
-  if (draft.isReply) state.aiDraft = "";
-  else state.compose = { to: "", subject: "", body: "" };
+  if (draft.isReply) { state.aiDraft = ""; state.aiInstructions.reply = ""; }
+  else { state.compose = { to: "", subject: "", body: "" }; state.aiInstructions.compose = ""; }
   state.sentLoaded = false;
   state.view = "sent";
   showToast("Message sent");
@@ -774,6 +804,8 @@ function resetOutgoing() {
   state.sendError = "";
   state.sending = false;
   state.compose = { to: "", subject: "", body: "" };
+  state.aiInstructions = { reply: "", compose: "" };
+  state.aiComposeLoading = false;
 }
 
 function resetMailbox() {
@@ -815,18 +847,47 @@ async function aiExtract() {
   }
 }
 
-async function aiDraftReply(tone) {
+// Writes the reply draft. With instructions typed and a draft present, the draft is revised according to
+// them; `fresh` (the header Regenerate button) and an empty instructions box write a new draft instead.
+async function aiDraftReply({ fresh = false } = {}) {
   if (!state.selectedEmail) return;
-  state.aiDraftTone = tone;
+  const emailId = String(state.selectedEmail.id);
+  const instructions = state.aiInstructions.reply.trim();
+  const currentDraft = !fresh && instructions ? state.aiDraft : "";
   state.aiDraftLoading = true;
   render();
   try {
-    const payload = await api("/api/v1/ai/draft-reply", { method: "POST", body: JSON.stringify({ message_id: String(state.selectedEmail.id), tone }) });
-    state.aiDraft = payload.draft;
+    const payload = await api("/api/v1/ai/draft-reply", {
+      method: "POST",
+      body: JSON.stringify({ message_id: emailId, tone: state.aiDraftTone, instructions, current_draft: currentDraft })
+    });
+    // Ignore the result if the user opened a different email while this was running.
+    if (String(state.selectedEmail?.id) === emailId) state.aiDraft = payload.draft;
   } catch (error) {
     showToast(error.message);
   } finally {
     state.aiDraftLoading = false;
+    render();
+  }
+}
+
+// Writes (or revises) a new message from the instructions box. The subject is only filled in if still empty.
+async function aiCompose() {
+  const instructions = state.aiInstructions.compose.trim();
+  if (!instructions) { showToast("Tell Revo AI what to write first"); return; }
+  state.aiComposeLoading = true;
+  render();
+  try {
+    const result = await api("/api/v1/ai/compose", {
+      method: "POST",
+      body: JSON.stringify({ instructions, tone: state.aiDraftTone, subject: state.compose.subject.trim(), current_draft: state.compose.body })
+    });
+    if (result.draft) state.compose.body = result.draft;
+    if (!state.compose.subject.trim() && result.subject) state.compose.subject = result.subject;
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    state.aiComposeLoading = false;
     render();
   }
 }

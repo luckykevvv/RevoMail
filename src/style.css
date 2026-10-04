@@ -394,3 +394,12 @@ input.input-shell { padding: 0; }
 .send-body { max-height: 240px; overflow: auto; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-soft); color: var(--ink); font-size: 14px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 .send-error { margin: 12px 0 0; color: #b42318; font-size: 13px; }
 .send-modal .modal-footer { margin-top: 18px; justify-content: flex-end; }
+
+.ai-prompt { margin-top: 18px; padding: 14px; display: grid; gap: 10px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-soft); }
+.ai-prompt > label span { display: flex; align-items: center; gap: 7px; color: var(--blue); font-weight: 600; font-size: 13px; }
+.ai-prompt textarea { width: 100%; min-height: 58px; resize: vertical; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; outline: 0; color: var(--ink); background: var(--surface); font: inherit; font-size: 14px; line-height: 1.5; }
+.ai-prompt textarea:focus { border-color: var(--blue); }
+.ai-prompt-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.ai-prompt .tone-row { padding: 0; border: 0; }
+.ai-prompt small { color: var(--muted); font-size: 12px; }
+.compose-new .ai-prompt + .reply-editor { margin-top: 16px; }
