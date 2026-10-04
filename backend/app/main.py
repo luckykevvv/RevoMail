@@ -14,7 +14,7 @@ from backend.app.errors import AppError, error_payload
 from backend.app.idempotency import IdempotencyRepository
 from backend.app.jobs import JobRepository
 from backend.app.persistence import build_persistence
-from backend.app.routers import accounts, ai, auth, emails, health
+from backend.app.routers import accounts, ai, auth, calendar, emails, health
 
 
 logger = logging.getLogger("revomail.api")
@@ -93,6 +93,7 @@ def create_app(app_settings: Settings = settings) -> FastAPI:
     app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
     app.include_router(accounts.router, prefix="/api/v1/accounts", tags=["accounts"])
     app.include_router(emails.router, prefix="/api/v1/emails", tags=["emails"])
+    app.include_router(calendar.router, prefix="/api/v1/calendar", tags=["calendar"])
     app.include_router(ai.router, prefix="/api/v1/ai", tags=["ai"])
 
     dist_path = PROJECT_ROOT / "dist"

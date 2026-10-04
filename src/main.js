@@ -1,5 +1,5 @@
 import "./style.css";
-import { applyClassifications, applyMailboxPage, outgoingProblem, replySubject, setMessageUnread } from "./mailbox-state.js";
+import { applyClassifications, applyMailboxPage, calendarPayload, eventDraftFromExtraction, outgoingProblem, replySubject, setMessageUnread } from "./mailbox-state.js";
 import {
   AlignLeft,
   Archive,
@@ -148,8 +148,16 @@ const state = {
   sentNextPageToken: null,
   sendDraft: null,
   sendError: "",
-  sending: false
+  sending: false,
+  calendarDraft: null,
+  calendarError: "",
+  calendarSaving: false,
+  addedEvents: {}
 };
+
+function userTimeZone() {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch { return "UTC"; }
+}
 
 function initialsOf(text) {
   return escapeHtml(String(text || "").split(/\s|@/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase());
@@ -347,8 +355,22 @@ function readingView() {
   <button class="floating-mic" data-voice title="Voice input">${icon("mic")}</button>`);
 }
 
+// Identifies an extracted event by content rather than list position, so re-running the extraction (which
+// may order events differently) still shows the right "Added" state.
+function eventKey(messageId, event) {
+  return `${messageId}:${event.title || ""}|${event.start || event.date || ""}|${event.time || ""}`;
+}
+
 function renderExtraction(extraction) {
-  const events = (extraction.events || []).map((event) => `<li><strong>${escapeHtml(event.title || "Event")}</strong> ${escapeHtml([event.date, event.time, event.location].filter(Boolean).join(" · "))}</li>`);
+  const messageId = String(state.selectedEmail?.id || "");
+  const events = (extraction.events || []).map((event, index) => {
+    const details = escapeHtml([event.date, event.time, event.location].filter(Boolean).join(" · "));
+    const addedLink = state.addedEvents[eventKey(messageId, event)];
+    const action = addedLink
+      ? `<span class="event-added">${icon("check")} Added to Google Calendar${/^https:\/\//.test(addedLink) ? ` · <a href="${escapeHtml(addedLink)}" target="_blank" rel="noopener noreferrer">Open</a>` : ""}</span>`
+      : `<button class="secondary-button event-add" data-calendar-add="${index}">${icon("calendar-plus")} Add to Google Calendar</button>`;
+    return `<li class="event-item"><div><strong>${escapeHtml(event.title || "Event")}</strong> ${details}</div>${action}</li>`;
+  });
   const tasks = (extraction.tasks || []).map((task) => `<li><strong>${escapeHtml(task.title || "Task")}</strong> ${escapeHtml(task.due_date || "")}</li>`);
   const items = [...events, ...tasks];
   return items.length ? `<ul>${items.join("")}</ul>` : "<p>No explicit tasks or events were found.</p>";
@@ -488,6 +510,30 @@ function sendConfirmModal() {
   </section></div>`;
 }
 
+function calendarModal() {
+  const draft = state.calendarDraft;
+  if (!draft) return "";
+  const busy = state.calendarSaving ? "disabled" : "";
+  const unresolved = !draft.date ? '<p class="cal-note">RevoMail could not work out an exact date from the email. Please enter it.</p>' : "";
+  return `<div class="modal-backdrop" role="presentation"><section class="send-modal" role="dialog" aria-modal="true" aria-labelledby="cal-title">
+    <div class="modal-header"><div><span class="eyebrow">GOOGLE CALENDAR</span><h2 id="cal-title">Add this event?</h2></div></div>
+    ${unresolved}
+    <div class="cal-form">
+      <label>Title<input type="text" data-cal-field="title" maxlength="300" value="${escapeHtml(draft.title)}" ${busy} /></label>
+      <label class="cal-check"><input type="checkbox" data-cal-field="allDay" ${draft.allDay ? "checked" : ""} ${busy} /> All day</label>
+      <div class="cal-row">
+        <label>Date<input type="date" data-cal-field="date" value="${escapeHtml(draft.date)}" ${busy} /></label>
+        <label>Start<input type="time" data-cal-field="startTime" value="${escapeHtml(draft.startTime)}" ${draft.allDay || state.calendarSaving ? "disabled" : ""} /></label>
+        <label>End<input type="time" data-cal-field="endTime" value="${escapeHtml(draft.endTime)}" ${draft.allDay || state.calendarSaving ? "disabled" : ""} /></label>
+      </div>
+      <label>Location<input type="text" data-cal-field="location" maxlength="500" value="${escapeHtml(draft.location)}" ${busy} /></label>
+      <small class="cal-note">Time zone: ${escapeHtml(userTimeZone())}. It is added to your primary Google Calendar.</small>
+    </div>
+    ${state.calendarError ? `<p class="send-error" role="alert">${escapeHtml(state.calendarError)}</p>` : ""}
+    <div class="modal-footer"><button class="secondary-button" data-cancel-calendar ${busy}>Cancel</button><button class="primary-button" data-confirm-calendar ${busy}>${icon("calendar-plus")} ${state.calendarSaving ? "Adding…" : state.calendarError ? "Try again" : "Add to calendar"}</button></div>
+  </section></div>`;
+}
+
 function placeholderView(title, navIcon) {
   return shell(`<header class="page-header"><div><span class="eyebrow">Mailbox</span><h1>${title}</h1><p>Your ${title.toLowerCase()} messages live here.</p></div></header><div class="placeholder-card">${icon(navIcon)}<h2>${title} is ready</h2><p>This demo focuses on the AI-assisted inbox flow from the presentation mock.</p><button class="secondary-button" data-nav="inbox">Back to inbox</button></div>`);
 }
@@ -527,7 +573,7 @@ function render() {
     else if (state.view === "starred") content = placeholderView("Starred", "star");
     else if (state.view === "drafts") content = placeholderView("Drafts", "file");
     else content = sentView();
-    app.innerHTML = content + voiceModal() + sendConfirmModal() + toast();
+    app.innerHTML = content + voiceModal() + sendConfirmModal() + calendarModal() + toast();
   }
   createIcons({ icons: demoIcons });
   bindEvents();
@@ -623,6 +669,14 @@ function bindEvents() {
   document.querySelectorAll("[data-send]").forEach((button) => button.addEventListener("click", () => openSendConfirmation()));
   document.querySelector("[data-cancel-send]")?.addEventListener("click", () => { if (state.sending) return; state.sendDraft = null; state.sendError = ""; render(); });
   document.querySelector("[data-confirm-send]")?.addEventListener("click", () => void submitSend());
+  document.querySelectorAll("[data-calendar-add]").forEach((button) => button.addEventListener("click", () => openCalendarDialog(Number(button.dataset.calendarAdd))));
+  document.querySelectorAll("[data-cal-field]").forEach((field) => {
+    const name = field.dataset.calField;
+    if (field.type === "checkbox") field.addEventListener("change", () => { state.calendarDraft.allDay = field.checked; render(); });
+    else field.addEventListener("input", () => { state.calendarDraft[name] = field.value; });
+  });
+  document.querySelector("[data-cancel-calendar]")?.addEventListener("click", () => { if (state.calendarSaving) return; state.calendarDraft = null; state.calendarError = ""; render(); });
+  document.querySelector("[data-confirm-calendar]")?.addEventListener("click", () => void submitCalendar());
   document.querySelectorAll("[data-sent-refresh]").forEach((button) => button.addEventListener("click", () => void fetchSent()));
   document.querySelector("[data-sent-more]")?.addEventListener("click", () => void fetchSent(state.sentNextPageToken));
   document.querySelector("[data-summarize-all]")?.addEventListener("click", () => showToast(`${emails.length} emails ready to summarise`));
@@ -717,6 +771,45 @@ async function fetchSent(pageToken = null) {
   }
 }
 
+// Step 1 of adding an extracted event to Google Calendar: show an editable form pre-filled from the email.
+// Nothing is created until the user presses "Add to calendar" in the dialog.
+function openCalendarDialog(index) {
+  const email = state.selectedEmail;
+  const event = state.aiExtraction?.events?.[index];
+  if (!email || !event) return;
+  state.calendarDraft = { ...eventDraftFromExtraction(event, email.subject), eventKey: eventKey(String(email.id), event), idempotencyKey: newIdempotencyKey() };
+  state.calendarError = "";
+  render();
+}
+
+// Step 2: the user confirmed. The idempotency key stays the same across retries of this dialog, so a retry after
+// a lost response cannot create the event twice.
+async function submitCalendar() {
+  const draft = state.calendarDraft;
+  if (!draft || state.calendarSaving) return;
+  const result = calendarPayload(draft, userTimeZone());
+  if (result.error) { state.calendarError = result.error; render(); return; }
+  state.calendarSaving = true;
+  state.calendarError = "";
+  render();
+  let created;
+  try {
+    created = await api("/api/v1/calendar/events", {
+      method: "POST",
+      body: JSON.stringify({ ...result.payload, confirmed: true, idempotencyKey: draft.idempotencyKey })
+    });
+  } catch (error) {
+    state.calendarSaving = false;
+    state.calendarError = error.message;
+    render();
+    return;
+  }
+  state.calendarSaving = false;
+  state.calendarDraft = null;
+  state.addedEvents[draft.eventKey] = created?.htmlLink || "added";
+  showToast("Added to Google Calendar");
+}
+
 // Step 1 of sending: validate and show the recipients, subject and body for the user to confirm.
 // Nothing is sent until they press "Send now" in the dialog.
 function openSendConfirmation() {
@@ -803,6 +896,10 @@ function resetOutgoing() {
   state.sendDraft = null;
   state.sendError = "";
   state.sending = false;
+  state.calendarDraft = null;
+  state.calendarError = "";
+  state.calendarSaving = false;
+  state.addedEvents = {};
   state.compose = { to: "", subject: "", body: "" };
   state.aiInstructions = { reply: "", compose: "" };
   state.aiComposeLoading = false;

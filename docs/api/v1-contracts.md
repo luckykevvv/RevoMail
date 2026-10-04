@@ -84,6 +84,33 @@ Each message in `GET /api/v1/emails` and `GET /api/v1/emails/{id}` carries `unre
 
 The implemented endpoints are `POST /api/v1/ai/summarise`, `POST /api/v1/ai/extract`, `POST /api/v1/ai/draft-reply`, and `POST /api/v1/ai/classify`. The first three accept a mailbox `message_id`; reply drafting also accepts `professional`, `concise`, or `friendly` tone. Output remains a draft for human review.
 
+### Event extraction
+
+`POST /api/v1/ai/extract` returns `events` and `tasks`. Each event keeps the text as written in the email (`date`, `time`, `location`, `organiser`) and also carries `start`, `end` and `all_day`. `start` is `YYYY-MM-DDTHH:MM` (or `YYYY-MM-DD` for an all-day event) and `end` is `YYYY-MM-DDTHH:MM`; both are `null` when the AI could not resolve them with certainty. Relative dates such as "tomorrow" are resolved against the email's sent date. Values that are not real calendar dates are dropped by the server. These fields only pre-fill the calendar form; the user checks and can change them before anything is created.
+
+## Calendar
+
+`POST /api/v1/calendar/events` adds an event to the connected Google account's primary calendar (`calendar` scope):
+
+```json
+{
+  "title": "Project Meeting",
+  "startsAt": "2026-10-05T10:00",
+  "endsAt": "2026-10-05T11:00",
+  "timezone": "Australia/Melbourne",
+  "allDay": false,
+  "location": "Room 302",
+  "description": "",
+  "confirmed": true,
+  "idempotencyKey": "client-generated, 8-128 characters"
+}
+```
+
+- Times are local wall-clock values in `timezone` (an IANA name; invalid names are rejected). For `allDay: true`, `startsAt` and `endsAt` are dates and `endsAt` is the inclusive last day. A missing `endsAt` on a timed event means one hour. The end must be after the start.
+- `confirmed` must be `true`, set only after the user reviewed the event in the dialog. Otherwise `400 CONFIRMATION_REQUIRED`. Invalid input returns `422 INVALID_EVENT`.
+- Success returns `{ "id", "htmlLink", "created": true, "replayed": false }`.
+- Idempotency, delivery outcomes and auditing work exactly as for sending email (see above), with these codes: `409 IDEMPOTENCY_KEY_REUSED`, `409 CALENDAR_IN_PROGRESS`, `502`/`409 CALENDAR_OUTCOME_UNKNOWN` (check Google Calendar before adding it again), `403 INSUFFICIENT_PERMISSIONS` (reconnect the Google account). Only the Google event id and link are stored with the key; the audit operation is `calendar.create`.
+
 ### Guided drafting
 
 `POST /api/v1/ai/draft-reply` also accepts optional `instructions` (what the user wants to say, up to 1000 characters) and `current_draft` (up to 20000 characters). With instructions the reply follows them; with `current_draft` as well, that draft is revised rather than rewritten. The original email is treated as untrusted content, so instructions inside it are not followed. The sign-off uses the signed-in user's display name instead of a placeholder.

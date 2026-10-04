@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyClassifications, applyMailboxPage, outgoingProblem, replySubject, setMessageUnread } from "./mailbox-state.js";
+import { applyClassifications, applyMailboxPage, calendarPayload, eventDraftFromExtraction, outgoingProblem, replySubject, setMessageUnread } from "./mailbox-state.js";
 
 
 describe("mailbox state", () => {
@@ -96,5 +96,38 @@ describe("outgoing mail helpers", () => {
   it("accepts a ready reply or new message", () => {
     expect(outgoingProblem({ isReply: true, replyTo: ["a@example.com"], body: "Hi" })).toBe("");
     expect(outgoingProblem({ isReply: false, to: "b@example.com", body: "Hi" })).toBe("");
+  });
+});
+
+describe("calendar helpers", () => {
+  it("pre-fills a timed event from the extraction", () => {
+    const draft = eventDraftFromExtraction({ title: "Project Meeting", start: "2026-10-05T10:00", end: "2026-10-05T11:30", location: "Room 302" }, "Meeting tomorrow");
+    expect(draft).toMatchObject({ title: "Project Meeting", date: "2026-10-05", startTime: "10:00", endTime: "11:30", allDay: false, location: "Room 302" });
+    expect(draft.description).toContain("Meeting tomorrow");
+  });
+
+  it("treats a date without a time as all day and leaves unknowns empty", () => {
+    expect(eventDraftFromExtraction({ title: "Holiday", start: "2026-12-25" })).toMatchObject({ date: "2026-12-25", startTime: "", allDay: true });
+    expect(eventDraftFromExtraction({ title: "Vague", start: null })).toMatchObject({ date: "", startTime: "", endTime: "", allDay: false });
+    expect(eventDraftFromExtraction({ title: "Overnight", start: "2026-10-05T22:00", end: "2026-10-06T02:00" }).endTime).toBe("");
+  });
+
+  it("builds a payload for a valid timed event", () => {
+    const { payload } = calendarPayload({ title: " Meeting ", date: "2026-10-05", startTime: "10:00", endTime: "", allDay: false, location: " Room 1 ", description: "d" }, "Australia/Melbourne");
+    expect(payload).toEqual({ title: "Meeting", startsAt: "2026-10-05T10:00", endsAt: null, allDay: false, timezone: "Australia/Melbourne", location: "Room 1", description: "d" });
+  });
+
+  it("builds an all-day payload without times", () => {
+    const { payload } = calendarPayload({ title: "Holiday", date: "2026-12-25", startTime: "09:00", endTime: "10:00", allDay: true }, "UTC");
+    expect(payload).toMatchObject({ startsAt: "2026-12-25", endsAt: null, allDay: true });
+  });
+
+  it("explains what is missing or wrong", () => {
+    const ok = { title: "T", date: "2026-10-05", startTime: "10:00", endTime: "11:00", allDay: false };
+    expect(calendarPayload({ ...ok, title: " " }, "UTC").error).toMatch(/title/);
+    expect(calendarPayload({ ...ok, date: "" }, "UTC").error).toMatch(/date/);
+    expect(calendarPayload({ ...ok, startTime: "" }, "UTC").error).toMatch(/start time/);
+    expect(calendarPayload({ ...ok, endTime: "09:00" }, "UTC").error).toMatch(/after the start/);
+    expect(calendarPayload({ ...ok, endTime: "10:00" }, "UTC").error).toMatch(/after the start/);
   });
 });

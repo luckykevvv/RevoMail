@@ -1,19 +1,16 @@
-import logging
-
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from googleapiclient.errors import HttpError
 
 from backend.app.contracts import SendEmailRequest
 from backend.app.dependencies import require_session, require_tokens
-from backend.app.errors import AppError, ProviderError, correlation_id
+from backend.app.errors import AppError, ProviderError
 from backend.app.idempotency import request_hash
+from backend.app.once import OnceConfig, execute_once
 from backend.app.services import gmail as gmail_service
 
 
 router = APIRouter()
-logger = logging.getLogger("revomail.emails")
-
 SEND_OPERATION = "email.send"
 
 
@@ -78,8 +75,20 @@ async def mark_email_read(message_id: str, tokens: dict = Depends(require_tokens
         ) from exc
 
 
-def _http_status(exc: HttpError) -> int | None:
-    return getattr(exc, "status_code", None) or getattr(getattr(exc, "resp", None), "status", None)
+SEND_ONCE = OnceConfig(
+    operation=SEND_OPERATION,
+    resource_type="email",
+    thing="message",
+    check_hint="your Sent folder",
+    in_progress_code="SEND_IN_PROGRESS",
+    unknown_code="SEND_OUTCOME_UNKNOWN",
+    validation_error=gmail_service.MessageValidationError,
+    validation_code="INVALID_RECIPIENT",
+    permission_message="RevoMail needs permission to send email. Reconnect your Google account in Settings and tick the permission to send email.",
+    api_name="Gmail API",
+    enable_url="https://console.cloud.google.com/apis/library/gmail.googleapis.com",
+    not_found=("EMAIL_NOT_FOUND", "The message you are replying to could not be found."),
+)
 
 
 @router.post("/send")
@@ -101,11 +110,6 @@ async def send_email(
     if not payload.replyToMessageId and not (payload.to or "").strip():
         raise AppError("INVALID_RECIPIENT", "Enter at least one valid recipient email address.", 422)
 
-    user_id = session.user["id"]
-    cid = correlation_id(request)
-    idempotency = request.app.state.idempotency
-    audit = request.app.state.audit
-
     digest = request_hash(
         {
             "to": (payload.to or "").strip(),
@@ -114,70 +118,13 @@ async def send_email(
             "reply": payload.replyToMessageId,
         }
     )
-    decision = idempotency.begin(payload.idempotencyKey, user_id, SEND_OPERATION, digest)
-    if decision.state == "replay":
-        return {**(decision.response or {}), "sent": True, "replayed": True}
-    if decision.state == "mismatch":
-        raise AppError("IDEMPOTENCY_KEY_REUSED", "This send request key was already used for a different message.", 409)
-    if decision.state == "in_progress":
-        raise AppError("SEND_IN_PROGRESS", "This message is already being sent.", 409, True)
-    if decision.state == "unknown":
-        raise AppError(
-            "SEND_OUTCOME_UNKNOWN",
-            "An earlier attempt to send this message did not finish. Check your Sent folder before sending it again.",
-            409,
-        )
-
-    def fail(outcome: str) -> None:
-        audit.record(user_id, SEND_OPERATION, "email", None, outcome, cid)
-
-    try:
-        result = await run_in_threadpool(
-            gmail_service.send_message,
-            tokens,
-            payload.to,
-            payload.subject,
-            payload.body,
-            payload.replyToMessageId,
-        )
-    except gmail_service.MessageValidationError as exc:
-        idempotency.release(payload.idempotencyKey, user_id, SEND_OPERATION)
-        fail("REJECTED")
-        raise AppError("INVALID_RECIPIENT", str(exc), 422) from exc
-    except HttpError as exc:
-        status = _http_status(exc)
-        if status is not None and status >= 500:
-            # Gmail may have accepted the message before failing — never auto-repeat it.
-            idempotency.mark_unknown(payload.idempotencyKey, user_id, SEND_OPERATION)
-            fail("UNKNOWN")
-            raise ProviderError(
-                "SEND_OUTCOME_UNKNOWN",
-                "Gmail did not confirm the message was sent. Check your Sent folder before sending it again.",
-                502,
-            ) from exc
-        idempotency.release(payload.idempotencyKey, user_id, SEND_OPERATION)
-        fail("FAILED")
-        if status == 403:
-            raise AppError(
-                "INSUFFICIENT_PERMISSIONS",
-                "RevoMail needs permission to send email. Reconnect your Google account in Settings.",
-                403,
-            ) from exc
-        if status == 404:
-            raise AppError("EMAIL_NOT_FOUND", "The message you are replying to could not be found.", 404) from exc
-        raise ProviderError("EMAIL_PROVIDER_FAILED", "The mailbox provider could not complete the request.", 502, True) from exc
-    except Exception as exc:
-        # Timeouts and unexpected failures: the message may already have been sent.
-        idempotency.mark_unknown(payload.idempotencyKey, user_id, SEND_OPERATION)
-        fail("UNKNOWN")
-        logger.error("Email send outcome unknown correlation_id=%s error_type=%s", cid, type(exc).__name__)
-        raise ProviderError(
-            "SEND_OUTCOME_UNKNOWN",
-            "Gmail did not confirm the message was sent. Check your Sent folder before sending it again.",
-            502,
-        ) from exc
-
-    response = {"id": result["id"], "threadId": result["thread_id"]}
-    idempotency.complete(payload.idempotencyKey, user_id, SEND_OPERATION, response)
-    audit.record(user_id, SEND_OPERATION, "email", result["id"], "SUCCEEDED", cid)
-    return {**response, "sent": True, "replayed": False}
+    response, replayed = await execute_once(
+        request,
+        SEND_ONCE,
+        session.user["id"],
+        payload.idempotencyKey,
+        digest,
+        lambda: gmail_service.send_message(tokens, payload.to, payload.subject, payload.body, payload.replyToMessageId),
+        lambda result: {"id": result["id"], "threadId": result["thread_id"]},
+    )
+    return {**response, "sent": True, "replayed": replayed}

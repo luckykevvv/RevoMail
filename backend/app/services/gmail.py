@@ -18,8 +18,9 @@ from email.utils import formataddr, getaddresses
 from typing import Any
 
 import bleach
-import google.oauth2.credentials
 from googleapiclient.discovery import build
+
+from backend.app.services.google_credentials import build_credentials
 
 # HTML tags and attributes we allow through the sanitiser.
 # Everything else (scripts, iframes, forms, event handlers…) is stripped.
@@ -50,15 +51,7 @@ class MessageValidationError(ValueError):
 
 def _build_gmail(tokens: dict) -> Any:
     """Return an authenticated Gmail API client built from stored session tokens."""
-    creds = google.oauth2.credentials.Credentials(
-        token=tokens["token"],
-        refresh_token=tokens.get("refresh_token"),
-        token_uri=tokens["token_uri"],
-        client_id=tokens["client_id"],
-        client_secret=tokens["client_secret"],
-        scopes=tokens.get("scopes"),
-    )
-    return build("gmail", "v1", credentials=creds)
+    return build("gmail", "v1", credentials=build_credentials(tokens))
 
 
 def _decode_body(data: str) -> str:

@@ -2,7 +2,7 @@
 
 RevoMail is an AI-assisted email client for email summarization, reply drafting, voice commands, and task/calendar extraction.
 
-> **Current status:** RevoMail uses Python/FastAPI for its active API and SQLite for active server-side sessions, encrypted provider credentials, user/account records, settings, tasks, audits, idempotency records, and recoverable jobs. Google OAuth, Gmail reads, and OpenAI operations are implemented with simulated provider coverage; real Google and OpenAI calls remain unverified. Replies and new messages can be sent through Gmail after an explicit confirmation step and appear in the Sent tab; this is covered by simulated-provider tests only and has not been run against a real Gmail account. Microsoft, Speech-to-Text, and calendar writes remain pending.
+> **Current status:** RevoMail uses Python/FastAPI for its active API and SQLite for active server-side sessions, encrypted provider credentials, user/account records, settings, tasks, audits, idempotency records, and recoverable jobs. Google OAuth, Gmail reads, and OpenAI operations are implemented with simulated provider coverage; real Google and OpenAI calls remain unverified. Replies and new messages can be sent through Gmail after an explicit confirmation step and appear in the Sent tab; this is covered by simulated-provider tests only and has not been run against a real Gmail account. Events extracted from an email can be added to Google Calendar after confirming them in a dialog (also covered by simulated-provider tests only). Microsoft and Speech-to-Text remain pending.
 
 ## Current Prototype
 
@@ -16,7 +16,7 @@ The frontend currently demonstrates:
 - Task and calendar extraction.
 - Light, dark, desktop, and mobile layouts.
 
-The inbox keeps demo data while signed out or unconnected and loads Gmail data after a configured Google session. OAuth and OpenAI actions are enabled only when their server-side credentials are configured. Sending uses Gmail once a Google account is connected; calendar creation remains simulated.
+The inbox keeps demo data while signed out or unconnected and loads Gmail data after a configured Google session. OAuth and OpenAI actions are enabled only when their server-side credentials are configured. Sending and adding extracted events to Google Calendar use the connected Google account; the demo Tasks & events page still shows simulated data.
 
 ## Quick Start
 

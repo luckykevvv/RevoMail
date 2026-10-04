@@ -39,6 +39,7 @@ def _get_email_text(tokens: dict, message_id: str) -> dict:
     return {
         "subject": message.get("subject", ""),
         "sender": message.get("sender", ""),
+        "date": message.get("date", ""),
         "body": body,
     }
 
@@ -111,7 +112,7 @@ async def compose(payload: ComposeRequest, session=Depends(require_session)):
 async def extract(payload: EmailRef, tokens: dict = Depends(require_tokens)):
     try:
         email = await run_in_threadpool(_get_email_text, tokens, payload.message_id)
-        return await run_in_threadpool(ai_service.extract, email["subject"], email["sender"], email["body"])
+        return await run_in_threadpool(ai_service.extract, email["subject"], email["sender"], email["body"], email["date"])
     except HTTPException:
         raise
     except Exception as exc:

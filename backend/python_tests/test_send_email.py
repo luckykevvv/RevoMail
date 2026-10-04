@@ -242,14 +242,14 @@ def test_validation_failure_allows_retry_with_same_key(client, monkeypatch):
     assert client.post("/api/v1/emails/send", json=body()).status_code == 200
 
 
-def http_error(status):
+def http_error(status, content=b"{}"):
     class Resp(dict):
         pass
 
     resp = Resp(status=status)
     resp.status = status
     resp.reason = "x"
-    return HttpError(resp, b"{}")
+    return HttpError(resp, content)
 
 
 def test_permission_error_maps_to_reconnect_message(client, monkeypatch):
