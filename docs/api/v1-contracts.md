@@ -53,6 +53,33 @@ Each message in `GET /api/v1/emails` and `GET /api/v1/emails/{id}` carries `unre
 
 `POST /api/v1/emails/{id}/read` removes the `UNREAD` label in Gmail and returns `{ "id": "...", "unread": false }`. It is idempotent, needs an authenticated session with a connected mailbox, and requires the `gmail.modify` scope. Accounts connected before that scope was requested receive `403 INSUFFICIENT_PERMISSIONS` (not retryable) until the user reconnects the Google account in Settings. Other provider failures return `502 EMAIL_PROVIDER_FAILED`. The frontend marks the row read immediately, then restores it to unread if this call fails, so RevoMail never shows a state that Gmail does not have.
 
+## Sending email and the Sent mailbox
+
+`GET /api/v1/emails?label=SENT` lists the connected account's Gmail Sent mail (same response shape as the inbox; `to` holds the recipients). `label` accepts `INBOX` (default) or `SENT`, case-insensitively; anything else returns `422 INVALID_REQUEST`.
+
+`GET /api/v1/emails/{id}` also returns `reply_to`: the list of addresses a reply would go to, so the UI can show them before sending. For a message you received this is its `Reply-To` header, otherwise `From`; for a message you sent (Gmail `SENT` label) it is the original `To`.
+
+`POST /api/v1/emails/send` sends a message from the connected Gmail account (`gmail.send`/`gmail.modify` scope):
+
+```json
+{
+  "to": "bob@example.com",
+  "subject": "Hello",
+  "body": "Plain-text body",
+  "replyToMessageId": null,
+  "confirmed": true,
+  "idempotencyKey": "client-generated, 8-128 characters"
+}
+```
+
+- `confirmed` must be `true`, set only after the user has reviewed the final recipients, subject and body. Otherwise `400 CONFIRMATION_REQUIRED`.
+- For a reply, set `replyToMessageId`. The recipient is then taken **from that message on the server** (see `reply_to` above) and any `to` sent by the client is ignored, so a reply cannot be redirected. The reply is placed in the same Gmail thread (`threadId`, `In-Reply-To`, `References`). An empty `subject` becomes `Re: <original subject>`.
+- For a new message, `to` is required (at most 20 addresses; syntax is validated, and values containing line breaks are rejected to prevent header injection). Invalid input returns `422 INVALID_RECIPIENT`.
+- Success returns `{ "id", "threadId", "sent": true, "replayed": false }`.
+- Idempotency: repeating a request with the same `idempotencyKey` and identical content returns the original result with `"replayed": true` and does not send again. Reusing a key for different content returns `409 IDEMPOTENCY_KEY_REUSED`; a request still running returns `409 SEND_IN_PROGRESS` (retryable). Only the provider message id is stored with the key, never recipients, subject or body.
+- Delivery outcomes: a definite failure (validation, `403 INSUFFICIENT_PERMISSIONS` when the account must be reconnected, `404 EMAIL_NOT_FOUND`, other 4xx → `502 EMAIL_PROVIDER_FAILED`) releases the key so the same request can be retried. If Gmail may have accepted the message (timeout, unexpected error or a Gmail 5xx) the response is `502 SEND_OUTCOME_UNKNOWN`, the key is locked, and repeating it returns `409 SEND_OUTCOME_UNKNOWN`; the user must check the Sent mailbox before sending again.
+- Every attempt writes an `AuditRecord` (`email.send`, outcome `SUCCEEDED`, `FAILED`, `REJECTED` or `UNKNOWN`, correlation id, Gmail message id on success). Message content is never logged or audited.
+
 ## AI operations
 
 The implemented endpoints are `POST /api/v1/ai/summarise`, `POST /api/v1/ai/extract`, `POST /api/v1/ai/draft-reply`, and `POST /api/v1/ai/classify`. The first three accept a mailbox `message_id`; reply drafting also accepts `professional`, `concise`, or `friendly` tone. Output remains a draft for human review.

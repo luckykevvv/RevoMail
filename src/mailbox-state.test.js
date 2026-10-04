@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyClassifications, applyMailboxPage, setMessageUnread } from "./mailbox-state.js";
+import { applyClassifications, applyMailboxPage, outgoingProblem, replySubject, setMessageUnread } from "./mailbox-state.js";
 
 
 describe("mailbox state", () => {
@@ -76,5 +76,25 @@ describe("read state", () => {
     const read = setMessageUnread(inbox, "b", false);
     expect(setMessageUnread(read, "b", true)[1].unread).toBe(true);
     expect(setMessageUnread([{ id: 7, unread: true }], "7", false)[0].unread).toBe(false);
+  });
+});
+
+describe("outgoing mail helpers", () => {
+  it("prefixes reply subjects once", () => {
+    expect(replySubject("Project Meeting Tomorrow")).toBe("Re: Project Meeting Tomorrow");
+    expect(replySubject("RE: Project Meeting Tomorrow")).toBe("RE: Project Meeting Tomorrow");
+    expect(replySubject("  ")).toBe("Re:");
+  });
+
+  it("blocks empty messages and replies without an address", () => {
+    expect(outgoingProblem({ isReply: true, replyTo: ["a@example.com"], body: "  " })).toMatch(/Write a message/);
+    expect(outgoingProblem({ isReply: true, replyTo: [], body: "Hi" })).toMatch(/no address/);
+    expect(outgoingProblem({ isReply: true, body: "Hi" })).toMatch(/no address/);
+    expect(outgoingProblem({ isReply: false, to: " ", body: "Hi" })).toMatch(/recipient/);
+  });
+
+  it("accepts a ready reply or new message", () => {
+    expect(outgoingProblem({ isReply: true, replyTo: ["a@example.com"], body: "Hi" })).toBe("");
+    expect(outgoingProblem({ isReply: false, to: "b@example.com", body: "Hi" })).toBe("");
   });
 });

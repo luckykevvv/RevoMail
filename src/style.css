@@ -386,3 +386,11 @@ input.input-shell { padding: 0; }
   .priority-filter { margin-top: 12px; padding: 0 12px; }
   .email-content .priority-badge { justify-self: start; }
 }
+
+.send-modal { width: min(560px, 100%); max-height: calc(100vh - 40px); overflow: auto; padding: 25px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface); box-shadow: var(--shadow-lg); animation: modal-in .28s cubic-bezier(.2,.8,.2,1) both; }
+.send-summary { display: grid; grid-template-columns: 70px 1fr; gap: 8px 12px; margin: 18px 0 12px; font-size: 14px; }
+.send-summary dt { color: var(--muted); }
+.send-summary dd { margin: 0; overflow-wrap: anywhere; color: var(--ink); }
+.send-body { max-height: 240px; overflow: auto; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-soft); color: var(--ink); font-size: 14px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.send-error { margin: 12px 0 0; color: #b42318; font-size: 13px; }
+.send-modal .modal-footer { margin-top: 18px; justify-content: flex-end; }

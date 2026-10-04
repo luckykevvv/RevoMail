@@ -2,7 +2,7 @@
 
 RevoMail is an AI-assisted email client for email summarization, reply drafting, voice commands, and task/calendar extraction.
 
-> **Current status:** RevoMail uses Python/FastAPI for its active API and SQLite for active server-side sessions, encrypted provider credentials, user/account records, settings, tasks, audits, idempotency records, and recoverable jobs. Google OAuth, Gmail reads, and OpenAI operations are implemented with simulated provider coverage; real Google and OpenAI calls remain unverified. Microsoft, Speech-to-Text, sending, and calendar writes remain pending.
+> **Current status:** RevoMail uses Python/FastAPI for its active API and SQLite for active server-side sessions, encrypted provider credentials, user/account records, settings, tasks, audits, idempotency records, and recoverable jobs. Google OAuth, Gmail reads, and OpenAI operations are implemented with simulated provider coverage; real Google and OpenAI calls remain unverified. Replies and new messages can be sent through Gmail after an explicit confirmation step and appear in the Sent tab; this is covered by simulated-provider tests only and has not been run against a real Gmail account. Microsoft, Speech-to-Text, and calendar writes remain pending.
 
 ## Current Prototype
 
@@ -16,7 +16,7 @@ The frontend currently demonstrates:
 - Task and calendar extraction.
 - Light, dark, desktop, and mobile layouts.
 
-The inbox keeps demo data while signed out or unconnected and loads Gmail data after a configured Google session. OAuth and OpenAI actions are enabled only when their server-side credentials are configured. Sending and calendar creation remain simulated.
+The inbox keeps demo data while signed out or unconnected and loads Gmail data after a configured Google session. OAuth and OpenAI actions are enabled only when their server-side credentials are configured. Sending uses Gmail once a Google account is connected; calendar creation remains simulated.
 
 ## Quick Start
 
@@ -33,7 +33,7 @@ npm ci
 npm run desktop
 ```
 
-`npm ci` automatically creates the ignored repository `.venv` and installs `backend/requirements.txt`. Source start, test, and packaging commands repeat this check and install only when the environment is missing or the requirements file changed. If Python is not installed, setup stops with an actionable message; it does not make system-wide changes. Packaged desktop builds launch their bundled standalone backend and do not require Node.js or Python on the target machine. Google and OpenAI buttons remain unavailable until the relevant server-side credentials are supplied. Register `${APP_BASE_URL}/api/v1/auth/google/callback` with Google. RevoMail requests the `gmail.modify` scope so that reading an email in RevoMail also marks it read in Gmail; accounts connected earlier with read-only access must use Reconnect in Settings once.
+`npm ci` automatically creates the ignored repository `.venv` and installs `backend/requirements.txt`. Source start, test, and packaging commands repeat this check and install only when the environment is missing or the requirements file changed. If Python is not installed, setup stops with an actionable message; it does not make system-wide changes. Packaged desktop builds launch their bundled standalone backend and do not require Node.js or Python on the target machine. Google and OpenAI buttons remain unavailable until the relevant server-side credentials are supplied. Register `${APP_BASE_URL}/api/v1/auth/google/callback` with Google. RevoMail requests the `gmail.modify` scope so that reading an email in RevoMail also marks it read in Gmail, and `gmail.send` so it can send replies; accounts connected earlier with read-only access must use Reconnect in Settings once.
 
 On Windows, contributors can instead double-click the root-level `RevoMail.cmd`. It checks for Node.js and npm, compares the current `package-lock.json` with the installed Node environment, runs `npm ci` when dependencies are missing or stale (preparing the Python environment through the npm post-install hook), builds the frontend, and opens Electron. Node.js LTS and Python 3.11 or newer are the only source-development prerequisites. No prebuilt executable is committed; `RevoMail.cmd` is the one-click source launcher.
 

@@ -6,12 +6,15 @@ Responsibilities:
 - List messages (with basic metadata, including unread/starred state) for the inbox.
 - Fetch and parse a single message body (plain-text and HTML).
 - Mark a message as read in Gmail.
+- Send a message (new or reply) through Gmail, working out the correct reply recipient.
 - Sanitise HTML bodies so scripts / tracking pixels cannot execute.
 """
 
 import base64
 import email as email_lib
 import re
+from email.message import EmailMessage
+from email.utils import formataddr, getaddresses
 from typing import Any
 
 import bleach
@@ -32,6 +35,17 @@ ALLOWED_ATTRS = {
     "a": ["href", "title"],
     "img": ["src", "alt", "width", "height"],
 }
+
+
+# Mailbox views the inbox API may list. Anything else is rejected by the router.
+MAILBOX_LABELS = ("INBOX", "SENT")
+
+MAX_RECIPIENTS = 20
+_ADDRESS_RE = re.compile(r"^[^@\s<>,;\"]+@[^@\s<>,;\"]+\.[^@\s<>,;\"]+$")
+
+
+class MessageValidationError(ValueError):
+    """The message cannot be sent as requested (bad recipient, header injection, …)."""
 
 
 def _build_gmail(tokens: dict) -> Any:
@@ -114,9 +128,14 @@ def _sanitise_html(html: str) -> str:
 # Public API
 # ---------------------------------------------------------------------------
 
-def list_messages(tokens: dict, max_results: int = 20, page_token: str | None = None) -> dict:
+def list_messages(
+    tokens: dict,
+    max_results: int = 20,
+    page_token: str | None = None,
+    label: str = "INBOX",
+) -> dict:
     """
-    Return a page of inbox messages with metadata only (no bodies).
+    Return a page of messages for one mailbox view (INBOX or SENT) with metadata only (no bodies).
 
     Returns:
         {
@@ -124,11 +143,13 @@ def list_messages(tokens: dict, max_results: int = 20, page_token: str | None = 
           "next_page_token": str | None,
         }
     """
+    if label not in MAILBOX_LABELS:
+        raise ValueError("Unsupported mailbox label.")
     gmail = _build_gmail(tokens)
 
     kwargs: dict = {
         "userId": "me",
-        "labelIds": ["INBOX"],
+        "labelIds": [label],
         "maxResults": max_results,
     }
     if page_token:
@@ -193,6 +214,7 @@ def get_message(tokens: dict, message_id: str) -> dict:
         "unread": "UNREAD" in label_ids,
         "starred": "STARRED" in label_ids,
         "category": _category(label_ids),
+        "reply_to": reply_recipients(headers, label_ids),
         "body_plain": plain,
         "body_html": _sanitise_html(html) if html else None,
         "body_html_clean": _sanitise_html(html) if html else None,
@@ -211,6 +233,115 @@ def mark_read(tokens: dict, message_id: str) -> dict:
         body={"removeLabelIds": ["UNREAD"]},
     ).execute()
     return {"id": detail.get("id", message_id), "unread": "UNREAD" in detail.get("labelIds", [])}
+
+
+def parse_recipients(raw: str) -> list[str]:
+    """Parse and validate a To field. Raises MessageValidationError on anything unsafe or malformed."""
+    if not raw or re.search(r"[\r\n\x00]", raw):
+        raise MessageValidationError("Enter at least one valid recipient email address.")
+    recipients: list[str] = []
+    for name, address in getaddresses([raw]):
+        address = address.strip()
+        if not _ADDRESS_RE.match(address) or re.search(r"[\r\n\x00]", name):
+            raise MessageValidationError("One of the recipient email addresses is not valid.")
+        recipients.append(formataddr((name, address)) if name else address)
+    if not recipients:
+        raise MessageValidationError("Enter at least one valid recipient email address.")
+    if len(recipients) > MAX_RECIPIENTS:
+        raise MessageValidationError(f"A message can have at most {MAX_RECIPIENTS} recipients.")
+    return recipients
+
+
+def reply_recipients(headers: list[dict], label_ids: list[str]) -> list[str]:
+    """
+    Work out who a reply to this message should go to.
+
+    - A message you sent (SENT label): reply to the people you sent it to.
+    - Anything else: Reply-To when the sender set one, otherwise From.
+    Returns [] when no valid recipient can be determined.
+    """
+    if "SENT" in label_ids:
+        raw = _header(headers, "To")
+    else:
+        raw = _header(headers, "Reply-To") or _header(headers, "From")
+    try:
+        return parse_recipients(raw)
+    except MessageValidationError:
+        return []
+
+
+def reply_subject(subject: str) -> str:
+    subject = (subject or "").strip()
+    if re.match(r"^re:", subject, flags=re.IGNORECASE):
+        return subject
+    return f"Re: {subject}" if subject else "Re:"
+
+
+def build_mime(
+    to: list[str],
+    subject: str,
+    body: str,
+    in_reply_to: str = "",
+    references: str = "",
+) -> EmailMessage:
+    """Build the outgoing MIME message. Header values containing line breaks are rejected."""
+    for value in (subject, in_reply_to, references):
+        if re.search(r"[\r\n\x00]", value or ""):
+            raise MessageValidationError("The subject contains invalid characters.")
+    message = EmailMessage()
+    message["To"] = ", ".join(to)
+    message["Subject"] = subject
+    if in_reply_to:
+        message["In-Reply-To"] = in_reply_to
+        message["References"] = (references + " " + in_reply_to).strip() if references else in_reply_to
+    message.set_content(body)
+    return message
+
+
+def send_message(
+    tokens: dict,
+    to: str | None,
+    subject: str,
+    body: str,
+    reply_to_message_id: str | None = None,
+) -> dict:
+    """
+    Send a message through Gmail. Requires the gmail.send scope.
+
+    For a reply the recipient is taken from the original message (Reply-To, else From; the
+    original's To for a message you sent) — never from client input — and the reply is placed in the
+    same Gmail thread with In-Reply-To/References set.
+    """
+    gmail = _build_gmail(tokens)
+    thread_id = None
+    in_reply_to = ""
+    references = ""
+
+    if reply_to_message_id:
+        original = gmail.users().messages().get(
+            userId="me",
+            id=reply_to_message_id,
+            format="metadata",
+            metadataHeaders=["From", "To", "Reply-To", "Subject", "Message-ID", "References"],
+        ).execute()
+        headers = original.get("payload", {}).get("headers", [])
+        recipients = reply_recipients(headers, original.get("labelIds", []))
+        if not recipients:
+            raise MessageValidationError("This message has no valid address to reply to.")
+        subject = subject.strip() or reply_subject(_header(headers, "Subject"))
+        thread_id = original.get("threadId")
+        in_reply_to = _header(headers, "Message-ID").strip()
+        references = _header(headers, "References").strip()
+    else:
+        recipients = parse_recipients(to or "")
+
+    message = build_mime(recipients, subject, body, in_reply_to, references)
+    raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
+    request_body: dict = {"raw": raw}
+    if thread_id:
+        request_body["threadId"] = thread_id
+    sent = gmail.users().messages().send(userId="me", body=request_body).execute()
+    return {"id": sent.get("id"), "thread_id": sent.get("threadId", thread_id)}
 
 
 def _category(label_ids: list[str]) -> str:

@@ -1,5 +1,5 @@
 import "./style.css";
-import { applyClassifications, applyMailboxPage, setMessageUnread } from "./mailbox-state.js";
+import { applyClassifications, applyMailboxPage, outgoingProblem, replySubject, setMessageUnread } from "./mailbox-state.js";
 import {
   AlignLeft,
   Archive,
@@ -10,6 +10,7 @@ import {
   CalendarPlus,
   Captions,
   Check,
+  CircleAlert,
   CircleCheck,
   Clock3,
   Cpu,
@@ -60,6 +61,7 @@ const demoIcons = {
   CalendarPlus,
   Captions,
   Check,
+  CircleAlert,
   CircleCheck,
   Clock3,
   Cpu,
@@ -102,6 +104,7 @@ const demoIcons = {
 const app = document.querySelector("#app");
 
 let emails = [];
+let sentEmails = [];
 
 const state = {
   authenticated: null,
@@ -123,7 +126,6 @@ const state = {
   voiceOpen: false,
   voiceListening: true,
   transcript: "",
-  replyVersion: 0,
   eventAdded: false,
   assignmentAdded: false,
   toast: "",
@@ -135,8 +137,25 @@ const state = {
   aiExtractionLoading: false,
   aiDraft: "",
   aiDraftLoading: false,
-  aiDraftTone: "professional"
+  aiDraftTone: "professional",
+  compose: { to: "", subject: "", body: "" },
+  returnView: "inbox",
+  sentLoaded: false,
+  sentLoading: false,
+  sentError: "",
+  sentNextPageToken: null,
+  sendDraft: null,
+  sendError: "",
+  sending: false
 };
+
+function initialsOf(text) {
+  return escapeHtml(String(text || "").split(/\s|@/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase());
+}
+
+function newIdempotencyKey() {
+  return globalThis.crypto?.randomUUID?.() || `send-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 function escapeHtml(value = "") {
   return String(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[character]));
@@ -163,12 +182,6 @@ const navItems = [
   ["tasks", "Tasks", "square-check-big"],
   ["calendar", "Calendar", "calendar-days"],
   ["settings", "Settings", "settings"]
-];
-
-const replies = [
-  "Hi Prof. Smith,\n\nThank you for the reminder. I will attend the meeting tomorrow at 10:00 AM in Room 302.\n\nI will prepare the progress update and note down any blockers to discuss.\n\nBest regards,\nAnon User",
-  "Hello Prof. Smith,\n\nThanks for the reminder. I’ve confirmed the 10:00 AM meeting in Room 302 and will bring a concise progress update, including any current blockers.\n\nKind regards,\nAnon User",
-  "Hi Prof. Smith,\n\nConfirmed — I’ll be at Room 302 tomorrow at 10:00 AM with the progress update and blockers ready for discussion.\n\nBest,\nAnon User"
 ];
 
 function icon(name, className = "") {
@@ -249,7 +262,7 @@ function inboxView() {
     <button class="primary-button compose-button" data-compose>${icon("square-pen")} Compose</button>
   </header>
   <section class="inbox-toolbar">
-    <label class="search-box">${icon("search")}<input id="search" type="search" placeholder="Search emails…" value="${state.search}" /><kbd>⌘ K</kbd></label>
+    <label class="search-box">${icon("search")}<input id="search" type="search" placeholder="Search emails…" value="${escapeHtml(state.search)}" /><kbd>⌘ K</kbd></label>
     <button class="icon-button filter-button" title="Filter inbox">${icon("list-filter")}</button>
   </section>
   <div class="category-tabs" role="tablist">
@@ -294,13 +307,14 @@ function priorityStatus() {
   return "";
 }
 
-function emailRow(email) {
-  return `<article class="email-row ${email.unread ? "unread" : "read"}" data-email="${email.id}" tabindex="0">
+function emailRow(email, { sent = false } = {}) {
+  const person = sent ? email.to || "" : email.sender || "";
+  return `<article class="email-row ${email.unread ? "unread" : "read"}" data-email="${escapeHtml(email.id)}" tabindex="0">
     <button class="check-button" aria-label="Select email"><span></span></button>
-    <button class="star-button ${email.starred ? "starred" : ""}" data-star="${email.id}" aria-label="Star email">${icon("star")}</button>
-    <span class="avatar avatar-sm avatar-soft">${email.sender.split(/\s|@/).slice(0, 2).map((part) => part[0]).join("").toUpperCase()}</span>
-    <div class="email-sender"><span class="sr-only">${email.unread ? "Unread. " : "Read. "}</span>${email.sender}</div>
-    <div class="email-content">${priorityBadge(email)}<strong>${email.subject}</strong><span>${email.preview}</span></div>
+    <button class="star-button ${email.starred ? "starred" : ""}" data-star="${escapeHtml(email.id)}" aria-label="Star email">${icon("star")}</button>
+    <span class="avatar avatar-sm avatar-soft">${initialsOf(person)}</span>
+    <div class="email-sender"><span class="sr-only">${sent ? "Sent to " : email.unread ? "Unread. " : "Read. "}</span>${sent ? "To: " : ""}${escapeHtml(person)}</div>
+    <div class="email-content">${sent ? "" : priorityBadge(email)}<strong>${escapeHtml(email.subject)}</strong><span>${escapeHtml(email.preview)}</span></div>
     <time>${escapeHtml(email.time || email.date || "")}</time>
     ${email.unread ? '<span class="unread-dot" role="img" aria-label="Unread"></span>' : ""}
   </article>`;
@@ -313,15 +327,15 @@ function readingView() {
   const summary = state.aiSummary;
   const extraction = state.aiExtraction;
   return shell(`<header class="compact-header">
-    <button class="back-button" data-nav="inbox">${icon("arrow-left")}</button>
-    <div><span class="eyebrow">Inbox / Primary</span><h1>${email.subject}</h1></div>
+    <button class="back-button" data-nav="${state.returnView}">${icon("arrow-left")}</button>
+    <div><span class="eyebrow">${state.returnView === "sent" ? "Sent" : "Inbox / Primary"}</span><h1>${escapeHtml(email.subject)}</h1></div>
     <div class="header-actions"><button class="icon-button" title="Archive">${icon("archive")}</button><button class="icon-button" title="Delete">${icon("trash-2")}</button><button class="icon-button" title="More">${icon("ellipsis")}</button></div>
   </header>
   <div class="reading-grid">
     <article class="message-card">
-      <div class="message-from"><span class="avatar">PS</span><div><strong>${escapeHtml(email.sender)}</strong><small>${escapeHtml(email.to || email.address || "")}</small></div><time>${escapeHtml(email.time || email.date || "")}</time><button class="star-button">${icon("star")}</button></div>
+      <div class="message-from"><span class="avatar">${initialsOf(email.sender)}</span><div><strong>${escapeHtml(email.sender)}</strong><small>${escapeHtml(email.to || email.address || "")}</small></div><time>${escapeHtml(email.time || email.date || "")}</time><button class="star-button">${icon("star")}</button></div>
       <div class="message-body">${messageBody}</div>
-      <div class="message-actions"><button class="secondary-button" data-reply>${icon("reply")} Reply</button><button class="secondary-button">${icon("reply-all")} Reply all</button><button class="secondary-button">${icon("forward")} Forward</button></div>
+      <div class="message-actions"><button class="secondary-button" data-reply ${email._loading ? "disabled" : ""}>${icon("reply")} Reply</button><button class="secondary-button">${icon("reply-all")} Reply all</button><button class="secondary-button">${icon("forward")} Forward</button></div>
     </article>
     <aside class="ai-rail">
       <section class="insight-card summary-card"><div class="insight-title"><span>${icon("sparkles")}</span><div><small>REVO AI</small><h2>Summary</h2></div>${summary ? "" : `<button class="text-button" data-ai-summarise ${state.aiSummaryLoading ? "disabled" : ""}>${state.aiSummaryLoading ? "Generating…" : "Summarise"}</button>`}</div>${summary ? `<p>${escapeHtml(summary.summary)}</p><ul>${(summary.bullets || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : `<p>${state.aiSummaryLoading ? "Summarising…" : "Generate a summary for this email."}</p>`}</section>
@@ -339,19 +353,21 @@ function renderExtraction(extraction) {
 }
 
 function replyView() {
-  const draft = state.aiDraft || replies[state.replyVersion];
+  const email = state.selectedEmail;
+  const recipients = Array.isArray(email.reply_to) ? email.reply_to : [];
+  const draft = state.aiDraft;
   return shell(`<header class="compact-header">
     <button class="back-button" data-view="reading">${icon("arrow-left")}</button>
     <div><span class="eyebrow">AI generated · review before sending</span><h1>Reply draft</h1></div>
     <button class="secondary-button" data-regenerate>${icon("refresh-cw")} Regenerate</button>
   </header>
   <section class="composer-card">
-    <div class="field-row"><label>To</label><div class="input-shell"><span class="avatar avatar-xs">PS</span> Prof. Smith &lt;smith@university.edu&gt;</div></div>
-    <div class="field-row"><label>Subject</label><div class="input-shell">Re: Project Meeting Tomorrow</div></div>
-    <div class="ai-draft-label"><span>${icon("sparkles")} AI generated reply</span><small>Version ${state.replyVersion + 1} of 3 · Edit as needed</small></div>
-    ${state.aiDraftLoading ? '<div class="reply-editor">Generating draft…</div>' : `<textarea id="reply-text" class="reply-editor">${escapeHtml(draft)}</textarea>`}
+    <div class="field-row"><label>To</label><div class="input-shell">${recipients.length ? `<span class="avatar avatar-xs">${initialsOf(recipients[0])}</span> ${escapeHtml(recipients.join(", "))}` : "No reply address found for this message"}</div></div>
+    <div class="field-row"><label>Subject</label><div class="input-shell">${escapeHtml(replySubject(email.subject))}</div></div>
+    <div class="ai-draft-label"><span>${icon("sparkles")} AI generated reply</span><small>Edit as needed — nothing is sent until you confirm</small></div>
+    ${state.aiDraftLoading ? '<div class="reply-editor">Generating draft…</div>' : `<textarea id="reply-text" class="reply-editor" placeholder="Write your reply…">${escapeHtml(draft)}</textarea>`}
     <div class="tone-row"><span>Quick tone</span>${["professional", "concise", "friendly"].map((tone) => `<button class="tone-chip ${state.aiDraftTone === tone ? "active" : ""}" data-tone="${tone}">${tone[0].toUpperCase() + tone.slice(1)}</button>`).join("")}</div>
-    <div class="composer-footer"><div class="compose-tools"><button class="icon-button">${icon("paperclip")}</button><button class="icon-button">${icon("smile")}</button><button class="icon-button">${icon("image")}</button><button class="icon-button" data-voice>${icon("mic")}</button></div><div><button class="secondary-button" data-discard>Discard</button><button class="primary-button" data-send>${icon("send")} Send reply</button></div></div>
+    <div class="composer-footer"><div class="compose-tools"><button class="icon-button">${icon("paperclip")}</button><button class="icon-button">${icon("smile")}</button><button class="icon-button">${icon("image")}</button><button class="icon-button" data-voice>${icon("mic")}</button></div><div><button class="secondary-button" data-discard>Discard</button><button class="primary-button" data-send ${state.aiDraftLoading || !recipients.length ? "disabled" : ""}>${icon("send")} Review &amp; send</button></div></div>
   </section>`);
 }
 
@@ -411,7 +427,42 @@ function selectSetting(label, settingIcon, values) {
 
 function composeView() {
   return shell(`<header class="compact-header"><button class="back-button" data-nav="inbox">${icon("arrow-left")}</button><div><span class="eyebrow">New message</span><h1>Compose</h1></div><button class="text-button" data-ai-compose>${icon("sparkles")} Write with AI</button></header>
-  <section class="composer-card compose-new"><div class="field-row"><label>To</label><input id="compose-to" class="input-shell" placeholder="Recipient" /></div><div class="field-row"><label>Subject</label><input id="compose-subject" class="input-shell" placeholder="Email subject" /></div><textarea id="compose-body" class="reply-editor" placeholder="Write a message, or ask Revo AI for a first draft…"></textarea><div class="composer-footer"><div class="compose-tools"><button class="icon-button">${icon("paperclip")}</button><button class="icon-button">${icon("smile")}</button><button class="icon-button" data-voice>${icon("mic")}</button></div><button class="primary-button" data-send>${icon("send")} Send</button></div></section>`);
+  <section class="composer-card compose-new"><div class="field-row"><label>To</label><input id="compose-to" class="input-shell" placeholder="Recipient" value="${escapeHtml(state.compose.to)}" /></div><div class="field-row"><label>Subject</label><input id="compose-subject" class="input-shell" placeholder="Email subject" value="${escapeHtml(state.compose.subject)}" /></div><textarea id="compose-body" class="reply-editor" placeholder="Write a message, or ask Revo AI for a first draft…">${escapeHtml(state.compose.body)}</textarea><div class="composer-footer"><div class="compose-tools"><button class="icon-button">${icon("paperclip")}</button><button class="icon-button">${icon("smile")}</button><button class="icon-button" data-voice>${icon("mic")}</button></div><button class="primary-button" data-send>${icon("send")} Review &amp; send</button></div></section>`);
+}
+
+function sentView() {
+  const loading = state.sentLoading && !sentEmails.length;
+  const list = loading
+    ? '<div class="empty-state"><h3>Loading sent mail…</h3><p>Fetching messages from your connected account.</p></div>'
+    : state.sentError && !sentEmails.length
+      ? `<div class="empty-state">${icon("circle-alert")}<h3>Sent mail could not be loaded</h3><p>${escapeHtml(state.sentError)}</p><button class="secondary-button" data-sent-refresh>Try again</button></div>`
+      : sentEmails.length
+        ? sentEmails.map((email) => emailRow(email, { sent: true })).join("")
+        : `<div class="empty-state">${icon("send")}<h3>No sent messages</h3><p>Messages you send will appear here.</p></div>`;
+  return shell(`<header class="page-header">
+    <div><span class="eyebrow">Mailbox</span><h1>Sent</h1><p>Messages you have sent, including replies sent from RevoMail.</p></div>
+    <button class="primary-button compose-button" data-compose>${icon("square-pen")} Compose</button>
+  </header>
+  <section class="mail-panel">
+    <div class="mail-panel-heading"><span>${loading ? "Loading sent mail" : `${sentEmails.length} sent`}</span><button class="text-button" data-sent-refresh ${state.sentLoading ? "disabled" : ""}>${icon("refresh-cw")} Refresh</button></div>
+    <div class="email-list">${list}</div>
+    ${state.sentNextPageToken ? `<div class="mail-panel-heading"><button class="text-button" data-sent-more ${state.sentLoading ? "disabled" : ""}>${state.sentLoading ? "Loading…" : "Load more"}</button></div>` : ""}
+  </section>`);
+}
+
+function sendConfirmModal() {
+  const draft = state.sendDraft;
+  if (!draft) return "";
+  return `<div class="modal-backdrop" role="presentation"><section class="send-modal" role="dialog" aria-modal="true" aria-labelledby="send-title">
+    <div class="modal-header"><div><span class="eyebrow">CONFIRM</span><h2 id="send-title">Send this email?</h2></div></div>
+    <dl class="send-summary">
+      <dt>To</dt><dd>${escapeHtml(draft.to)}</dd>
+      <dt>Subject</dt><dd>${escapeHtml(draft.subject) || "(no subject)"}</dd>
+    </dl>
+    <div class="send-body">${escapeHtml(draft.body)}</div>
+    ${state.sendError ? `<p class="send-error" role="alert">${escapeHtml(state.sendError)}</p>` : ""}
+    <div class="modal-footer"><button class="secondary-button" data-cancel-send ${state.sending ? "disabled" : ""}>Cancel</button><button class="primary-button" data-confirm-send ${state.sending ? "disabled" : ""}>${icon("send")} ${state.sending ? "Sending…" : state.sendError ? "Try again" : "Send now"}</button></div>
+  </section></div>`;
 }
 
 function placeholderView(title, navIcon) {
@@ -452,8 +503,8 @@ function render() {
     else if (state.view === "compose") content = composeView();
     else if (state.view === "starred") content = placeholderView("Starred", "star");
     else if (state.view === "drafts") content = placeholderView("Drafts", "file");
-    else content = placeholderView("Sent", "send");
-    app.innerHTML = content + voiceModal() + toast();
+    else content = sentView();
+    app.innerHTML = content + voiceModal() + sendConfirmModal() + toast();
   }
   createIcons({ icons: demoIcons });
   bindEvents();
@@ -491,14 +542,20 @@ function bindEvents() {
   document.querySelector("[data-clear-auth-error]")?.addEventListener("click", () => { state.authError = ""; render(); });
   document.querySelectorAll("[data-logout]").forEach((button) => button.addEventListener("click", async () => {
     try { await api("/api/v1/auth/logout", { method: "POST" }); } catch (error) { showToast(error.message); return; }
-    state.authenticated = false; state.user = null; state.csrfToken = ""; state.accounts = []; state.view = "inbox"; resetMailbox(); render();
+    state.authenticated = false; state.user = null; state.csrfToken = ""; state.accounts = []; state.view = "inbox"; resetMailbox(); resetOutgoing(); render();
   }));
-  document.querySelectorAll("[data-nav]").forEach((button) => button.addEventListener("click", () => { state.view = button.dataset.nav; render(); }));
+  document.querySelectorAll("[data-nav]").forEach((button) => button.addEventListener("click", () => {
+    state.view = button.dataset.nav;
+    if (state.view === "sent" && !state.sentLoaded && !state.sentLoading) void fetchSent();
+    else render();
+  }));
   document.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => { state.view = button.dataset.view; render(); }));
   document.querySelectorAll("[data-email]").forEach((row) => row.addEventListener("click", async (event) => {
     if (event.target.closest("button")) return;
-    const selected = emails.find((email) => String(email.id) === row.dataset.email);
+    const fromSent = state.view === "sent";
+    const selected = (fromSent ? sentEmails : emails).find((email) => String(email.id) === row.dataset.email);
     if (!selected) return;
+    state.returnView = fromSent ? "sent" : "inbox";
     state.aiSummary = null;
     state.aiExtraction = null;
     state.aiDraft = "";
@@ -527,8 +584,17 @@ function bindEvents() {
   document.querySelector("[data-regenerate]")?.addEventListener("click", () => void aiDraftReply(state.aiDraftTone));
   document.querySelectorAll("[data-tone]").forEach((button) => button.addEventListener("click", () => void aiDraftReply(button.dataset.tone)));
   document.querySelector("[data-discard]")?.addEventListener("click", () => { state.view = "reading"; render(); });
-  document.querySelectorAll("[data-send]").forEach((button) => button.addEventListener("click", () => { state.view = "sent"; showToast("Message sent — human review complete"); }));
-  document.querySelector("[data-ai-compose]")?.addEventListener("click", () => { const field = document.querySelector("#compose-body"); field.value = "Hi,\n\nI’m following up with a quick update on our project progress. The team has completed the initial planning and is now preparing the interactive prototype.\n\nBest regards,\nAnon User"; showToast("AI draft inserted — review before sending"); });
+  // Keep what the user types in state so a re-render (toast, dialog, loading) never wipes it.
+  document.querySelector("#reply-text")?.addEventListener("input", (event) => { state.aiDraft = event.target.value; });
+  document.querySelector("#compose-to")?.addEventListener("input", (event) => { state.compose.to = event.target.value; });
+  document.querySelector("#compose-subject")?.addEventListener("input", (event) => { state.compose.subject = event.target.value; });
+  document.querySelector("#compose-body")?.addEventListener("input", (event) => { state.compose.body = event.target.value; });
+  document.querySelectorAll("[data-send]").forEach((button) => button.addEventListener("click", () => openSendConfirmation()));
+  document.querySelector("[data-cancel-send]")?.addEventListener("click", () => { if (state.sending) return; state.sendDraft = null; state.sendError = ""; render(); });
+  document.querySelector("[data-confirm-send]")?.addEventListener("click", () => void submitSend());
+  document.querySelectorAll("[data-sent-refresh]").forEach((button) => button.addEventListener("click", () => void fetchSent()));
+  document.querySelector("[data-sent-more]")?.addEventListener("click", () => void fetchSent(state.sentNextPageToken));
+  document.querySelector("[data-ai-compose]")?.addEventListener("click", () => { state.compose.body = "Hi,\n\nI’m following up with a quick update on our project progress. The team has completed the initial planning and is now preparing the interactive prototype.\n\nBest regards,\nAnon User"; showToast("AI draft inserted — review before sending"); });
   document.querySelector("[data-summarize-all]")?.addEventListener("click", () => showToast(`${emails.length} emails ready to summarise`));
   document.querySelector("[data-load-more]")?.addEventListener("click", () => void fetchEmails(state.nextPageToken));
   document.querySelector("[data-ai-summarise]")?.addEventListener("click", () => void aiSummarise());
@@ -599,6 +665,79 @@ async function fetchEmails(pageToken = null) {
   }
 }
 
+async function fetchSent(pageToken = null) {
+  if (state.sentLoading) return;
+  if (!pageToken) { sentEmails = []; state.sentNextPageToken = null; }
+  state.sentLoading = true;
+  state.sentError = "";
+  render();
+  try {
+    const query = new URLSearchParams({ max_results: "20", label: "SENT" });
+    if (pageToken) query.set("page_token", pageToken);
+    const payload = await api(`/api/v1/emails?${query}`);
+    const page = applyMailboxPage(sentEmails, payload, { append: Boolean(pageToken) });
+    sentEmails = page.messages;
+    state.sentNextPageToken = page.nextPageToken;
+    state.sentLoaded = true;
+  } catch (error) {
+    state.sentError = error.message;
+  } finally {
+    state.sentLoading = false;
+    render();
+  }
+}
+
+// Step 1 of sending: validate and show the recipients, subject and body for the user to confirm.
+// Nothing is sent until they press "Send now" in the dialog.
+function openSendConfirmation() {
+  const isReply = state.view === "reply";
+  const email = state.selectedEmail;
+  const draft = isReply
+    ? { isReply, to: (email?.reply_to || []).join(", "), subject: replySubject(email?.subject), body: state.aiDraft, replyToMessageId: String(email?.id || "") }
+    : { isReply, to: state.compose.to.trim(), subject: state.compose.subject.trim(), body: state.compose.body, replyToMessageId: null };
+  const problem = outgoingProblem({ isReply, to: draft.to, replyTo: email?.reply_to, body: draft.body });
+  if (problem) { showToast(problem); return; }
+  state.sendDraft = { ...draft, idempotencyKey: newIdempotencyKey() };
+  state.sendError = "";
+  render();
+}
+
+// Step 2: the user confirmed. The idempotency key stays the same across retries of this dialog, so a
+// retry after a lost response cannot send the message twice.
+async function submitSend() {
+  const draft = state.sendDraft;
+  if (!draft || state.sending) return;
+  state.sending = true;
+  state.sendError = "";
+  render();
+  try {
+    await api("/api/v1/emails/send", {
+      method: "POST",
+      body: JSON.stringify({
+        to: draft.isReply ? null : draft.to,
+        subject: draft.subject,
+        body: draft.body,
+        replyToMessageId: draft.isReply ? draft.replyToMessageId : null,
+        confirmed: true,
+        idempotencyKey: draft.idempotencyKey
+      })
+    });
+  } catch (error) {
+    state.sending = false;
+    state.sendError = error.message;
+    render();
+    return;
+  }
+  state.sending = false;
+  state.sendDraft = null;
+  if (draft.isReply) state.aiDraft = "";
+  else state.compose = { to: "", subject: "", body: "" };
+  state.sentLoaded = false;
+  state.view = "sent";
+  showToast("Message sent");
+  void fetchSent();
+}
+
 // Ask the AI to label a page of inbox messages. Runs after the list has rendered so a slow or
 // failed classification never blocks reading mail; unlabelled messages simply show no badge.
 async function classifyEmails(messages) {
@@ -623,6 +762,18 @@ async function classifyEmails(messages) {
     state.classifying = false;
     render();
   }
+}
+
+// Clears everything tied to the signed-in account (sent mail, unsent drafts, open dialogs).
+function resetOutgoing() {
+  sentEmails = [];
+  state.sentLoaded = false;
+  state.sentNextPageToken = null;
+  state.sentError = "";
+  state.sendDraft = null;
+  state.sendError = "";
+  state.sending = false;
+  state.compose = { to: "", subject: "", body: "" };
 }
 
 function resetMailbox() {

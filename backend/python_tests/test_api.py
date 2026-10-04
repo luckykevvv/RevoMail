@@ -115,7 +115,7 @@ def test_gmail_and_ai_routes_use_authenticated_provider(client, monkeypatch):
     monkeypatch.setattr(
         emails.gmail_service,
         "list_messages",
-        lambda _tokens, _max, _page: {
+        lambda _tokens, _max, _page, _label: {
             "messages": [{"id": "gmail-1", "subject": "Project update"}],
             "next_page_token": None,
         },

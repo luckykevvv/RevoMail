@@ -9,7 +9,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from backend.app.config import PROJECT_ROOT, Settings, settings
+from backend.app.audit import AuditRepository
 from backend.app.errors import AppError, error_payload
+from backend.app.idempotency import IdempotencyRepository
 from backend.app.jobs import JobRepository
 from backend.app.persistence import build_persistence
 from backend.app.routers import accounts, ai, auth, emails, health
@@ -35,6 +37,8 @@ def create_app(app_settings: Settings = settings) -> FastAPI:
         app.state.auth_repository = auth_repository
         app.state.oauth_transactions = oauth_repository
         app.state.job_repository = JobRepository(database, app_settings)
+        app.state.idempotency = IdempotencyRepository(database)
+        app.state.audit = AuditRepository(database)
         app.state.job_repository.recover_interrupted()
         yield
 

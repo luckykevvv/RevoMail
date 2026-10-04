@@ -65,3 +65,14 @@ class CalendarMutationRequest(BaseModel):
     timezone: str
     confirmed: bool = False
     idempotencyKey: str
+
+
+class SendEmailRequest(BaseModel):
+    """Send a new email, or a reply when replyToMessageId is set (the recipient then comes from that message)."""
+
+    to: str | None = Field(default=None, max_length=2000)
+    subject: str = Field(default="", max_length=300)
+    body: str = Field(min_length=1, max_length=100_000)
+    replyToMessageId: str | None = Field(default=None, max_length=256)
+    confirmed: bool = False
+    idempotencyKey: str = Field(min_length=8, max_length=128)

@@ -95,9 +95,9 @@ Acceptance criteria:
 - [ ] Support regeneration and tones such as Professional, Concise, and Friendly.
 - [ ] Support configurable reply length.
 - [ ] Let users edit the complete message before sending.
-- [ ] Never allow AI to send a message automatically.
-- [ ] Show the final recipients, subject, and body for confirmation before sending.
-- [ ] Prevent repeated clicks from sending the same message more than once.
+- [x] Never allow AI to send a message automatically.
+- [x] Show the final recipients, subject, and body for confirmation before sending.
+- [x] Prevent repeated clicks from sending the same message more than once.
 
 Acceptance criteria:
 

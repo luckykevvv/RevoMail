@@ -21,3 +21,17 @@ export function applyClassifications(messages, classifications) {
 export function setMessageUnread(messages, id, unread) {
   return messages.map((message) => (String(message.id) === String(id) ? { ...message, unread: Boolean(unread) } : message));
 }
+
+export function replySubject(subject) {
+  const text = String(subject || "").trim();
+  if (/^re:/i.test(text)) return text;
+  return text ? `Re: ${text}` : "Re:";
+}
+
+// Returns a user-facing problem with an outgoing message, or "" when it is ready to be reviewed.
+// Address syntax is validated by the server; replies are addressed server-side from the original message.
+export function outgoingProblem({ isReply, to, replyTo, body }) {
+  if (!String(body || "").trim()) return "Write a message before sending.";
+  if (isReply) return Array.isArray(replyTo) && replyTo.length ? "" : "This message has no address to reply to.";
+  return String(to || "").trim() ? "" : "Enter a recipient before sending.";
+}
