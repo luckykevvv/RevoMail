@@ -47,3 +47,5 @@ Tasks and Calendar reused the same mixed renderer, while sanitized marketing and
 
 - The user explicitly requested committing and pushing the current reviewed work to `origin/module-7-voice-settings-accessibility` without changing other branches.
 - The user also requested English issue comments recording that #67 and #68 remain unresolved. Neither issue may be closed without the reporter's later confirmation.
+- Committed the reviewed implementation as `ed429f3` (`fix: refine extraction and email rendering`) and pushed it normally to `origin/module-7-voice-settings-accessibility`; no force push or other branch update was used.
+- Posted English follow-up comments on open issues #67 and #68 stating that the real-message extra first line and related vertical text remain unresolved after the reporter's retest.
