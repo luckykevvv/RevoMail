@@ -70,11 +70,14 @@
       "required": ["title", "startsAt", "timezone", "confirmed", "idempotencyKey"],
       "properties": {
         "title": { "type": "string", "minLength": 1, "maxLength": 300 },
-        "startsAt": { "type": "string", "format": "date-time" },
-        "endsAt": { "type": ["string", "null"], "format": "date-time" },
-        "timezone": { "type": "string", "minLength": 1 },
+        "startsAt": { "type": "string", "maxLength": 32, "description": "Local YYYY-MM-DDTHH:MM, or YYYY-MM-DD for all-day events" },
+        "endsAt": { "type": ["string", "null"], "maxLength": 32, "description": "Local end time, or inclusive last day for all-day events" },
+        "timezone": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "allDay": { "type": "boolean", "default": false },
+        "location": { "type": "string", "maxLength": 500 },
+        "description": { "type": "string", "maxLength": 2000 },
         "confirmed": { "const": true },
-        "idempotencyKey": { "type": "string", "minLength": 1 }
+        "idempotencyKey": { "type": "string", "minLength": 8, "maxLength": 128 }
       },
       "additionalProperties": false
     },

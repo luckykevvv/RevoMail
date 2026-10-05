@@ -38,13 +38,16 @@
     "desktop:ui-smoke": "node scripts/smoke-electron-ui.mjs",
     "desktop:pack": "npm run build && npm run backend:pack && electron-builder --dir",
     "desktop:dist": "npm run build && npm run backend:pack && electron-builder",
-    "verify:push": "npm test && npm run build && npm run desktop:pack && npm run desktop:smoke"
+    "verify:push": "npm test && npm run build && npm run desktop:pack && npm run desktop:smoke",
+    "test:browser": "playwright test"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "^1.63.0",
     "electron": "^43.2.0",
     "electron-builder": "^26.15.3",
     "express": "^4.21.2",

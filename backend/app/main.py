@@ -11,11 +11,15 @@ from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from backend.app.config import PROJECT_ROOT, Settings, settings
+from backend.app.audit import AuditRepository
 from backend.app.errors import AppError, error_payload
+from backend.app.idempotency import IdempotencyRepository
 from backend.app.jobs import JobRepository
 from backend.app.mailbox import MailboxRepository
 from backend.app.persistence import build_persistence
-from backend.app.routers import accounts, ai, auth, emails, health
+from backend.app.routers import accounts, ai, auth, calendar, emails, health, preferences, voice
+from backend.app.preferences import PreferencesRepository
+from backend.app.services.speech import SpeechService
 from backend.app.services.mailbox import MailboxSyncService
 
 
@@ -39,10 +43,14 @@ def create_app(app_settings: Settings = settings) -> FastAPI:
         app.state.auth_repository = auth_repository
         app.state.oauth_transactions = oauth_repository
         app.state.job_repository = JobRepository(database, app_settings)
+        app.state.idempotency = IdempotencyRepository(database)
+        app.state.audit = AuditRepository(database)
         app.state.job_repository.recover_interrupted()
         app.state.mailbox_repository = MailboxRepository(database, auth_repository.protector)
         app.state.mailbox_sync = MailboxSyncService(app.state.mailbox_repository, auth_repository, app.state.job_repository)
         app.state.settings = app_settings
+        app.state.preferences = PreferencesRepository(database, app_settings)
+        app.state.speech = SpeechService(app_settings)
         worker = asyncio.create_task(app.state.mailbox_sync.run())
         try:
             yield
@@ -103,7 +111,10 @@ def create_app(app_settings: Settings = settings) -> FastAPI:
     app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
     app.include_router(accounts.router, prefix="/api/v1/accounts", tags=["accounts"])
     app.include_router(emails.router, prefix="/api/v1/emails", tags=["emails"])
+    app.include_router(calendar.router, prefix="/api/v1/calendar", tags=["calendar"])
     app.include_router(ai.router, prefix="/api/v1/ai", tags=["ai"])
+    app.include_router(preferences.router, prefix="/api/v1/settings", tags=["settings"])
+    app.include_router(voice.router, prefix="/api/v1/voice", tags=["voice"])
 
     dist_path = PROJECT_ROOT / "dist"
 

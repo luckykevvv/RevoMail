@@ -15,7 +15,7 @@ afterEach(() => {
 
 
 describe("standalone backend pruning", () => {
-  it("keeps Gmail and OAuth profile discovery data and removes unrelated APIs", () => {
+  it("keeps Calendar, Gmail and OAuth profile discovery data and removes unrelated APIs", () => {
     const backendDirectory = mkdtempSync(path.join(os.tmpdir(), "revomail-backend-"));
     temporaryDirectories.push(backendDirectory);
     const documentsDirectory = path.join(
@@ -30,10 +30,11 @@ describe("standalone backend pruning", () => {
     writeFileSync(path.join(documentsDirectory, "oauth2.v2.json"), "oauth2", "utf8");
     writeFileSync(path.join(documentsDirectory, "drive.v3.json"), "drive", "utf8");
 
+    writeFileSync(path.join(documentsDirectory, "calendar.v3.json"), "calendar", "utf8");
     const result = pruneGoogleDiscoveryDocuments(backendDirectory);
 
     expect(result.removedFiles).toBe(1);
     expect(result.removedBytes).toBe(5);
-    expect(readdirSync(documentsDirectory)).toEqual(["gmail.v1.json", "oauth2.v2.json"]);
+    expect(readdirSync(documentsDirectory)).toEqual(["calendar.v3.json", "gmail.v1.json", "oauth2.v2.json"]);
   });
 });

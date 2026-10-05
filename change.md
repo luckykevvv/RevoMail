@@ -1,59 +1,45 @@
-# Integrate the Module 7 branch baseline
+# Module 7: voice, preferences, and accessibility
 
-Date: 2026-09-28
+Date: 2026-10-05
 
-## Task Scope
+## Scope and reason
 
-Create `module-7-voice-settings-accessibility` from `origin/email_classification` and integrate the newer `origin/main` mailbox, sending, security, and navigation-performance work without losing AI priority classification or the real Google OAuth scope-normalisation fix.
+Implement Issues #7, #27, #31, #37, #33, and #34 on baseline afdf154. Replace simulated voice and settings with reviewed commands, permission-aware cloud transcription, persistent preferences, and accessible interactions.
 
 ## Changes
 
-- Created the Module 7 working branch from `origin/email_classification`.
-- Integrated `origin/main` and resolved the overlapping frontend, mailbox, OAuth, API-test, documentation, and task-history changes.
-- Retained the latest mailbox cache, synchronization, safe HTML rendering, confirmed idempotent sending, CSRF checks, request cancellation, persistent application shell, and repeated-navigation performance fixes from `origin/main`.
-- Retained the AI High/Medium/Low classification endpoint, inbox badges and filters, classification tests, and Google OAuth relaxed scope handling from `email_classification`.
-- Diagnosed the real Google callback failure to the token-exchange connection. Its exception chain ended in `PermissionError`, proving that the restricted launch environment denied the backend's outbound Google connection rather than Google rejecting the OAuth configuration. Added bounded connect-only retries, a 15-second timeout, stage-specific safe diagnostics, and an actionable `AUTHORIZATION_NETWORK_FAILED` UI message; read retries remain disabled so an authorization code is never replayed after an uncertain response.
-- Disabled Uvicorn request-target access logging because an OAuth callback URL contains a short-lived authorization code. Application diagnostics now retain only a correlation ID, request stage, and exception class chain.
-- Separated the initial mailbox synchronisation placeholder from the completed empty-mailbox state. A zero-message mailbox now announces `Synchronising your inbox…` while the provider job is active and displays `Your inbox is empty` only after synchronisation finishes.
-- Formatted provider timestamps with the browser's local timezone, kept list dates on one line, and retained the original ISO value in semantic `datetime` attributes.
-- Upgraded formatted-email rendering to preserve allowlisted inline CSS, HTTPS images, safe links, and raster CID images up to 2 MB while continuing to strip scripts, active embeds, SVG, dangerous URLs, and unsupported CSS. The sandboxed message frame uses a restrictive CSP and no-referrer policy.
-- Added a safe one-time provider refresh when opening HTML cached by the earlier destructive sanitiser, then stores a version marker so subsequent opens remain cache-only. Cached content remains readable if that refresh cannot reach Gmail.
-- Fixed the Desktop control room falsely reporting `FAILED` when a healthy RevoMail backend already owns the configured port. Startup now verifies the endpoint identity before spawning, reuses an existing `revomail-api` without claiming its process, labels it `Existing service`, and keeps stop/restart controls disabled for an externally managed process. Unrelated HTTP services are never adopted.
-- Preserved both branches' colliding task records by keeping the classification record at `change/change-16.md` and archiving the main Module 3 and both active branch records as `change/change-19.md` through `change/change-21.md`.
+- Archived the baseline record as change/change-22.md.
+- Continued Module 7 with the requested integration of main at 02f7030. Preserved the original HEAD in codex/backup-module7-before-main-20261005 and all tracked/untracked source changes in stash (module7-before-main-20261005).
+- Merged with --no-commit --no-ff and reapplied the stash. Conflicts were resolved by preserving the Module 3/7 architecture and adapting main's functionality. No commit, push or provider verification is implied.
+- Preserved incoming archive collisions 19–22 as 25–28 and incoming main's active record as 29. Existing archives, including Module 7's archive 22, remain intact.
+- Integrated Calendar extraction/confirmation, CSRF and separate calendar idempotency; retained cached inbox and canonical confirmed-send API. Added a separate SENT list and custom AI draft instructions with request-scoped preferences.
+- Kept Calendar, Gmail and OAuth discovery resources in desktop packages; added least-privilege Calendar event authorization.
+- Added live reply metadata for reviewed Reply-To/SENT recipients without turning normal cached reads into provider calls. Preserved the exact reviewed send recipients and existing send response/status contract; carried forward References threading.
+- Calendar dialogs use the existing focus trap and stable overlay, preserve edits across background refresh, require explicit confirmation, and retain keys across retries/reopening. Added English/Chinese copy, light/dark contrast corrections and 320px layout checks.
+- Updated README, todo, environment examples, API docs and shared Calendar schema. Imported main tests were adapted to the retained canonical sending API rather than enabling a competing send route.
 
-## Reason
+## Commands and validation
 
-Module 7 must build on the more advanced email-classification branch, while the latest main branch contains the fix for progressive UI blocking after repeatedly opening different emails and newer mailbox/security behavior required by the project.
+- Reviewed clean Git status and skip-worktree entries (none).
+- Switched to module-7-voice-settings-accessibility tracking the requested remote baseline.
+- Ran git fetch origin main, git branch backup, git stash push --include-untracked, git merge --no-commit --no-ff origin/main, and git stash apply. Backups are retained.
+- npm ci passed and installed the merged pinned tzdata requirement. npm reported 14 dependency audit findings (6 moderate, 8 high); no unrelated dependency upgrade was attempted.
+- npm test: 112 JavaScript tests passed; Python initially exposed three integration failures (Calendar key bounds, reply token budget, and fixture Base64 padding), which were corrected. Latest npm run test:python: 140 passed, including Calendar CSRF, confirmation, DST, rate limits, unknown outcomes, and per-user/operation idempotency isolation.
+- npm run build passed. npm run desktop:pack passed on Windows, including the final artifact refresh after the Sent-star fix (exit 0).
+- BROWSER_CHANNEL=msedge npm run test:browser: all 7 passed (desktop/320px, settings, voice review, synthetic native media capture, compose, Sent, Calendar and axe). Initial Calendar contrast failures were fixed. Additional Calendar-only light/dark and keyboard-trap checks: 2 passed.
+- npm run desktop:smoke passed against the packaged service: database health OK, session endpoint OK, Google OAuth start returned 307 to accounts.google.com. This does not verify OAuth completion.
+- Inspected the packaged Calendar/Gmail/OAuth discovery documents and Australia/Sydney tzdata resource: present.
+- Final git diff --check and git diff --cached --check passed. All merge conflicts are resolved and changes are staged for review. The staged file list contains no real .env, database, log, dependency directory or packaged artifact.
+- Real packaged Electron with an isolated build-directory profile: launcher start/open/stop and signed-out mailbox rendering passed; both windows have contextIsolation=true, sandbox=true and nodeIntegration=false. The first automation attempt timed out locating a window; a follow-up inspection of all windows verified the expected launcher and mailbox state. Native microphone prompts were not exercised.
 
-## Key Commands
+## Remaining verification
 
-- `git fetch origin email_classification`
-- `git switch -c module-7-voice-settings-accessibility origin/email_classification`
-- `git merge --no-commit --no-ff origin/main`
-- `git commit -m "merge: establish module 7 baseline"`
-- `git push -u origin module-7-voice-settings-accessibility`
-- `npm test`
-- `npm run build`
-- `npm run setup`
-- `npm run desktop:dev`
-- `npm run start`
-- `Invoke-RestMethod http://127.0.0.1:4173/api/v1/health`
-- `Invoke-WebRequest http://127.0.0.1:4173/`
-- Real Google sign-in retry with sanitized OAuth callback logging
+- Real Google OAuth completion, Gmail sending, Calendar writes and cloud transcription remain unverified without dedicated provider-test credentials. Automated coverage uses sanitized fixtures and synthetic audio.
+- Physical microphone permission prompts, manual Windows screen-reader review and native macOS/Linux verification remain pending. Automated axe checks are not a claim of full WCAG conformance.
+- Backup reference and original stash are retained. No issue closure or real-provider completion is implied.
 
-## Validation
+## Publication follow-up
 
-- All 67 JavaScript tests passed, including regression coverage for synchronising, completed empty-mailbox, invalid-date, local-timezone, existing-service reuse, and rejection of unrelated services.
-- All 57 Python tests passed, including safe email CSS/HTTPS-image handling and CID-image embedding.
-- The Vite production build passed.
-- The production FastAPI process started successfully; `/api/v1/health` returned `ok` with the database check `ok`, and `/` returned the built frontend with HTTP 200.
-- The real Electron development launcher started while the existing backend owned port 4173. It reused PID 29264 without spawning another backend, opened live connections from its renderer, and left the original listener healthy.
-- A real Google consent flow reached the callback with all requested scopes. Stage-specific logging identified `ConnectionError > MaxRetryError > NewConnectionError > PermissionError` during token exchange in the restricted process. Credential-free probes reached Google's token endpoint, and the same backend was restarted with outbound-network permission for the final interactive retry.
-- The contributor confirmed that real Google login and Gmail message reading succeeded after the backend was restarted with outbound-network permission.
-- `git diff --cached --check` passed before publication.
-
-## Known Issues and Remaining Work
-
-- OpenAI and microphone behavior are not exercised by this baseline merge.
-- Repeated email navigation is covered by the imported regression tests and implementation review; a long real-Gmail stress walkthrough was not performed in this task.
-- Module 7 voice, settings, and accessibility implementation has not started; this task establishes its safe baseline.
+- The user explicitly requested committing and pushing the reviewed result to the current module-7-voice-settings-accessibility branch.
+- Rechecked staged changes, working-tree differences, conflict entries and skip-worktree entries before publication. No unstaged changes or unresolved conflicts were present; git diff --cached --check passed.
+- The merge will be committed and pushed normally to origin/module-7-voice-settings-accessibility, without force-pushing. Push completion is verified separately against the remote branch after the command succeeds.

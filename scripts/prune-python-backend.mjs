@@ -2,7 +2,7 @@ import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 
 
-const REQUIRED_DISCOVERY_DOCUMENTS = new Set(["gmail.v1.json", "oauth2.v2.json"]);
+const REQUIRED_DISCOVERY_DOCUMENTS = new Set(["gmail.v1.json", "oauth2.v2.json", "calendar.v3.json"]);
 
 
 export function pruneGoogleDiscoveryDocuments(backendDirectory) {

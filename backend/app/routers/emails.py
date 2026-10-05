@@ -1,3 +1,5 @@
+from typing import Literal
+
 from fastapi import APIRouter, Query, Request
 from fastapi.concurrency import run_in_threadpool
 
@@ -55,9 +57,16 @@ async def list_emails(
     category: str | None = Query(default=None, max_length=50),
     unread: bool | None = None,
     starred: bool | None = None,
+    label: Literal["INBOX", "SENT"] = "INBOX",
 ):
     _session, account, tokens = require_mailbox(request)
     repository = request.app.state.mailbox_repository
+    if label == "SENT":
+        try:
+            page = await run_in_threadpool(GmailAdapter(tokens).list_messages, min(max_results, 50), page_token, query.strip(), ["SENT"])
+        except MailProviderError as exc:
+            raise _provider_error(exc) from exc
+        return {"messages": [_legacy_summary(item) for item in page["items"]], "next_page_token": page.get("nextCursor"), "sync": None}
     if query.strip():
         try:
             page = await run_in_threadpool(
@@ -173,10 +182,23 @@ async def get_email(message_id: str, request: Request):
         # layout and image sources. Refresh it once from Gmail, then persist the
         # version marker so later opens remain cache-only.
         provider_message = await run_in_threadpool(GmailAdapter(tokens).get_message, message_id)
+        if not provider_message.get("_inInbox", True):
+            return _legacy_detail(provider_message)
         await run_in_threadpool(repository.upsert_messages, account["id"], [provider_message])
         message = await run_in_threadpool(repository.get_message, account["id"], message_id)
+        message["reply_to"] = provider_message.get("reply_to", [message["sender"]])
         return _legacy_detail(message)
     except MailProviderError as exc:
         if message:
             return _legacy_detail(message)
+        raise _provider_error(exc) from exc
+
+
+@router.get("/{message_id}/reply-metadata")
+async def reply_metadata(message_id: str, request: Request):
+    _session, _account, tokens = require_mailbox(request)
+    try:
+        message = await run_in_threadpool(GmailAdapter(tokens).get_message, message_id)
+        return {"reply_to": message.get("reply_to", []), "subject": message["subject"]}
+    except MailProviderError as exc:
         raise _provider_error(exc) from exc

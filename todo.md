@@ -1,6 +1,6 @@
 # RevoMail Project Requirements and TODO
 
-Last updated: 2026-08-06
+Last updated: 2026-10-05
 
 ## 1. Project Objectives
 
@@ -37,7 +37,7 @@ Target users:
 
 ### Not Yet Completed
 
-- [ ] Verify the merged OAuth, Gmail, and OpenAI implementations with provider test credentials; speech recognition and calendar APIs are not implemented.
+- [ ] Verify the merged OAuth, Gmail, and OpenAI implementations with provider test credentials; speech transcription and Calendar creation now have fixture coverage; dedicated provider-account verification remains pending.
 - [ ] Verify Google OAuth authorization, refresh, and revocation end to end with a provider test application and test account.
 - [ ] Plan multi-user and additional-provider support as a dedicated future module with child issues; neither is part of the current Gmail-only MVP.
 - [x] Add Python SQLite persistence, encrypted credentials, durable user sessions, ordered migrations, and a recoverable job foundation. The retained Node implementation remains regression-only migration reference.
@@ -94,9 +94,9 @@ Acceptance criteria:
 - [ ] Support regeneration and tones such as Professional, Concise, and Friendly.
 - [ ] Support configurable reply length.
 - [ ] Let users edit the complete message before sending.
-- [ ] Never allow AI to send a message automatically.
-- [ ] Show the final recipients, subject, and body for confirmation before sending.
-- [ ] Prevent repeated clicks from sending the same message more than once.
+- [x] Never allow AI to send a message automatically.
+- [x] Show the final recipients, subject, and body for confirmation before sending.
+- [x] Prevent repeated clicks from sending the same message more than once.
 
 Acceptance criteria:
 
@@ -205,7 +205,7 @@ Acceptance criteria:
 ### P0: External Services
 
 - [x] Implement a Google Gmail API adapter. **Automated fixtures pass; dedicated provider-account validation remains pending.**
-- [ ] Implement a Google Calendar adapter.
+- [x] Implement a Google Calendar adapter. **Fixture tests and Windows packaging pass; dedicated provider-account verification remains pending.**
 - [ ] Define a replaceable LLM provider interface.
 - [ ] Define a Speech-to-Text provider interface.
 - [ ] Add timeouts, retries, and rate-limit handling for every external service.
@@ -276,3 +276,11 @@ Acceptance criteria:
 - [ ] Core workflows pass automated tests and a manual accessibility review.
 - [ ] No high-severity security vulnerabilities or sensitive-data leaks remain.
 - [ ] README, `.env.example`, deployment documentation, and `change.md` match the implemented system.
+
+## Module 7 and main integration verification (2026-10-05)
+
+- Implemented account preferences, English/Chinese interface, reviewed cloud transcription and deterministic English commands; real cloud and physical microphone checks remain pending.
+- Integrated main's Calendar extraction/confirmation, guided reply/compose drafting, Sent pagination and local timestamp formatting while retaining cached INBOX, CSRF and the established send contract.
+- Calendar creation requires explicit confirmation, CSRF and an independent idempotency operation; DST ambiguity, missing dates, rate limits and unknown outcomes are handled without automatic duplicate creation.
+- Automated logic/API/browser accessibility checks use provider fixtures and synthetic audio. They do not establish real-provider completion, full WCAG conformance, or Windows screen-reader usability.
+- Native macOS/Linux packages, real Google Calendar/OAuth, cloud transcription and manual assistive-technology checks remain outstanding. See change.md for commands and final results.

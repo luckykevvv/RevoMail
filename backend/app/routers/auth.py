@@ -25,6 +25,7 @@ router = APIRouter()
 logger = logging.getLogger("revomail.api.oauth")
 
 SCOPES = [
+    "https://www.googleapis.com/auth/calendar.events",
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",

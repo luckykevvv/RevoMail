@@ -206,6 +206,7 @@ class AuthRepository:
                 "id": row["id"], "provider": row["provider"], "email": row["email"], "displayName": row["displayName"],
                 "status": "REAUTHORIZATION_REQUIRED" if requires_reauthorization else row["status"],
                 "requiresReauthorization": requires_reauthorization, "scopes": scopes,
+                "calendarRequiresReauthorization": not any(scope in scopes for scope in ("https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar")),
             })
         return accounts
 

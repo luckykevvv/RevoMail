@@ -104,6 +104,13 @@ class Settings(BaseSettings):
 
     openai_api_key: str = ""
     openai_model: str = "gpt-4o"
+    ai_allowed_models: list[str] = Field(default_factory=list)
+    speech_model: str = "gpt-transcribe"
+    speech_api_url: str = "https://api.openai.com/v1/audio/transcriptions"
+    speech_max_seconds: int = Field(default=60, ge=1, le=300)
+    speech_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1024, le=25 * 1024 * 1024)
+    speech_limit_per_minute: int = Field(default=6, ge=1, le=60)
+    speech_timeout_seconds: int = Field(default=30, ge=1, le=120)
 
     @model_validator(mode="after")
     def validate_runtime(self):

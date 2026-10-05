@@ -1,7 +1,8 @@
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, ipcMain, Menu, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
+import { installAudioPermissions } from "./media-permissions.js";
 import { ZodError } from "zod";
 import { DesktopSettingsStore } from "./settings-store.js";
 import { ServiceController } from "./service-controller.js";
@@ -91,6 +92,19 @@ async function openMailWindow() {
     webPreferences: { partition: "persist:revomail" }
   }));
   protectNavigation(mailWindow, { allowAppOrigin: true, allowProviderAuth: true });
+  installAudioPermissions({
+    window: mailWindow,
+    origin: () => serviceController.snapshot().url,
+    confirm: async () => {
+      const result = await dialog.showMessageBox(mailWindow, {
+        type: "question", title: "RevoMail microphone / 麦克风权限",
+        message: "Allow microphone access for voice commands? / 允许使用麦克风输入语音命令？",
+        detail: "Audio is uploaded to OpenAI only when you finish recording. / 结束录音后，音频将上传至 OpenAI 转写。",
+        buttons: ["Deny / 拒绝", "Allow / 允许"], defaultId: 0, cancelId: 0,
+      });
+      return result.response === 1;
+    }
+  });
   mailWindow.once("ready-to-show", () => mailWindow.show());
   mailWindow.on("closed", () => { mailWindow = null; });
   await mailWindow.loadURL(snapshot.url);

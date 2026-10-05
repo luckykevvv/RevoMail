@@ -59,12 +59,21 @@ class TaskMutationRequest(BaseModel):
 
 
 class CalendarMutationRequest(BaseModel):
+    """Create a Google Calendar event.
+
+    Times are local wall-clock values in `timezone` (an IANA name): "YYYY-MM-DDTHH:MM" for timed events, or
+    "YYYY-MM-DD" when `allDay` is true (`endsAt` is then the inclusive last day).
+    """
+
     title: str = Field(min_length=1, max_length=300)
-    startsAt: str
-    endsAt: str | None = None
-    timezone: str
+    startsAt: str = Field(max_length=32)
+    endsAt: str | None = Field(default=None, max_length=32)
+    timezone: str = Field(max_length=64)
+    allDay: bool = False
+    location: str = Field(default="", max_length=500)
+    description: str = Field(default="", max_length=2000)
     confirmed: bool = False
-    idempotencyKey: str
+    idempotencyKey: str = Field(min_length=8, max_length=128)
 
 
 class MessageStateMutation(BaseModel):

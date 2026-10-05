@@ -5,7 +5,7 @@ import re
 import socket
 from email.header import decode_header, make_header
 from email.message import EmailMessage
-from email.utils import parsedate_to_datetime
+from email.utils import parsedate_to_datetime, getaddresses, formataddr
 from typing import Any
 
 import bleach
@@ -222,6 +222,7 @@ def normalise_message(detail: dict) -> dict:
     plain, html, attachments = _extract_parts(payload)
     return {
         "id": str(detail["id"]), "threadId": detail.get("threadId"), "historyId": detail.get("historyId"),
+        "reply_to": reply_recipients(headers, labels), "references": _header(headers, "References"),
         "rfcMessageId": _header(headers, "Message-ID"), "sender": _header(headers, "From"),
         "recipients": _addresses(headers, "To", "Cc", "Bcc"), "subject": _header(headers, "Subject") or "(no subject)",
         "receivedAt": _received_at(detail, headers), "preview": str(detail.get("snippet") or ""),
@@ -360,12 +361,17 @@ class GmailAdapter:
             source = self.get_message(payload["inReplyToMessageId"])
             if source.get("rfcMessageId"):
                 message["In-Reply-To"] = source["rfcMessageId"]
-                message["References"] = source["rfcMessageId"]
+                message["References"] = (source.get("references", "") + " " + source["rfcMessageId"]).strip()
             if source.get("threadId"):
                 body["threadId"] = source["threadId"]
         message.set_content(payload["bodyText"])
         body["raw"] = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii").rstrip("=")
-        result = self._execute(self.gmail.users().messages().send(userId="me", body=body))
+        try:
+            result = self._execute(self.gmail.users().messages().send(userId="me", body=body))
+        except (InvalidAuthorization, ProviderRateLimited):
+            raise
+        except MailProviderError as exc:
+            raise ProviderTimeout() from exc
         return {"providerMessageId": str(result["id"]), "threadId": result.get("threadId")}
 
 
@@ -391,3 +397,72 @@ def get_message(tokens: dict, message_id: str) -> dict:
         "category": item["category"], "attachments": item["attachments"], "body_plain": item["bodyText"],
         "body_html": item["bodyHtmlSafe"] or None, "body_html_clean": item["bodyHtmlSafe"] or None,
     }
+
+
+MAX_RECIPIENTS = 50
+_ADDRESS_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+class MessageValidationError(ValueError):
+    pass
+
+def parse_recipients(raw: str) -> list[str]:
+    """Parse and validate a To field. Raises MessageValidationError on anything unsafe or malformed."""
+    if not raw or re.search(r"[\r\n\x00]", raw):
+        raise MessageValidationError("Enter at least one valid recipient email address.")
+    recipients: list[str] = []
+    for name, address in getaddresses([raw]):
+        address = address.strip()
+        if not _ADDRESS_RE.match(address) or re.search(r"[\r\n\x00]", name):
+            raise MessageValidationError("One of the recipient email addresses is not valid.")
+        recipients.append(formataddr((name, address)) if name else address)
+    if not recipients:
+        raise MessageValidationError("Enter at least one valid recipient email address.")
+    if len(recipients) > MAX_RECIPIENTS:
+        raise MessageValidationError(f"A message can have at most {MAX_RECIPIENTS} recipients.")
+    return recipients
+
+
+def reply_recipients(headers: list[dict], label_ids: list[str]) -> list[str]:
+    """
+    Work out who a reply to this message should go to.
+
+    - A message you sent (SENT label): reply to the people you sent it to.
+    - Anything else: Reply-To when the sender set one, otherwise From.
+    Returns [] when no valid recipient can be determined.
+    """
+    if "SENT" in label_ids:
+        raw = _header(headers, "To")
+    else:
+        raw = _header(headers, "Reply-To") or _header(headers, "From")
+    try:
+        return parse_recipients(raw)
+    except MessageValidationError:
+        return []
+
+
+def reply_subject(subject: str) -> str:
+    subject = (subject or "").strip()
+    if re.match(r"^re:", subject, flags=re.IGNORECASE):
+        return subject
+    return f"Re: {subject}" if subject else "Re:"
+
+
+def build_mime(
+    to: list[str],
+    subject: str,
+    body: str,
+    in_reply_to: str = "",
+    references: str = "",
+) -> EmailMessage:
+    """Build the outgoing MIME message. Header values containing line breaks are rejected."""
+    for value in (subject, in_reply_to, references):
+        if re.search(r"[\r\n\x00]", value or ""):
+            raise MessageValidationError("The subject contains invalid characters.")
+    message = EmailMessage()
+    message["To"] = ", ".join(to)
+    message["Subject"] = subject
+    if in_reply_to:
+        message["In-Reply-To"] = in_reply_to
+        message["References"] = (references + " " + in_reply_to).strip() if references else in_reply_to
+    message.set_content(body)
+    return message

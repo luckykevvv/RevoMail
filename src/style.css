@@ -38,6 +38,10 @@ body[data-theme="dark"] {
   --muted: #9ba9be;
   --line: #28364a;
   --line-strong: #3a4a63;
+  --blue: #8ec5ff;
+  --green: #7cdbaf;
+  --amber: #ffc078;
+  --red: #ffaaaa;
   --blue-light: #173968;
   --shadow-sm: 0 2px 12px rgba(0,0,0,.2);
   --shadow-lg: 0 28px 80px rgba(0,0,0,.35);
@@ -378,6 +382,40 @@ input.input-shell { padding: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+body[data-theme="dark"] .danger-button { color: #ffb4b4; }
+body[data-theme="dark"] .primary-button { background: #0754d5; color: #fff; }
+
+/* Module 7: persistent controls, visible focus, and narrow-screen dialogs. */
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 3px solid #0757c7; outline-offset: 3px; }
+[data-theme="dark"] :focus-visible { outline-color: #8ec5ff; }
+html[data-reduce-motion="true"] *, html[data-reduce-motion="true"] *::before, html[data-reduce-motion="true"] *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+.skip-link { position: fixed; top: -100px; left: 12px; z-index: 300; padding: 12px; background: var(--surface); color: var(--ink); }
+.skip-link:focus { top: 12px; }
+fieldset.setting-group { min-width: 0; padding: 12px 0; margin: 0; }
+fieldset.setting-group legend { margin-left: 20px; padding: 0 6px; font-weight: 700; }
+.setting-row input[type="checkbox"] { width: 24px; height: 24px; accent-color: var(--blue); }
+.voice-modal { max-height: calc(100dvh - 32px); overflow-y: auto; overflow-wrap: anywhere; }
+.voice-modal textarea { display: block; width: 100%; resize: vertical; margin: 10px 0; padding: 12px; color: var(--ink); background: var(--surface-soft); border: 1px solid var(--line); border-radius: 8px; }
+.voice-controls, .voice-hints { display: flex; flex-wrap: wrap; gap: 8px; }
+.voice-modal .privacy-note { font-size: 12px; line-height: 1.6; }
+.voice-modal a { color: var(--blue); text-decoration: underline; }
+.toast.error { border: 2px solid #ed9696; }
+.email-content, .message-from > div, .task-copy, .setting-name { min-width: 0; }
+.account-provider small, .message-from, .send-review dd { overflow-wrap: anywhere; }
+@media (max-width: 380px) {
+  .workspace { padding-inline: 10px; }
+  .modal-backdrop { padding: 8px; }
+  .voice-modal, .confirm-modal { padding: 16px; }
+  .category-tabs { flex-wrap: wrap; }
+  .composer-footer, .tone-row, .account-actions { flex-wrap: wrap; }
+  .compose-tools { flex-wrap: wrap; }
+  .setting-row { padding-inline: 14px; }
+}
+@media (max-width: 720px) {
+  .composer-footer .secondary-button { display: inline-flex; }
+  .composer-footer { flex-wrap: wrap; gap: 12px; }
+  .nav-item span { font-size: 10px; }
+}
 
 /* AI priority classification */
 .priority-filter { max-width: 1180px; margin: 14px auto 0; display: flex; flex-wrap: wrap; gap: 8px; }
@@ -398,3 +436,39 @@ input.input-shell { padding: 0; }
   .priority-filter { margin-top: 12px; padding: 0 12px; }
   .email-content .priority-badge { justify-self: start; }
 }
+
+.send-modal { width: min(560px, 100%); max-height: calc(100vh - 40px); overflow: auto; padding: 25px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface); box-shadow: var(--shadow-lg); animation: modal-in .28s cubic-bezier(.2,.8,.2,1) both; }
+.send-summary { display: grid; grid-template-columns: 70px 1fr; gap: 8px 12px; margin: 18px 0 12px; font-size: 14px; }
+.send-summary dt { color: var(--muted); }
+.send-summary dd { margin: 0; overflow-wrap: anywhere; color: var(--ink); }
+.send-body { max-height: 240px; overflow: auto; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-soft); color: var(--ink); font-size: 14px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.send-error { margin: 12px 0 0; color: #b42318; font-size: 13px; }
+.send-modal .modal-footer { margin-top: 18px; justify-content: flex-end; }
+
+.ai-prompt { margin-top: 18px; padding: 14px; display: grid; gap: 10px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-soft); }
+.ai-prompt > label span { display: flex; align-items: center; gap: 7px; color: var(--blue); font-weight: 600; font-size: 13px; }
+.ai-prompt textarea { width: 100%; min-height: 58px; resize: vertical; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; outline: 0; color: var(--ink); background: var(--surface); font: inherit; font-size: 14px; line-height: 1.5; }
+.ai-prompt textarea:focus { border-color: var(--blue); }
+.ai-prompt-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.ai-prompt .tone-row { padding: 0; border: 0; }
+.ai-prompt small { color: var(--muted); font-size: 12px; }
+.compose-new .ai-prompt + .reply-editor { margin-top: 16px; }
+
+.event-item { display: grid; gap: 8px; }
+.event-add { justify-self: start; min-height: 32px; padding: 0 12px; font-size: 12px; }
+.event-added { display: inline-flex; align-items: center; gap: 6px; color: #067647; font-size: 12px; font-weight: 600; }
+.event-added a { color: var(--blue); }
+.cal-form { display: grid; gap: 12px; margin-top: 18px; }
+.cal-form label { display: grid; gap: 5px; color: var(--ink); font-size: 12px; }
+.cal-form input[type="text"], .cal-form input[type="date"], .cal-form input[type="time"] { height: 40px; padding: 0 12px; border: 1px solid var(--line); border-radius: 9px; outline: 0; color: var(--ink); background: var(--surface); font: inherit; font-size: 14px; }
+.cal-form input:focus { border-color: var(--blue); }
+.cal-form input:disabled { opacity: .55; }
+.cal-form .cal-check { display: flex; align-items: center; gap: 8px; color: var(--ink); font-size: 13px; }
+.cal-row { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 12px; }
+.cal-note { margin: 12px 0 0; color: var(--ink); font-size: 12px; }
+.cal-form input:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
+.cal-form input { min-width: 0; width: 100%; }
+.cal-form input[type="checkbox"] { width: auto; }
+[data-ai-instructions] { min-width: 0; width: 100%; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+body[data-theme="dark"] .send-error { color: var(--red); }
+@media (max-width: 640px) { .cal-row { grid-template-columns: 1fr; } }

@@ -14,6 +14,9 @@ google-auth==2.35.0
 google-auth-oauthlib==1.2.1
 google-api-python-client==2.151.0
 
+# Time zone database (Windows has none; Python's zoneinfo needs this to validate IANA names like Australia/Sydney)
+tzdata==2026.5
+
 # Session management
 itsdangerous==2.2.0
 cryptography==43.0.3

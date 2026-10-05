@@ -12,6 +12,8 @@ const args = [
   "--noconfirm",
   "--clean",
   "--onedir",
+  // zoneinfo has no OS time zone database on Windows; bundle the tzdata package's data files.
+  "--collect-data", "tzdata",
   "--name", "revomail-backend",
   "--distpath", path.join(projectRoot, "build", "python"),
   "--workpath", path.join(projectRoot, "build", "pyinstaller", "work"),
