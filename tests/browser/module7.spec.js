@@ -2,9 +2,10 @@ import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
 async function fixture(page, initial = {}) {
-  let preferences = { language: "en", theme: "light", reducedMotion: false, defaultAiModel: "fixture-model", replyLength: "medium", speechLanguage: "en-AU", voiceEnabled: false, ...initial };
+  const { message: messageOverrides = {}, ...preferenceOverrides } = initial;
+  let preferences = { language: "en", theme: "light", reducedMotion: false, defaultAiModel: "fixture-model", replyLength: "medium", speechLanguage: "en-AU", voiceEnabled: false, ...preferenceOverrides };
   let summaryCalls = 0; let sendCalls = 0; const calendarCalls = [];
-  const message = { id: "fixture-1", sender: "tester@example.com", recipients: ["reader@example.com"], subject: "Fixture planning", preview: "Review the proposal.", body_plain: "Please review the proposal.", unread: false, starred: false, category: "Primary", attachments: [] };
+  const message = { id: "fixture-1", sender: "tester@example.com", recipients: ["reader@example.com"], subject: "Fixture planning", preview: "Review the proposal.", body_plain: "Please review the proposal.", unread: false, starred: false, category: "Primary", attachments: [], ...messageOverrides };
   await page.route("**/api/v1/**", async route => {
     const url = new URL(route.request().url());
     let body;
@@ -24,7 +25,7 @@ async function fixture(page, initial = {}) {
     else if (url.pathname === "/api/v1/ai/summarise") { summaryCalls++; body = { summary: "Review the proposal.", bullets: [] }; }
     else if (url.pathname === "/api/v1/ai/draft-reply") body = { draft: "Thank you. I will review it." };
     else if (url.pathname === "/api/v1/ai/compose") body = { subject: "AI subject", draft: "User-reviewed generated draft." };
-    else if (url.pathname === "/api/v1/ai/extract") body = { events: [{ title: "Review meeting", date: "tomorrow", start: null, end: null, location: "Room 1" }], tasks: [] };
+    else if (url.pathname === "/api/v1/ai/extract") body = { events: [{ title: "Review meeting", date: "tomorrow", start: null, end: null, location: "Room 1" }], tasks: [{ title: "Submit review", due_date: "2026-10-12" }] };
     else if (url.pathname === "/api/v1/calendar/events") { calendarCalls.push(route.request().postDataJSON()); await new Promise(resolve => setTimeout(resolve, 250)); body = { id: "event-1", created: true, htmlLink: "https://calendar.google.com/event?eid=fixture" }; }
     else if (url.pathname === "/api/v1/emails/send") { sendCalls++; body = { status: "sent" }; }
     else body = {};
@@ -79,6 +80,81 @@ test("custom compose and Sent retain the reviewed sending contract", async ({ pa
   await page.locator('[data-nav="sent"]').click();
   await expect(page.getByRole("heading", { name: "Sent", exact: true })).toBeVisible();
   await expect(page.locator("[data-email]")).toHaveCount(1);
+});
+
+test("Tasks and Calendar separate and remove their own suggestions", async ({ page }) => {
+  await fixture(page);
+  await page.locator("[data-email]").click();
+  await page.locator("[data-ai-extract]").click();
+
+  await page.locator('[data-nav="tasks"]').click();
+  await expect(page.getByRole("heading", { name: "Tasks", exact: true })).toBeVisible();
+  await expect(page.getByText("Submit review", { exact: true })).toBeVisible();
+  await expect(page.getByText("Review meeting", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Remove task suggestion" }).click();
+  await expect(page.getByText("No tasks were extracted from the selected email.")).toBeVisible();
+
+  await page.locator('[data-nav="calendar"]').click();
+  await expect(page.getByRole("heading", { name: "Calendar", exact: true })).toBeVisible();
+  await expect(page.getByText("Review meeting", { exact: true })).toBeVisible();
+  await expect(page.getByText("Submit review", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Remove event suggestion" }).click();
+  await expect(page.getByText("No calendar events were extracted from the selected email.")).toBeVisible();
+});
+
+test("formatted email hides preheaders and does not stack long words vertically", async ({ page }) => {
+  await page.context().route("https://example.test/**", route => route.fulfill({ contentType: "text/html", body: "<!doctype html><title>External message</title>" }));
+  await fixture(page, { message: { body_html: '<div class="mcnPreviewText">Fender</div><span id="preheader">Facebook</span><table><tbody><tr><td id="narrow" style="width:1px">DomesticStudentResources</td><td><a id="message-link" href="https://example.test/message">Visible message</a></td></tr></tbody></table><a href="https://example.test/image"><img id="brand" src="https://invalid.example/logo.png" alt="Fender" style="font-size:16px;color:red"></a>' } });
+  await page.locator("[data-email]").click();
+  const frame = page.frameLocator("[data-message-frame]");
+
+  await expect(frame.locator(".mcnPreviewText")).toBeHidden();
+  await expect(frame.locator("#preheader")).toBeHidden();
+  await expect(frame.getByText("Visible message", { exact: true })).toBeVisible();
+  const layout = await frame.locator("#narrow").evaluate(element => {
+    const style = getComputedStyle(element);
+    const box = element.getBoundingClientRect();
+    return { width: box.width, height: box.height, wordBreak: style.wordBreak, overflowWrap: style.overflowWrap };
+  });
+  expect(layout.wordBreak).toBe("normal");
+  expect(layout.overflowWrap).toBe("normal");
+  expect(layout.width).toBeGreaterThan(80);
+  expect(layout.height).toBeLessThan(80);
+  await expect(frame.locator("#brand")).toHaveCSS("font-size", "0px");
+  await expect(frame.locator("#brand")).toHaveCSS("color", "rgba(0, 0, 0, 0)");
+  await expect(page.locator("[data-message-frame]")).toHaveAttribute("sandbox", "allow-popups allow-popups-to-escape-sandbox");
+
+  const popupPromise = page.waitForEvent("popup");
+  await frame.locator("#message-link").click();
+  const popup = await popupPromise;
+  await expect.poll(() => popup.url()).toBe("https://example.test/message");
+  await popup.close();
+});
+
+test("Key details keeps extracted copy readable in the narrow insight rail", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await fixture(page);
+  await page.locator("[data-email]").click();
+  await page.locator("[data-ai-extract]").click();
+
+  const item = page.locator(".ai-rail .extraction-item").first();
+  const content = item.locator(":scope > span").first();
+  const title = item.locator(".extraction-title");
+  const metadata = item.locator(".extraction-meta");
+  const actions = item.locator(".extraction-actions");
+  const [itemStyle, contentBox, titleBox, metadataBox, actionsBox] = await Promise.all([
+    item.evaluate(element => ({ flexDirection: getComputedStyle(element).flexDirection, alignItems: getComputedStyle(element).alignItems })),
+    content.boundingBox(),
+    title.boundingBox(),
+    metadata.boundingBox(),
+    actions.boundingBox()
+  ]);
+
+  expect(itemStyle).toEqual({ flexDirection: "column", alignItems: "flex-start" });
+  expect(contentBox.width).toBeGreaterThan(220);
+  expect(metadataBox.y).toBeGreaterThan(titleBox.y);
+  expect(actionsBox.y).toBeGreaterThan(contentBox.y);
+  await expect(page.getByRole("button", { name: "Add to Google Calendar" })).toBeVisible();
 });
 
 for (const width of [1280, 320]) {
@@ -174,7 +250,7 @@ test("real browser media capture pauses, releases and requires review", async ({
   await expect(page.locator("#voice-transcript")).toHaveValue("Show my tasks");
   await expect(page.locator('[role="dialog"]')).toBeVisible();
   await page.locator("[data-run-command]").click();
-  await expect(page.getByRole("heading", { name: "Tasks & events" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Tasks", exact: true })).toBeVisible();
   await expect(page.getByText("Project Meeting", { exact: true })).toHaveCount(0);
   await context.close();
 });

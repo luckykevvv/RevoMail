@@ -8,7 +8,7 @@ import { DesktopSettingsStore } from "./settings-store.js";
 import { ServiceController } from "./service-controller.js";
 import { resolveBackendLaunch } from "./backend-launch.js";
 import { configureDesktopBackendEnvironment, loadDesktopEnvironment } from "./runtime-environment.js";
-import { isAllowedNavigation } from "./navigation-policy.js";
+import { isAllowedExternalNavigation, isAllowedNavigation } from "./navigation-policy.js";
 
 const desktopDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = app.isPackaged ? path.join(process.resourcesPath, "app.asar.unpacked") : app.getAppPath();
@@ -49,7 +49,7 @@ function secureWindowOptions(overrides = {}) {
 
 function protectNavigation(window, { allowAppOrigin = false, allowProviderAuth = false } = {}) {
   window.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith("https://")) void shell.openExternal(url);
+    if (isAllowedExternalNavigation(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
   window.webContents.on("will-navigate", (event, url) => {

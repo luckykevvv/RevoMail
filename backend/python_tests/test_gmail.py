@@ -7,13 +7,16 @@ from backend.app.services.gmail import GmailAdapter, MessageNotFound, ProviderTi
 
 
 def test_email_html_keeps_safe_layout_and_https_images_but_removes_executable_content():
-    cleaned = _sanitise_html('<p style="color: red; position: fixed">Hello</p><script>alert(1)</script><img src="https://images.example/photo.png"><a href="javascript:alert(2)">bad</a>')
+    cleaned = _sanitise_html('<div id="preheader" class="mcnPreviewText" aria-hidden="true">Preview</div><p style="color: red; position: fixed">Hello</p><script>alert(1)</script><img src="https://images.example/photo.png"><a href="javascript:alert(2)">bad</a>')
     assert "script" not in cleaned
     assert "alert(1)" not in cleaned
     assert "Hello" in cleaned
     assert "color: red" in cleaned
     assert "position" not in cleaned
     assert 'src="https://images.example/photo.png"' in cleaned
+    assert 'class="mcnPreviewText"' in cleaned
+    assert 'aria-hidden="true"' in cleaned
+    assert 'id="preheader"' in cleaned
     assert "javascript:" not in cleaned
 
 

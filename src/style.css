@@ -220,6 +220,18 @@ input.input-shell { padding: 0; }
 .task-tabs { margin-top: -8px; }
 .task-grid { max-width: 1180px; margin: 20px auto; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .task-card { min-height: 330px; padding: 24px; display: flex; gap: 16px; }
+.extraction-card { display: block; }
+.extraction-list { width: 100%; margin: 0; padding-left: 24px; }
+.extraction-item { margin: 10px 0; }
+.extraction-item, .extraction-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.extraction-actions { flex: none; }
+.ai-rail .extraction-list { margin-top: 16px; padding-left: 0; list-style: none; }
+.ai-rail .extraction-item { align-items: flex-start; flex-direction: column; }
+.ai-rail .extraction-copy { width: 100%; min-width: 0; }
+.ai-rail .extraction-title, .ai-rail .extraction-meta { display: block; }
+.ai-rail .extraction-meta { margin-top: 2px; }
+.ai-rail .extraction-actions { justify-content: flex-start; flex-wrap: wrap; }
+.remove-action { color: var(--red); }
 .task-icon { width: 44px; height: 44px; display: grid; place-items: center; flex: none; border-radius: 12px; color: var(--blue); background: var(--blue-light); }
 .task-icon.amber { color: var(--amber); background: rgba(220,123,19,.1); }
 .task-copy { flex: 1; }
@@ -366,6 +378,8 @@ input.input-shell { padding: 0; }
   .composer-footer { align-items: flex-end; }
   .composer-footer .secondary-button { display: none; }
   .task-card { padding: 18px; }
+  .extraction-item { align-items: flex-start; flex-direction: column; }
+  .extraction-actions { flex-wrap: wrap; }
   .task-copy dl div { grid-template-columns: 75px 1fr; }
   .setting-row { align-items: flex-start; flex-direction: column; }
   .setting-row select { width: 100%; min-width: 0; }

@@ -5,6 +5,7 @@ import { validateCommand } from "./voice/commands.js";
 import { preferencesView, voiceView } from "./module7-views.js";
 import { captureFocus, restoreFocus, syncDialog } from "./accessibility.js";
 import { translate, translateUI } from "./i18n.js";
+import { messageFrameDocument } from "./email-html.js";
 import { calendarPayload, eventDraftFromExtraction, formatMailTime, formatFullMailTime, replySubject, applyClassifications, applyMailboxPage, formatLocalDateTime, LatestRequestCoordinator, mailboxContentState, matchesMailboxCategory, selectAfterMailboxRefresh } from "./mailbox-state.js";
 import {
   AlignLeft,
@@ -354,7 +355,7 @@ function readingView() {
   if (!email) return inboxView();
   const plainBody = escapeHtml(email.bodyText || email.body_plain || email.preview || "").replaceAll("\n", "<br />");
   const safeHtml = email.bodyHtmlSafe || email.body_html || "";
-  const messageBody = email._loading ? "<p>Loading email…</p>" : safeHtml && state.bodyMode === "formatted" ? '<iframe class="message-frame" data-message-frame sandbox="" title="Formatted email content"></iframe>' : `<p>${plainBody}</p>`;
+  const messageBody = email._loading ? "<p>Loading email…</p>" : safeHtml && state.bodyMode === "formatted" ? '<iframe class="message-frame" data-message-frame sandbox="allow-popups allow-popups-to-escape-sandbox" title="Formatted email content"></iframe>' : `<p>${plainBody}</p>`;
   const summary = state.aiSummary;
   const extraction = state.aiExtraction;
   return `<header class="compact-header">
@@ -378,15 +379,15 @@ function readingView() {
   <button class="floating-mic" data-voice title="Voice input">${icon("mic")}</button>`;
 }
 
-function renderExtraction(extraction) {
-  const events = (extraction.events || []).map((event, index) => {
+function renderExtraction(extraction, { events: showEvents = true, tasks: showTasks = true, removable = false, empty = "No explicit tasks or events were found." } = {}) {
+  const events = showEvents ? (extraction.events || []).map((event, index) => {
     const key = eventKey(event);
     const added = state.addedEvents[key];
-    return `<li><strong data-user-content>${escapeHtml(event.title || "Event")}</strong> <span data-user-content>${escapeHtml([event.date, event.time, event.location].filter(Boolean).join(" · "))}</span>${added ? `<a href="${escapeHtml(added)}" target="_blank" rel="noopener noreferrer">${t("Open in Google Calendar")}</a>` : `<button class="text-button" data-add-calendar="${index}">${t("Add to Google Calendar")}</button>`}</li>`;
-  });
-  const tasks = (extraction.tasks || []).map((task) => `<li><strong>${escapeHtml(task.title || "Task")}</strong> ${escapeHtml(task.due_date || "")}</li>`);
+    return `<li class="extraction-item"><span class="extraction-copy"><strong class="extraction-title" data-user-content>${escapeHtml(event.title || "Event")}</strong><span class="extraction-meta" data-user-content>${escapeHtml([event.date, event.time, event.location].filter(Boolean).join(" · "))}</span></span><span class="extraction-actions">${added ? `<a href="${escapeHtml(added)}" target="_blank" rel="noopener noreferrer">${t("Open in Google Calendar")}</a>` : `<button class="text-button" data-add-calendar="${index}">${t("Add to Google Calendar")}</button>`}${removable ? `<button class="text-button remove-action" data-remove-extraction="events" data-remove-index="${index}" aria-label="Remove event suggestion">Remove</button>` : ""}</span></li>`;
+  }) : [];
+  const tasks = showTasks ? (extraction.tasks || []).map((task, index) => `<li class="extraction-item"><span><strong>${escapeHtml(task.title || "Task")}</strong> ${escapeHtml(task.due_date || "")}</span>${removable ? `<button class="text-button remove-action" data-remove-extraction="tasks" data-remove-index="${index}" aria-label="Remove task suggestion">Remove</button>` : ""}</li>`) : [];
   const items = [...events, ...tasks];
-  return items.length ? `<ul data-user-content>${items.join("")}</ul>` : "<p>No explicit tasks or events were found.</p>";
+  return items.length ? `<ul class="extraction-list" data-user-content>${items.join("")}</ul>` : `<p>${escapeHtml(empty)}</p>`;
 }
 
 function replyView() {
@@ -408,8 +409,13 @@ function replyView() {
 
 function tasksView(calendarOnly = false) {
   const extraction = state.aiExtraction;
-  const result = extraction ? { tasks: calendarOnly ? [] : extraction.tasks || [], events: extraction.events || [] } : null;
-  return `<header class="page-header"><div><h1>${calendarOnly ? "Calendar" : "Tasks & events"}</h1><p>Extracted from the selected email</p></div></header><section class="task-card">${result ? renderExtraction(result) : "<p>No extracted items yet. Open an email and choose Extract.</p>"}</section><p>AI suggestions require review before adding to your calendar.</p><button class="floating-mic" data-voice aria-label="Voice commands">${icon("mic")}</button>`;
+  const title = calendarOnly ? "Calendar" : "Tasks";
+  const content = extraction
+    ? renderExtraction(extraction, calendarOnly
+      ? { tasks: false, removable: true, empty: "No calendar events were extracted from the selected email." }
+      : { events: false, removable: true, empty: "No tasks were extracted from the selected email." })
+    : `<p>No extracted ${calendarOnly ? "calendar events" : "tasks"} yet. Open an email and choose Extract.</p>`;
+  return `<header class="page-header"><div><h1>${title}</h1><p>Extracted from the selected email</p></div></header><section class="task-card extraction-card">${content}</section><p>${calendarOnly ? "AI suggestions require review before adding to your calendar." : "Remove suggestions that are not useful; this does not change the source email."}</p><button class="floating-mic" data-voice aria-label="Voice commands">${icon("mic")}</button>`;
 }
 
 function settingsView() {
@@ -536,7 +542,7 @@ function hydrateSafeMessageFrame() {
   const safeHtml = state.selectedEmail?.bodyHtmlSafe || state.selectedEmail?.body_html || "";
   if (!frame || !safeHtml || frame.dataset.hydrated) return;
   frame.dataset.hydrated = "true";
-  frame.srcdoc = `<!doctype html><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: data:; style-src 'unsafe-inline'"><style>html{color-scheme:light}body{margin:0;font:14px/1.65 system-ui;color:#172033;overflow-wrap:anywhere}img{max-width:100%;height:auto}table{max-width:100%;border-collapse:collapse}</style>${safeHtml}`;
+  frame.srcdoc = messageFrameDocument(safeHtml);
 }
 
 let toastTimer;
@@ -698,6 +704,15 @@ function bindEvents() {
   queryAll("[data-ai-instructions]").forEach(input => input.addEventListener("input", () => { state.aiInstructions[input.dataset.aiInstructions] = input.value; }));
   queryAll("[data-custom-draft]").forEach(button => button.addEventListener("click", () => button.dataset.customDraft === "reply" ? void aiDraftReply(state.aiDraftTone) : void aiCompose()));
   queryAll("[data-add-calendar]").forEach(button => button.addEventListener("click", () => openCalendarDialog(Number(button.dataset.addCalendar))));
+  queryAll("[data-remove-extraction]").forEach(button => button.addEventListener("click", () => {
+    const kind = button.dataset.removeExtraction;
+    const index = Number(button.dataset.removeIndex);
+    if (!state.aiExtraction || !["events", "tasks"].includes(kind) || !Number.isInteger(index)) return;
+    const items = state.aiExtraction[kind] || [];
+    if (!items[index]) return;
+    state.aiExtraction = { ...state.aiExtraction, [kind]: items.filter((_item, itemIndex) => itemIndex !== index) };
+    showToast(kind === "events" ? "Event suggestion removed" : "Task suggestion removed", false);
+  }));
   query("[data-cancel-calendar]")?.addEventListener("click", closeCalendar);
   query("[data-confirm-calendar]")?.addEventListener("click", () => void submitCalendar());
   queryAll("[data-cal-field]").forEach(input => input.addEventListener(input.type === "checkbox" ? "change" : "input", () => {

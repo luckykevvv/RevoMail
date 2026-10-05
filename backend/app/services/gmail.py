@@ -47,7 +47,7 @@ ALLOWED_TAGS = [
     "h5", "h6", "i", "img", "li", "ol", "p", "pre", "s", "span", "strong", "table", "tbody", "td",
     "tfoot", "th", "thead", "tr", "u", "ul",
 ]
-HTML_FORMAT_MARKER = "<!--revomail-html-v2-->"
+HTML_FORMAT_MARKER = "<!--revomail-html-v4-->"
 MAX_INLINE_IMAGE_BYTES = 2 * 1024 * 1024
 CSS_SANITIZER = CSSSanitizer(allowed_css_properties=frozenset({
     "background-color", "border", "border-bottom", "border-collapse", "border-color", "border-left",
@@ -63,7 +63,7 @@ CSS_SANITIZER = CSSSanitizer(allowed_css_properties=frozenset({
 def _allowed_html_attribute(tag: str, name: str, value: str) -> bool:
     if name == "style":
         return True
-    if name in {"align", "dir", "title"}:
+    if name in {"align", "aria-hidden", "class", "dir", "hidden", "id", "title"}:
         return True
     if tag == "a" and name == "href":
         return bool(re.match(r"^(?:https?://|mailto:)", value, flags=re.IGNORECASE))

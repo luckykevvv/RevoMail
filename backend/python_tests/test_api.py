@@ -442,7 +442,7 @@ def test_single_gmail_api_and_idempotent_confirmed_send(client, monkeypatch):
         "id": "gmail-1", "threadId": "thread-1", "historyId": "10", "sender": "sender@example.com",
         "recipients": ["tester@example.com"], "subject": "Project update", "receivedAt": "2026-08-20T00:00:00+00:00",
         "preview": "A provider-backed fixture", "unread": True, "starred": False, "category": "Primary",
-        "attachments": [], "bodyText": "Fixture body", "bodyHtmlSafe": "<!--revomail-html-v2--><p>Fixture body</p>",
+        "attachments": [], "bodyText": "Fixture body", "bodyHtmlSafe": "<!--revomail-html-v4--><p>Fixture body</p>",
     }
     client.app.state.mailbox_repository.upsert_messages(account_id, [message])
     database_files = client.app.state.database.path.parent.glob(f"{client.app.state.database.path.name}*")
