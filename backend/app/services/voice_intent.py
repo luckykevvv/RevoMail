@@ -75,6 +75,20 @@ def _result(action, language, display, mode="none", destination=None):
     }
 
 
+def _mailbox_result(action: str, language: str, sender: str) -> dict:
+    labels = {
+        "search_messages": (f"Search for emails from {sender}", f"查找来自 {sender} 的邮件"),
+        "open_message": (f"Open an email from {sender}", f"打开来自 {sender} 的邮件"),
+        "summarize_message": (f"Summarise an email from {sender}", f"总结来自 {sender} 的邮件"),
+        "draft_reply": (f"Draft a reply to an email from {sender}", f"为来自 {sender} 的邮件生成回复草稿"),
+        "extract_details": (f"Extract details from an email from {sender}", f"从来自 {sender} 的邮件提取详情"),
+    }
+    english, chinese = labels[action]
+    result = _result(action, language, chinese if language == "zh-CN" else english, "search")
+    result["target"]["sender"] = sender
+    return result
+
+
 def _strip_polite_wrapper(command: str) -> str:
     """Keep deterministic commands strict while accepting common speech wrappers."""
     command = re.sub(
@@ -97,13 +111,45 @@ def deterministic_intent(transcript: str, requested_language: str):
     if UNSAFE.search(command):
         raise AppError("VOICE_UNSAFE_COMMAND", "Voice cannot send, delete, archive, change mailbox state, or create calendar events.", 422)
     command = _strip_polite_wrapper(command)
+    mailbox_match = re.match(
+        r"^(?:find|search(?: for)?|look for) (?:the )?emails? from (?P<sender>.+?)"
+        r"(?: and (?:then )?(?P<action>summari[sz]e|open|draft (?:a )?reply(?: to)?|generate (?:a )?reply(?: to)?|extract (?:details|tasks and events)(?: from)?)(?: it| the email)?)?$",
+        command,
+        re.IGNORECASE,
+    )
+    if mailbox_match:
+        sender = mailbox_match.group("sender").strip()
+        terminal = (mailbox_match.group("action") or "").lower()
+        action = (
+            "summarize_message" if terminal.startswith("summari")
+            else "open_message" if terminal == "open"
+            else "draft_reply" if "reply" in terminal
+            else "extract_details" if terminal.startswith("extract")
+            else "search_messages"
+        )
+        return _mailbox_result(action, language, sender)
+    chinese_mailbox_match = re.match(
+        r"^(?:查找|搜索)(?:来自)?(?P<sender>.+?)(?:的)?邮件(?:(?:并|然后)(?P<action>总结|概括|打开|生成回复|起草回复|提取(?:详情|任务和事件))(?:它|这封邮件)?)?$",
+        command,
+    )
+    if chinese_mailbox_match:
+        sender = chinese_mailbox_match.group("sender").strip()
+        terminal = chinese_mailbox_match.group("action") or ""
+        action = (
+            "summarize_message" if terminal in {"总结", "概括"}
+            else "open_message" if terminal == "打开"
+            else "draft_reply" if "回复" in terminal
+            else "extract_details" if terminal.startswith("提取")
+            else "search_messages"
+        )
+        return _mailbox_result(action, language, sender)
     if re.match(r"^summari[sz]e (?:the )?(?:highest[ -]priority|most important)(?: recent)? email$|^(?:总结|概括)(?:一下)?(?:优先级最高|最重要)(?:的)?(?:最近)?邮件$", command, re.IGNORECASE):
         return _result("summarize_message", language, "总结优先级最高的邮件" if language == "zh-CN" else "Summarise the highest-priority email", "search")
     current_rules = [
-        (r"^summari[sz]e (?:the )?(?:current|this) email$|^(?:总结|概括)(?:一下)?(?:当前|这封)邮件$", "summarize_message", "Summarise the current email", "总结当前邮件"),
-        (r"^(?:draft|generate) (?:a )?reply(?: to (?:the )?(?:current|this) email)?$|^(?:(?:为(?:当前|这封)邮件)?(?:生成|起草)回复(?:草稿)?|(?:生成|起草)(?:当前|这封)?邮件(?:的)?回复(?:草稿)?)$", "draft_reply", "Generate a reply to the current email", "为当前邮件生成回复草稿"),
-        (r"^extract (?:tasks and events|details) from (?:the )?(?:current|this) email$|^从(?:当前|这封)邮件(?:中)?提取(?:任务和事件|详情)$", "extract_details", "Extract details from the current email", "从当前邮件提取任务和事件"),
-        (r"^open (?:the )?(?:current|this) email$|^打开(?:一下)?(?:当前|这封)邮件$", "open_message", "Open the current email", "打开当前邮件"),
+        (r"^summari[sz]e (?:the )?(?:current|this|selected|that) email$|^summari[sz]e it$|^(?:总结|概括)(?:一下)?(?:(?:当前|这封|选中的|刚才的)邮件|它)$", "summarize_message", "Summarise the current email", "总结当前邮件"),
+        (r"^(?:draft|generate) (?:a )?reply(?: to (?:(?:the )?(?:current|this|selected|that) email|it))?$|^(?:(?:为(?:(?:当前|这封|选中的|刚才的)邮件|它))?(?:生成|起草)回复(?:草稿)?|(?:生成|起草)(?:当前|这封|选中的|刚才的)?邮件(?:的)?回复(?:草稿)?)$", "draft_reply", "Generate a reply to the current email", "为当前邮件生成回复草稿"),
+        (r"^extract (?:tasks and events|details) from (?:(?:the )?(?:current|this|selected|that) email|it)$|^从(?:(?:当前|这封|选中的|刚才的)邮件|它)(?:中)?提取(?:任务和事件|详情)$", "extract_details", "Extract details from the current email", "从当前邮件提取任务和事件"),
+        (r"^open (?:(?:the )?(?:current|this|selected|that) email|it)$|^打开(?:一下)?(?:(?:当前|这封|选中的|刚才的)邮件|它)$", "open_message", "Open the current email", "打开当前邮件"),
     ]
     for pattern, action, english, chinese in current_rules:
         if re.match(pattern, command, re.IGNORECASE):
@@ -130,7 +176,10 @@ read-state changes, task creation, or calendar creation.
 target.mode is none, current, or search. Search target fields may only be terms, sender, subject,
 unread, starred, priority (high|medium|low), and newest. Do not produce Gmail syntax.
 destination may only be inbox, tasks, calendar, settings, starred, drafts, or sent.
-If an email action says this/current email use current. Otherwise use search and extract conservative
+If an email action says this/current/selected/that email or refers to it, use current when context has
+currentMessageId or followUpMessageId. For a safe compound request such as finding an email and then
+summarising, opening, drafting, or extracting it, return the final requested action with a search target;
+do not reduce it to search_messages. Otherwise use search and extract conservative
 filters from the user's words. For 'most important', 'highest priority', or 'recent', keep priority null and set newest true so
 the client can rank all candidates by priority and then date; set priority only when explicitly requested.
 Use detectedLanguage en or zh-CN and a short displayText in that language.

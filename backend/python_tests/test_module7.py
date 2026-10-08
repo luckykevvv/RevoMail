@@ -90,7 +90,7 @@ def test_voice_intent_review_and_tts_boundaries(client, monkeypatch, caplog):
     assert intent.json()["target"]["mode"] == "current"
     polite_intent = client.post("/api/v1/voice/intents", headers=h, json={
         "transcript": "Help me summarize this email.", "language": "auto",
-        "context": {"view": "reading", "currentMessageId": "message-1"},
+        "context": {"view": "reading", "currentMessageId": "message-1", "followUpMessageId": "reviewed-message"},
     })
     assert polite_intent.status_code == 200
     assert polite_intent.json()["action"] == "summarize_message"
@@ -125,6 +125,30 @@ def test_voice_intent_review_and_tts_boundaries(client, monkeypatch, caplog):
 def test_polite_voice_commands_remain_deterministic(transcript, action):
     parsed = voice_intent.deterministic_intent(transcript, "auto")
     assert parsed["action"] == action
+
+
+@pytest.mark.parametrize("transcript,action,sender", [
+    ("Help me find the email from Hassan", "search_messages", "hassan"),
+    ("Search the email from Hassan and summarize it.", "summarize_message", "hassan"),
+    ("查找 Hassan 的邮件并总结它", "summarize_message", "hassan"),
+])
+def test_mailbox_search_and_safe_terminal_action_remain_one_reviewed_intent(transcript, action, sender):
+    parsed = voice_intent.deterministic_intent(transcript, "auto")
+    assert parsed["action"] == action
+    assert parsed["target"]["mode"] == "search"
+    assert parsed["target"]["sender"].lower() == sender
+
+
+@pytest.mark.parametrize("transcript,action", [
+    ("Summarise it", "summarize_message"),
+    ("Generate a reply to it", "draft_reply"),
+    ("Extract details from the selected email", "extract_details"),
+    ("总结它", "summarize_message"),
+])
+def test_follow_up_references_use_the_reviewed_current_target(transcript, action):
+    parsed = voice_intent.deterministic_intent(transcript, "auto")
+    assert parsed["action"] == action
+    assert parsed["target"]["mode"] == "current"
 
 
 def test_polite_unsafe_voice_command_is_still_rejected():

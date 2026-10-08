@@ -130,7 +130,7 @@ const state = {
   preferences: { ...DEFAULT_PREFERENCES },
   settingsStatus: "loading", settingsError: false, allowedAiModels: [],
   capabilities: null,
-  voice: { status: "idle", text: "", error: "", source: "typed", intent: null, candidates: [], selectedTargetId: null, resultText: "", playback: { status: "idle", muted: false } },
+  voice: { status: "idle", text: "", error: "", source: "typed", intent: null, candidates: [], selectedTargetId: null, contextTarget: null, resultText: "", playback: { status: "idle", muted: false } },
   compose: { to: "", subject: "", body: "" },
   toastError: false,
   voiceOpen: false,
@@ -606,7 +606,7 @@ function showToast(message, error = true) {
 
 function openVoice() {
   if (state.sendConfirmation || state.calendarDraft) return;
-  state.voice = { status: "idle", text: "", error: "", source: "typed", intent: null, candidates: [], selectedTargetId: null, resultText: "", playback: { status: "idle", muted: voicePlayback?.muted || false } };
+  state.voice = { status: "idle", text: "", error: "", source: "typed", intent: null, candidates: [], selectedTargetId: null, contextTarget: null, resultText: "", playback: { status: "idle", muted: voicePlayback?.muted || false } };
   state.voiceOpen = true; render();
 }
 
@@ -741,6 +741,7 @@ function bindEvents() {
   queryAll("[data-voice-candidate]").forEach(input => input.addEventListener("change", () => {
     state.voice.selectedTargetId = input.dataset.voiceCandidate; state.voice.status = "ready"; state.voice.error = ""; render();
   }));
+  query("[data-clear-voice-context]")?.addEventListener("click", () => { state.voice.contextTarget = null; render(); });
   query("[data-run-command]")?.addEventListener("click", () => void runVoiceCommand());
   query("[data-speak]")?.addEventListener("click", () => void speakVoiceResult());
   query("[data-pause-speech]")?.addEventListener("click", () => voicePlayback.pause());
@@ -1162,7 +1163,7 @@ function closeVoice(shouldRender = true) {
   cancelRequest("voice-intent"); cancelRequest("voice-targets");
   voiceController.cancel();
   voicePlayback.stop({ announce: false });
-  state.voice = { status: "idle", text: "", error: "", source: "typed", intent: null, candidates: [], selectedTargetId: null, resultText: "", playback: { status: "idle", muted: voicePlayback.muted } };
+  state.voice = { status: "idle", text: "", error: "", source: "typed", intent: null, candidates: [], selectedTargetId: null, contextTarget: null, resultText: "", playback: { status: "idle", muted: voicePlayback.muted } };
   if (shouldRender) render();
 }
 
@@ -1229,7 +1230,11 @@ async function reviewVoiceCommand() {
       method: "POST", signal: controller.signal,
       body: JSON.stringify({
         transcript: state.voice.text.trim(), language: state.preferences.speechLanguage,
-        context: { view: state.view, currentMessageId: ["reading", "reply"].includes(state.view) ? String(state.selectedEmail?.id || "") || null : null }
+        context: {
+          view: state.view,
+          currentMessageId: ["reading", "reply"].includes(state.view) ? String(state.selectedEmail?.id || "") || null : null,
+          followUpMessageId: String(state.voice.contextTarget?.id || "") || null
+        }
       })
     });
     if (!finishRequest("voice-intent", controller)) return;
@@ -1237,7 +1242,7 @@ async function reviewVoiceCommand() {
       clarifyVoiceCommand("I couldn't identify a specific command. Please name the action and describe the email you want.");
       return;
     }
-    const hasCurrentEmail = ["reading", "reply"].includes(state.view) && Boolean(state.selectedEmail);
+    const hasCurrentEmail = (["reading", "reply"].includes(state.view) && Boolean(state.selectedEmail)) || Boolean(state.voice.contextTarget);
     if (needsMessage(intent.action) && intent.target.mode === "current" && !hasCurrentEmail) {
       clarifyVoiceCommand("Please specify which email you want, for example by sender, subject, or recency.");
       return;
@@ -1248,7 +1253,8 @@ async function reviewVoiceCommand() {
     }
     let candidates = [];
     if (intent.target.mode === "current") {
-      if (["reading", "reply"].includes(state.view) && state.selectedEmail) candidates = [{ ...state.selectedEmail, _localDate: formatFullMailTime(state.selectedEmail.receivedAt || state.selectedEmail.date || "", { locale: state.preferences.language }) }];
+      const current = ["reading", "reply"].includes(state.view) && state.selectedEmail ? state.selectedEmail : state.voice.contextTarget;
+      if (current) candidates = [{ ...current, _localDate: formatFullMailTime(current.receivedAt || current.date || "", { locale: state.preferences.language }) }];
     } else if (intent.target.mode === "search") {
       const targetController = beginRequest("voice-targets");
       candidates = await findVoiceCandidates(intent.target, targetController.signal);
@@ -1260,8 +1266,6 @@ async function reviewVoiceCommand() {
         ? "Please specify which email you want, for example by sender, subject, or recency."
         : "No matching emails were found. Please specify a sender, subject, unread or starred status, or recency.");
       return;
-    } else if (intent.action === "search_messages") {
-      state.voice.status = "ready";
     } else if (candidates.length === 1) {
       state.voice.selectedTargetId = candidates[0].id; state.voice.status = "ready";
     } else {
@@ -1297,7 +1301,7 @@ async function executeVoiceCommand() {
   const intent = state.voice.intent;
   if (!intent) return;
   const target = state.voice.candidates.find(item => String(item.id) === String(state.voice.selectedTargetId));
-  if (needsMessage(intent.action) && !target) {
+  if ((needsMessage(intent.action) || intent.action === "search_messages") && !target) {
     if (state.voice.candidates.length) { state.voice.status = "selecting"; state.voice.error = "Choose a target email before running this command."; render(); }
     else clarifyVoiceCommand("No matching emails were found. Please specify a sender, subject, unread or starred status, or recency.");
     return;
@@ -1305,7 +1309,7 @@ async function executeVoiceCommand() {
   state.voice.status = "executing"; state.voice.error = ""; state.voice.resultText = ""; render();
   try {
     let resultText = "";
-    if (target && !await openMessage(target, { preserveVoice: true, markRead: false })) throw new Error("The selected email could not be opened.");
+    if (target && intent.action !== "search_messages" && !await openMessage(target, { preserveVoice: true, markRead: false })) throw new Error("The selected email could not be opened.");
     if (intent.action === "search_messages") {
       emails = state.voice.candidates.map(({ _localDate, ...message }) => message);
       state.search = ""; state.category = "All"; state.priority = "All"; state.nextPageToken = null;
@@ -1337,6 +1341,7 @@ async function executeVoiceCommand() {
       navigate(intent.destination, { preserveVoice: true });
       resultText = intent.detectedLanguage === "zh-CN" ? `已前往${t(navItems.find(item => item[0] === intent.destination)?.[1] || intent.destination)}。` : `Opened ${intent.destination}.`;
     }
+    if (target) state.voice.contextTarget = target;
     state.voice.status = "complete"; state.voice.resultText = resultText; render();
     if (state.voice.source === "voice" && state.preferences.voiceAutoPlay && state.capabilities?.synthesisAvailable && resultText) void voicePlayback.speak(resultText, intent.detectedLanguage);
   } catch (error) {

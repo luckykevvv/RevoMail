@@ -491,6 +491,7 @@ fieldset.setting-group legend { margin-left: 20px; padding: 0 6px; font-weight: 
 .microphone-status.is-recording .status-dot { background: #d83b3b; box-shadow: 0 0 0 0 rgba(216,59,59,.45); animation: mic-pulse 1.4s ease-out infinite; }
 .microphone-status.is-paused .status-dot { background: #d99019; }
 .voice-context, .voice-review, .voice-result { padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }
+.voice-follow-up .link-button { margin-left: 8px; border: 0; padding: 2px 4px; background: transparent; color: var(--blue); text-decoration: underline; font: inherit; cursor: pointer; }
 .voice-review, .voice-result { margin: 12px 0; }
 .voice-review h3, .voice-review h4, .voice-result h3, .voice-result h4 { margin: 0 0 8px; font-size: 15px; }
 .voice-review p, .voice-result p { margin: 6px 0; }

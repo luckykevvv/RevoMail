@@ -65,7 +65,8 @@
           "required": ["view"],
           "properties": {
             "view": { "enum": ["inbox", "reading", "reply", "tasks", "calendar", "settings", "starred", "drafts", "sent", "compose"] },
-            "currentMessageId": { "type": ["string", "null"], "maxLength": 512 }
+            "currentMessageId": { "type": ["string", "null"], "maxLength": 512 },
+            "followUpMessageId": { "type": ["string", "null"], "maxLength": 512 }
           },
           "additionalProperties": false
         }

@@ -2,9 +2,9 @@ import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
 async function fixture(page, initial = {}) {
-  const { message: messageOverrides = {}, messages: messageFixtures, summaryText = "Review the proposal.", summaryBullets = [], extraction = { events: [{ title: "Review meeting", date: "tomorrow", start: null, end: null, location: "Room 1" }], tasks: [{ title: "Submit review", due_date: "2026-10-12" }] }, ...preferenceOverrides } = initial;
+  const { message: messageOverrides = {}, messages: messageFixtures, transcriptionText = "Show my tasks", summaryText = "Review the proposal.", summaryBullets = [], extraction = { events: [{ title: "Review meeting", date: "tomorrow", start: null, end: null, location: "Room 1" }], tasks: [{ title: "Submit review", due_date: "2026-10-12" }] }, ...preferenceOverrides } = initial;
   let preferences = { language: "en", theme: "light", reducedMotion: false, defaultAiModel: "fixture-model", replyLength: "medium", speechLanguage: "auto", voiceEnabled: false, voiceAutoPlay: true, ...preferenceOverrides };
-  let summaryCalls = 0; let sendCalls = 0; const calendarCalls = [];
+  let summaryCalls = 0; let sendCalls = 0; const calendarCalls = []; const intentContexts = [];
   const message = { id: "fixture-1", sender: "tester@example.com", recipients: ["reader@example.com"], subject: "Fixture planning", preview: "Review the proposal.", body_plain: "Please review the proposal.", unread: false, starred: false, category: "Primary", attachments: [], ...messageOverrides };
   const messages = messageFixtures || [message];
   await page.route("**/api/v1/**", async route => {
@@ -16,13 +16,18 @@ async function fixture(page, initial = {}) {
       if (route.request().method() === "PATCH") Object.assign(preferences, route.request().postDataJSON());
       body = { settings: preferences, allowedAiModels: ["fixture-model"] };
     } else if (url.pathname === "/api/v1/voice/capabilities") body = { available: true, transcriptionAvailable: true, synthesisAvailable: true, intentAvailable: true, maxBytes: 10485760, maxSeconds: 60, maxSpeechChars: 4096, languages: ["auto", "en-AU", "en-US", "zh-CN"] };
-    else if (url.pathname === "/api/v1/voice/transcriptions") body = { text: "Show my tasks" };
+    else if (url.pathname === "/api/v1/voice/transcriptions") body = { text: transcriptionText };
     else if (url.pathname === "/api/v1/voice/intents") {
-      const transcript = route.request().postDataJSON().transcript.toLowerCase();
+      const request = route.request().postDataJSON();
+      const transcript = request.transcript.toLowerCase();
+      intentContexts.push(request.context);
       if (transcript.includes("delete") || transcript.includes("send email")) {
         await route.fulfill({ status: 422, json: { error: { code: "VOICE_UNSAFE_COMMAND", message: "Voice cannot send, delete, archive, change mailbox state, or create calendar events.", retryable: false, correlationId: "fixture" } } }); return;
       }
-      if (transcript.includes("missing sender")) body = { detectedLanguage: "en", action: "summarize_message", target: { mode: "search", terms: "", sender: "missing@example.com", subject: "", unread: null, starred: null, priority: null, newest: true }, destination: null, displayText: "Summarise an email from a missing sender", confidence: "high" };
+      if (transcript.includes("from hassan") && transcript.includes("summar")) body = { detectedLanguage: "en", action: "summarize_message", target: { mode: "search", terms: "", sender: "Hassan", subject: "", unread: null, starred: null, priority: null, newest: true }, destination: null, displayText: "Summarise an email from Hassan", confidence: "high" };
+      else if (transcript.includes("from hassan")) body = { detectedLanguage: "en", action: "search_messages", target: { mode: "search", terms: "", sender: "Hassan", subject: "", unread: null, starred: null, priority: null, newest: true }, destination: null, displayText: "Search for emails from Hassan", confidence: "high" };
+      else if (transcript.includes("summarise it") || transcript.includes("summarize it")) body = { detectedLanguage: "en", action: "summarize_message", target: { mode: "current", terms: "", sender: "", subject: "", unread: null, starred: null, priority: null, newest: true }, destination: null, displayText: "Summarise the selected email", confidence: "high" };
+      else if (transcript.includes("missing sender")) body = { detectedLanguage: "en", action: "summarize_message", target: { mode: "search", terms: "", sender: "missing@example.com", subject: "", unread: null, starred: null, priority: null, newest: true }, destination: null, displayText: "Summarise an email from a missing sender", confidence: "high" };
       else if (transcript.includes("unclear request")) body = { detectedLanguage: "en", action: "summarize_message", target: { mode: "search", terms: "", sender: "", subject: "", unread: null, starred: null, priority: null, newest: true }, destination: null, displayText: "Unclear mailbox request", confidence: "low" };
       else if (transcript.includes("highest priority") || transcript.includes("important")) body = { detectedLanguage: "en", action: "summarize_message", target: { mode: "search", terms: "", sender: "", subject: "", unread: null, starred: null, priority: null, newest: true }, destination: null, displayText: "Summarise an important recent email", confidence: "high" };
       else if (transcript.includes("task")) body = { detectedLanguage: "en", action: "show_tasks", target: { mode: "none", terms: "", sender: "", subject: "", unread: null, starred: null, priority: null, newest: true }, destination: null, displayText: "Show tasks", confidence: "high" };
@@ -47,7 +52,7 @@ async function fixture(page, initial = {}) {
     await route.fulfill({ json: body });
   });
   await page.goto("/"); await expect(page.locator("[data-email]").first()).toBeVisible();
-  return { summaryCalls: () => summaryCalls, sendCalls: () => sendCalls, preferences: () => preferences, calendarCalls };
+  return { summaryCalls: () => summaryCalls, sendCalls: () => sendCalls, preferences: () => preferences, calendarCalls, intentContexts };
 }
 
 for (const width of [1280, 320]) {
@@ -322,6 +327,33 @@ test("global voice review resolves ranked candidates and requires target confirm
   await page.locator("[data-run-command]").click();
   await expect.poll(calls.summaryCalls).toBe(1);
   await expect(page.getByRole("heading", { name: "Result ready" })).toBeVisible();
+});
+
+test("a reviewed search target remains available to a recorded follow-up command", async ({ browser }) => {
+  const context = await browser.newContext({ permissions: ["microphone"] });
+  const page = await context.newPage();
+  const hassan = { id: "hassan-1", sender: "Hassan Saadatmand <hassan.saadatmand@monash.edu>", recipients: ["reader@example.com"], subject: "Test", preview: "Follow-up context", body_plain: "Please review this email.", unread: false, starred: false, category: "Primary", attachments: [], receivedAt: "2026-10-05T01:37:00Z" };
+  const calls = await fixture(page, { messages: [hassan], voiceEnabled: true, voiceAutoPlay: false, transcriptionText: "Summarise it" });
+
+  await page.locator("[data-voice]").click();
+  await page.locator("#voice-transcript").fill("Help me find the email from Hassan");
+  await page.locator("[data-run-command]").click();
+  await expect(page.locator(".voice-selected")).toContainText("Test");
+  await page.locator("[data-run-command]").click();
+  await expect(page.locator(".voice-follow-up")).toContainText("Follow-up target: Test");
+
+  await page.locator("[data-record]").click();
+  await expect(page.locator("[data-voice-status]")).toHaveText("Microphone on — recording");
+  await page.waitForTimeout(250);
+  await page.locator("[data-finish-recording]").click();
+  await expect(page.locator("#voice-transcript")).toHaveValue("Summarise it");
+  await page.locator("[data-run-command]").click();
+  await expect(page.locator(".voice-selected")).toContainText("Test");
+  expect(calls.intentContexts.at(-1)).toMatchObject({ followUpMessageId: "hassan-1" });
+  await page.locator("[data-run-command]").click();
+  await expect.poll(calls.summaryCalls).toBe(1);
+  await expect(page.locator(".voice-result-copy")).toHaveText("Review the proposal.");
+  await context.close();
 });
 
 test("whole-mailbox current-email wording asks the user to specify a target", async ({ page }) => {

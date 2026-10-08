@@ -54,6 +54,7 @@ export function voiceView({ voice: v, enabled, capabilities, currentEmail, escap
         <button class="secondary-button" data-cancel-recording ${v.status === "executing" ? "disabled" : ""}>${t("Cancel recording")}</button>
         <button class="secondary-button" data-restart-recording ${!available || v.status === "executing" ? "disabled" : ""}>${t("Restart recording")}</button></div>
         <p class="voice-context">${currentEmail ? t("Context: a current email is available when you say ‘this email’. No target is selected until your command is reviewed.") : t("Context: whole mailbox. Name or describe an email in your command.")}</p>
+        ${v.contextTarget ? `<p class="voice-context voice-follow-up"><strong>${t("Follow-up target:")}</strong> <span data-user-content>${e(v.contextTarget.subject || t("No subject"))}</span> <button class="link-button" data-clear-voice-context>${t("Clear follow-up target")}</button></p>` : ""}
         <label for="voice-transcript">${t("Review or type an English or Chinese command")}</label>
         <textarea id="voice-transcript" maxlength="2000" rows="4" ${busy || capturing ? "disabled" : ""}>${e(v.text)}</textarea>
         <div class="voice-hints">${["Summarise this email", "Find my most important recent email", "Generate a reply to this email", "Show my tasks"].map(command => `<button data-command="${e(t(command))}" ${busy || capturing ? "disabled" : ""}>${t(command)}</button>`).join("")}</div>
