@@ -1,0 +1,1 @@
+ALTER TABLE "UserSettings" ADD COLUMN "voiceAutoPlay" INTEGER NOT NULL DEFAULT 1;

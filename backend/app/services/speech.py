@@ -10,16 +10,20 @@ from backend.app.errors import AppError
 class SpeechService:
     def __init__(self, settings):
         self.settings = settings
-        self.attempts = {}
+        self.attempts = {"transcription": {}, "speech": {}}
 
-    def admit(self, user_id):
+    def admit(self, user_id, kind="transcription"):
         now = time.monotonic()
+        attempts = self.attempts[kind]
         # Prune inactive users as well as old requests; this is a single-process MVP.
-        self.attempts = {key: deque(t for t in entries if t > now - 60)
-                         for key, entries in self.attempts.items() if entries and entries[-1] > now - 60}
-        entries = self.attempts.setdefault(user_id, deque())
-        if len(entries) >= self.settings.speech_limit_per_minute:
-            raise AppError("VOICE_RATE_LIMITED", "Too many transcription requests. Try again shortly.", 429, True)
+        attempts = {key: deque(t for t in entries if t > now - 60)
+                    for key, entries in attempts.items() if entries and entries[-1] > now - 60}
+        self.attempts[kind] = attempts
+        entries = attempts.setdefault(user_id, deque())
+        limit = self.settings.tts_limit_per_minute if kind == "speech" else self.settings.speech_limit_per_minute
+        if len(entries) >= limit:
+            message = "Too many speech requests. Try again shortly." if kind == "speech" else "Too many transcription requests. Try again shortly."
+            raise AppError("VOICE_RATE_LIMITED", message, 429, True)
         entries.append(now)
 
     async def transcribe(self, audio, mime, language):
@@ -30,7 +34,11 @@ class SpeechService:
                     self.settings.speech_api_url,
                     headers={"Authorization": f"Bearer {self.settings.openai_api_key}"},
                     files={"file": (f"command.{extension}", audio, mime)},
-                    data={"model": self.settings.speech_model, "language": language.split("-")[0], "response_format": "json"},
+                    data={
+                        "model": self.settings.speech_model,
+                        **({"language": language.split("-")[0]} if language != "auto" else {}),
+                        "response_format": "json",
+                    },
                 )
             if response.status_code == 429:
                 raise AppError("VOICE_RATE_LIMITED", "The speech service is busy. Try again shortly.", 429, True)
@@ -48,3 +56,34 @@ class SpeechService:
             raise AppError("VOICE_TIMEOUT", "Transcription timed out. Record again or type a command.", 504, True) from None
         except (httpx.HTTPError, ValueError, AttributeError):
             raise AppError("VOICE_PROVIDER_FAILED", "The speech service is unavailable. Type a command or try again.", 502, True) from None
+
+    async def synthesise(self, text, language):
+        instructions = (
+            "Speak clearly in Simplified Chinese at a calm, accessible pace."
+            if language == "zh-CN"
+            else "Speak clearly in English at a calm, accessible pace."
+        )
+        try:
+            async with httpx.AsyncClient(timeout=self.settings.tts_timeout_seconds) as client:
+                response = await client.post(
+                    self.settings.tts_api_url,
+                    headers={"Authorization": f"Bearer {self.settings.openai_api_key}"},
+                    json={
+                        "model": self.settings.tts_model,
+                        "voice": self.settings.tts_voice,
+                        "input": text,
+                        "instructions": instructions,
+                        "response_format": "mp3",
+                    },
+                )
+            if response.status_code == 429:
+                raise AppError("VOICE_RATE_LIMITED", "The speech service is busy. Try again shortly.", 429, True)
+            if response.status_code in (400, 413, 422):
+                raise AppError("VOICE_INVALID_SPEECH", "This result could not be read aloud.", 422)
+            if response.status_code >= 400 or not response.content:
+                raise AppError("VOICE_PROVIDER_FAILED", "Speech playback is unavailable. Read the result on screen or try again.", 502, True)
+            return response.content
+        except httpx.TimeoutException:
+            raise AppError("VOICE_TIMEOUT", "Speech generation timed out. Read the result on screen or try again.", 504, True) from None
+        except httpx.HTTPError:
+            raise AppError("VOICE_PROVIDER_FAILED", "Speech playback is unavailable. Read the result on screen or try again.", 502, True) from None

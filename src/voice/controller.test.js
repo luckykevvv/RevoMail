@@ -43,3 +43,15 @@ it("reports denial and enforces recording deadline", async () => {
   vi.useFakeTimers(); await x.controller.start(limits, "en-AU"); await vi.advanceTimersByTimeAsync(60000);
   expect(x.track.stop).toHaveBeenCalled(); expect(x.controller.status).toBe("review");
 });
+
+it("freezes displayed elapsed time while recording is paused", async () => {
+  vi.useFakeTimers(); vi.setSystemTime(new Date("2026-10-06T00:00:00Z"));
+  const x = setup(); await x.controller.start(limits, "en-AU");
+  await vi.advanceTimersByTimeAsync(4000); x.controller.pause();
+  expect(x.changed).toHaveBeenLastCalledWith({ status: "paused", elapsed: 4 });
+  await vi.advanceTimersByTimeAsync(7000);
+  expect(x.changed).toHaveBeenLastCalledWith({ status: "paused", elapsed: 4 });
+  x.controller.resume(); await vi.advanceTimersByTimeAsync(2000);
+  expect(x.changed).toHaveBeenLastCalledWith({ status: "recording", elapsed: 6 });
+  x.controller.cancel();
+});

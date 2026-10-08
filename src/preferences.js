@@ -1,6 +1,6 @@
 export const DEFAULT_PREFERENCES = Object.freeze({
   language: "en", theme: "system", reducedMotion: false, defaultAiModel: null,
-  replyLength: "medium", speechLanguage: "en-AU", voiceEnabled: false
+  replyLength: "medium", speechLanguage: "auto", voiceEnabled: false, voiceAutoPlay: true
 });
 
 // Only one request is in flight. New edits remain visible while older saves complete.

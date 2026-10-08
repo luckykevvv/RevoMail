@@ -87,10 +87,15 @@ def test_invalid_configured_encryption_key_is_replaced(tmp_path):
 
 def test_migrations_apply_and_latest_migration_rolls_back(tmp_path):
     database = Database(f"file:{(tmp_path / 'migration.db').as_posix()}")
-    assert database.migrate() == 3
+    assert database.migrate() == 4
     with database.connect() as connection:
         assert connection.execute("SELECT name FROM sqlite_master WHERE name='Job'").fetchone()
+        assert "voiceAutoPlay" in {row[1] for row in connection.execute('PRAGMA table_info("UserSettings")').fetchall()}
 
+    assert database.rollback_last() == 3
+    with database.connect() as connection:
+        assert "voiceAutoPlay" not in {row[1] for row in connection.execute('PRAGMA table_info("UserSettings")').fetchall()}
+        assert connection.execute("SELECT name FROM sqlite_master WHERE name='MailboxMessage'").fetchone()
     assert database.rollback_last() == 2
     with database.connect() as connection:
         assert connection.execute("SELECT name FROM sqlite_master WHERE name='MailboxMessage'").fetchone() is None
@@ -102,7 +107,7 @@ def test_migrations_apply_and_latest_migration_rolls_back(tmp_path):
     assert database.rollback_last() == 0
     with database.connect() as connection:
         assert connection.execute("SELECT name FROM sqlite_master WHERE name='User'").fetchone() is None
-    assert database.migrate() == 3
+    assert database.migrate() == 4
 
 
 def test_token_protector_never_persists_plaintext(tmp_path):

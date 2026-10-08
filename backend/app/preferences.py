@@ -12,8 +12,9 @@ class Preferences(BaseModel):
     reducedMotion: bool = False
     defaultAiModel: str | None = None
     replyLength: Literal["concise", "medium", "detailed"] = "medium"
-    speechLanguage: Literal["en-AU", "en-US"] = "en-AU"
+    speechLanguage: Literal["auto", "en-AU", "en-US", "zh-CN"] = "auto"
     voiceEnabled: bool = False
+    voiceAutoPlay: bool = True
 
 
 class PreferencesPatch(BaseModel):
@@ -23,8 +24,9 @@ class PreferencesPatch(BaseModel):
     reducedMotion: bool | None = None
     defaultAiModel: str | None = None
     replyLength: Literal["concise", "medium", "detailed"] | None = None
-    speechLanguage: Literal["en-AU", "en-US"] | None = None
+    speechLanguage: Literal["auto", "en-AU", "en-US", "zh-CN"] | None = None
     voiceEnabled: bool | None = None
+    voiceAutoPlay: bool | None = None
 
 
 class PreferencesRepository:
@@ -38,7 +40,7 @@ class PreferencesRepository:
             if key not in saved:
                 continue
             value = saved[key]
-            if key in {"voiceEnabled", "reducedMotion"} and type(value) is int and value in (0, 1):
+            if key in {"voiceEnabled", "voiceAutoPlay", "reducedMotion"} and type(value) is int and value in (0, 1):
                 value = bool(value)
             try:
                 result[key] = getattr(Preferences(**{key: value}), key)

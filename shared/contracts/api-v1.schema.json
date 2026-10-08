@@ -54,6 +54,33 @@
       },
       "additionalProperties": false
     },
+    "voiceIntent": {
+      "type": "object",
+      "required": ["transcript", "language", "context"],
+      "properties": {
+        "transcript": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "language": { "enum": ["auto", "en-AU", "en-US", "zh-CN"] },
+        "context": {
+          "type": "object",
+          "required": ["view"],
+          "properties": {
+            "view": { "enum": ["inbox", "reading", "reply", "tasks", "calendar", "settings", "starred", "drafts", "sent", "compose"] },
+            "currentMessageId": { "type": ["string", "null"], "maxLength": 512 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "voiceSpeech": {
+      "type": "object",
+      "required": ["text", "language"],
+      "properties": {
+        "text": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "language": { "enum": ["en", "zh-CN"] }
+      },
+      "additionalProperties": false
+    },
     "taskMutation": {
       "type": "object",
       "required": ["title", "confirmed", "idempotencyKey"],

@@ -111,6 +111,12 @@ class Settings(BaseSettings):
     speech_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1024, le=25 * 1024 * 1024)
     speech_limit_per_minute: int = Field(default=6, ge=1, le=60)
     speech_timeout_seconds: int = Field(default=30, ge=1, le=120)
+    tts_model: str = "gpt-4o-mini-tts"
+    tts_api_url: str = "https://api.openai.com/v1/audio/speech"
+    tts_voice: str = "alloy"
+    tts_max_chars: int = Field(default=4096, ge=1, le=4096)
+    tts_limit_per_minute: int = Field(default=12, ge=1, le=120)
+    tts_timeout_seconds: int = Field(default=30, ge=1, le=120)
 
     @model_validator(mode="after")
     def validate_runtime(self):

@@ -6,9 +6,14 @@ export class VoiceController {
     this.generation = 0; this.status = "idle"; this.chunks = [];
   }
   emit(status, details = {}) { this.status = status; this.changed({ status, ...details }); }
+  elapsedSeconds() {
+    const active = this.status === "recording" && this.activeStartedAt ? Date.now() - this.activeStartedAt : 0;
+    return Math.floor(((this.recordedMs || 0) + active) / 1000);
+  }
   available() { return Boolean(this.mediaDevices?.getUserMedia && this.Recorder && FORMATS.some(type => this.Recorder.isTypeSupported(type))); }
   release() {
     clearTimeout(this.timer);
+    clearInterval(this.ticker);
     this.stream?.getTracks().forEach(track => track.stop()); this.stream = null;
   }
   cancel() {
@@ -40,6 +45,7 @@ export class VoiceController {
           this.cancel(); this.emit("error", { error: "Recording is too large. Record a shorter command." }); return;
         }
         this.chunks.push(event.data);
+        if (this.status === "recording") this.emit("recording", { elapsed: this.elapsedSeconds(), level: Math.min(1, event.data.size / 16000) });
       };
       recorder.onerror = () => { if (generation === this.generation) { this.cancel(); this.emit("error", { error: "Recording failed. Try again or type a command." }); } };
       recorder.onstop = async () => {
@@ -57,7 +63,12 @@ export class VoiceController {
         } finally { if (generation === this.generation) this.abort = null; }
       };
       recorder.start(250);
-      this.emit("recording");
+      this.recordedMs = 0;
+      this.activeStartedAt = Date.now();
+      this.emit("recording", { elapsed: 0 });
+      this.ticker = setInterval(() => {
+        if (this.status === "recording") this.emit("recording", { elapsed: this.elapsedSeconds() });
+      }, 1000);
       // Wall-clock limit also bounds paused sessions and the lifetime of microphone access.
       this.timer = setTimeout(() => this.finish(), limits.maxSeconds * 1000);
     } catch (error) {
@@ -68,11 +79,14 @@ export class VoiceController {
   }
   pause() {
     if (this.status !== "recording") return;
-    this.recorder.pause(); this.stream.getAudioTracks().forEach(track => { track.enabled = false; }); this.emit("paused");
+    this.recordedMs += Date.now() - this.activeStartedAt;
+    this.activeStartedAt = null;
+    this.recorder.pause(); this.stream.getAudioTracks().forEach(track => { track.enabled = false; }); this.emit("paused", { elapsed: this.elapsedSeconds() });
   }
   resume() {
     if (this.status !== "paused") return;
-    this.stream.getAudioTracks().forEach(track => { track.enabled = true; }); this.recorder.resume(); this.emit("recording");
+    this.activeStartedAt = Date.now();
+    this.stream.getAudioTracks().forEach(track => { track.enabled = true; }); this.recorder.resume(); this.emit("recording", { elapsed: this.elapsedSeconds() });
   }
   finish() {
     if (!["recording", "paused"].includes(this.status)) return;

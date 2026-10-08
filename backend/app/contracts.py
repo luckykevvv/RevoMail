@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ErrorDetail(BaseModel):
@@ -49,6 +49,60 @@ class AiOperationRequest(BaseModel):
 class VoiceCommandRequest(BaseModel):
     transcript: str = Field(min_length=1, max_length=2000)
     confirmed: bool = False
+
+
+class VoiceContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    view: Literal["inbox", "reading", "reply", "tasks", "calendar", "settings", "starred", "drafts", "sent", "compose"]
+    currentMessageId: str | None = Field(default=None, max_length=512)
+
+
+class VoiceTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["none", "current", "search"] = "none"
+    terms: str = Field(default="", max_length=300)
+    sender: str = Field(default="", max_length=300)
+    subject: str = Field(default="", max_length=500)
+    unread: bool | None = None
+    starred: bool | None = None
+    priority: Literal["high", "medium", "low"] | None = None
+    newest: bool = True
+
+
+class VoiceIntentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    transcript: str = Field(min_length=1, max_length=2000)
+    language: Literal["auto", "en-AU", "en-US", "zh-CN"] = "auto"
+    context: VoiceContext
+
+
+class VoiceIntentResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    detectedLanguage: Literal["en", "zh-CN"]
+    action: Literal["search_messages", "open_message", "summarize_message", "draft_reply", "extract_details", "show_tasks", "show_calendar", "navigate"]
+    target: VoiceTarget = Field(default_factory=VoiceTarget)
+    destination: Literal["inbox", "tasks", "calendar", "settings", "starred", "drafts", "sent"] | None = None
+    displayText: str = Field(min_length=1, max_length=500)
+    confidence: Literal["high", "medium", "low"]
+
+    @model_validator(mode="after")
+    def validate_route(self):
+        email_actions = {"open_message", "summarize_message", "draft_reply", "extract_details"}
+        if self.action in email_actions and self.target.mode == "none":
+            raise ValueError("Email actions require a target rule.")
+        if self.action == "search_messages" and self.target.mode != "search":
+            raise ValueError("Mailbox search requires a search target.")
+        if self.action == "navigate" and self.destination is None:
+            raise ValueError("Navigation requires a destination.")
+        if self.action != "navigate" and self.destination is not None:
+            raise ValueError("Only navigation may include a destination.")
+        return self
+
+
+class VoiceSpeechRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(min_length=1, max_length=4096)
+    language: Literal["en", "zh-CN"] = "en"
 
 
 class TaskMutationRequest(BaseModel):

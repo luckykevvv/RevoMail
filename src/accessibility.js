@@ -1,4 +1,5 @@
 let returnFocus;
+let returnSelector;
 let activeDialog;
 let closeDialog;
 
@@ -11,6 +12,8 @@ export function syncDialog(dialog, onClose) {
   document.querySelector(".app-shell")?.toggleAttribute("inert", Boolean(dialog));
   if (dialog && !activeDialog) {
     returnFocus = document.activeElement;
+    const identity = [...(returnFocus?.attributes || [])].find(attribute => attribute.name === "id" || attribute.name.startsWith("data-"));
+    returnSelector = identity ? `[${identity.name}="${CSS.escape(identity.value)}"]` : null;
     activeDialog = dialog;
     (dialog.querySelector("textarea:not(:disabled)") || focusable(dialog)[0] || dialog).focus();
   } else if (dialog) {
@@ -20,8 +23,10 @@ export function syncDialog(dialog, onClose) {
   } else if (activeDialog) {
     activeDialog = null;
     if (returnFocus?.isConnected) returnFocus.focus();
+    else if (returnSelector && document.querySelector(returnSelector)) document.querySelector(returnSelector).focus();
     else document.querySelector('[data-workspace] h1, [data-nav="inbox"]')?.focus();
     returnFocus = null;
+    returnSelector = null;
   }
 }
 

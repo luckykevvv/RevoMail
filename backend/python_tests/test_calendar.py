@@ -94,6 +94,7 @@ def run_extract(monkeypatch, payload, email_date="Mon, 28 Sep 2026 09:00:00 +100
     seen = {}
 
     def fake_chat(system, user, **_kw):
+        seen["system"] = system
         seen["user"] = user
         return payload if isinstance(payload, str) else json.dumps(payload)
 
@@ -106,6 +107,8 @@ def test_extract_keeps_valid_start_and_end_and_sends_email_date(monkeypatch):
     assert result["events"][0]["start"] == "2026-10-05T10:00" and result["events"][0]["end"] == "2026-10-05T11:00"
     assert result["events"][0]["all_day"] is False
     assert "Email sent: Mon, 28 Sep 2026 09:00:00 +1000" in seen["user"]
+    assert "A deadline alone does not turn a task into an event" in seen["system"]
+    assert "Do not duplicate the same item in both lists" in seen["system"]
 
 
 def test_extract_all_day_event_has_no_end_time(monkeypatch):

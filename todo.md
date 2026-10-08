@@ -121,12 +121,12 @@ Acceptance criteria:
 
 ### FR-06 Voice Interaction
 
-- [ ] Integrate a browser-based or cloud Speech-to-Text service.
-- [ ] Support starting, pausing, cancelling, and restarting voice capture.
-- [ ] Display the recognized transcript before executing a command.
-- [ ] Support a limited command set, including summarizing the current email, generating a reply, and showing tasks.
-- [ ] Provide keyboard input when the microphone is unavailable or recognition fails.
-- [ ] Do not activate the microphone or retain audio without user permission.
+- [x] Integrate provider-ready cloud Speech-to-Text and Text-to-Speech adapters with local fixture coverage.
+- [x] Support starting, pausing, cancelling, and restarting voice capture.
+- [x] Display the recognized transcript, parsed action, and resolved target before executing a command.
+- [x] Support guarded English/Chinese search, open, summary, reply-draft, extraction, task/calendar-view, and navigation commands.
+- [x] Provide keyboard input when the microphone is unavailable or recognition fails.
+- [x] Do not activate the microphone or retain audio without user permission.
 
 Acceptance criteria:
 
@@ -137,8 +137,8 @@ Acceptance criteria:
 ### FR-07 Settings
 
 - [ ] Support interface language, light/dark theme, and reduced motion.
-- [ ] Support a default AI model, reply length, and speech language.
-- [ ] Allow users to enable or disable voice input.
+- [x] Support a default AI model, reply length, automatic/English/Chinese speech language, and spoken-result preference.
+- [x] Allow users to enable or disable voice input.
 - [ ] Show connected accounts, granted permissions, and a revoke-access action.
 - [ ] Persist user settings across sessions.
 
@@ -281,6 +281,7 @@ Acceptance criteria:
 
 - Implemented account preferences, English/Chinese interface, reviewed cloud transcription and deterministic English commands; real cloud and physical microphone checks remain pending.
 - Integrated main's Calendar extraction/confirmation, guided reply/compose drafting, Sent pagination and local timestamp formatting while retaining cached INBOX, CSRF and the established send contract.
+- Voice examples now follow the saved interface language; task-only commands no longer mix in events. Tasks have an explicit empty state, and Calendar uses a month grid with resolved events in their validated date cells and unresolved dates held for review.
 - Calendar creation requires explicit confirmation, CSRF and an independent idempotency operation; DST ambiguity, missing dates, rate limits and unknown outcomes are handled without automatic duplicate creation.
 - Automated logic/API/browser accessibility checks use provider fixtures and synthetic audio. They do not establish real-provider completion, full WCAG conformance, or Windows screen-reader usability.
 - Native macOS/Linux packages, real Google Calendar/OAuth, cloud transcription and manual assistive-technology checks remain outstanding. See change.md for commands and final results.

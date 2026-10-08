@@ -2,10 +2,11 @@ import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
 async function fixture(page, initial = {}) {
-  const { message: messageOverrides = {}, ...preferenceOverrides } = initial;
-  let preferences = { language: "en", theme: "light", reducedMotion: false, defaultAiModel: "fixture-model", replyLength: "medium", speechLanguage: "en-AU", voiceEnabled: false, ...preferenceOverrides };
+  const { message: messageOverrides = {}, messages: messageFixtures, summaryText = "Review the proposal.", summaryBullets = [], extraction = { events: [{ title: "Review meeting", date: "tomorrow", start: null, end: null, location: "Room 1" }], tasks: [{ title: "Submit review", due_date: "2026-10-12" }] }, ...preferenceOverrides } = initial;
+  let preferences = { language: "en", theme: "light", reducedMotion: false, defaultAiModel: "fixture-model", replyLength: "medium", speechLanguage: "auto", voiceEnabled: false, voiceAutoPlay: true, ...preferenceOverrides };
   let summaryCalls = 0; let sendCalls = 0; const calendarCalls = [];
   const message = { id: "fixture-1", sender: "tester@example.com", recipients: ["reader@example.com"], subject: "Fixture planning", preview: "Review the proposal.", body_plain: "Please review the proposal.", unread: false, starred: false, category: "Primary", attachments: [], ...messageOverrides };
+  const messages = messageFixtures || [message];
   await page.route("**/api/v1/**", async route => {
     const url = new URL(route.request().url());
     let body;
@@ -14,25 +15,39 @@ async function fixture(page, initial = {}) {
     else if (url.pathname === "/api/v1/settings") {
       if (route.request().method() === "PATCH") Object.assign(preferences, route.request().postDataJSON());
       body = { settings: preferences, allowedAiModels: ["fixture-model"] };
-    } else if (url.pathname === "/api/v1/voice/capabilities") body = { available: true, maxBytes: 10485760, maxSeconds: 60, languages: ["en-AU", "en-US"] };
+    } else if (url.pathname === "/api/v1/voice/capabilities") body = { available: true, transcriptionAvailable: true, synthesisAvailable: true, intentAvailable: true, maxBytes: 10485760, maxSeconds: 60, maxSpeechChars: 4096, languages: ["auto", "en-AU", "en-US", "zh-CN"] };
     else if (url.pathname === "/api/v1/voice/transcriptions") body = { text: "Show my tasks" };
-    else if (url.pathname === "/api/v1/emails") body = { messages: [message], sync: { status: "completed" } };
-    else if (url.pathname === "/api/v1/emails/fixture-1") body = message;
+    else if (url.pathname === "/api/v1/voice/intents") {
+      const transcript = route.request().postDataJSON().transcript.toLowerCase();
+      if (transcript.includes("delete") || transcript.includes("send email")) {
+        await route.fulfill({ status: 422, json: { error: { code: "VOICE_UNSAFE_COMMAND", message: "Voice cannot send, delete, archive, change mailbox state, or create calendar events.", retryable: false, correlationId: "fixture" } } }); return;
+      }
+      if (transcript.includes("missing sender")) body = { detectedLanguage: "en", action: "summarize_message", target: { mode: "search", terms: "", sender: "missing@example.com", subject: "", unread: null, starred: null, priority: null, newest: true }, destination: null, displayText: "Summarise an email from a missing sender", confidence: "high" };
+      else if (transcript.includes("unclear request")) body = { detectedLanguage: "en", action: "summarize_message", target: { mode: "search", terms: "", sender: "", subject: "", unread: null, starred: null, priority: null, newest: true }, destination: null, displayText: "Unclear mailbox request", confidence: "low" };
+      else if (transcript.includes("highest priority") || transcript.includes("important")) body = { detectedLanguage: "en", action: "summarize_message", target: { mode: "search", terms: "", sender: "", subject: "", unread: null, starred: null, priority: null, newest: true }, destination: null, displayText: "Summarise an important recent email", confidence: "high" };
+      else if (transcript.includes("task")) body = { detectedLanguage: "en", action: "show_tasks", target: { mode: "none", terms: "", sender: "", subject: "", unread: null, starred: null, priority: null, newest: true }, destination: null, displayText: "Show tasks", confidence: "high" };
+      else body = { detectedLanguage: transcript.includes("总结") ? "zh-CN" : "en", action: "summarize_message", target: { mode: "current", terms: "", sender: "", subject: "", unread: null, starred: null, priority: null, newest: true }, destination: null, displayText: "Summarise the current email", confidence: "high" };
+    }
+    else if (url.pathname === "/api/v1/emails") body = { messages, sync: { status: "completed" } };
+    else if (messages.some(item => url.pathname === `/api/v1/emails/${item.id}`)) body = messages.find(item => url.pathname === `/api/v1/emails/${item.id}`) || message;
     else if (url.pathname === "/api/v1/emails/fixture-1/reply-metadata") body = { reply_to: ["support@example.com"], subject: message.subject };
     else if (url.pathname === "/api/v1/emails/sync") body = { jobId: "fixture-job", status: "syncing" };
     else if (url.pathname.startsWith("/api/v1/emails/sync/")) body = { sync: { status: "completed" } };
-    else if (url.pathname === "/api/v1/ai/classify") body = { classifications: {}, warning: null };
-    else if (url.pathname === "/api/v1/ai/summarise") { summaryCalls++; body = { summary: "Review the proposal.", bullets: [] }; }
+    else if (url.pathname === "/api/v1/ai/classify") body = { classifications: Object.fromEntries((route.request().postDataJSON()?.messages || []).flatMap(item => {
+      const found = messages.find(candidate => String(candidate.id) === String(item.id));
+      return found?.priority ? [[String(item.id), { priority: found.priority, reason: "Fixture priority" }]] : [];
+    })), warning: null };
+    else if (url.pathname === "/api/v1/ai/summarise") { summaryCalls++; body = { summary: summaryText, bullets: summaryBullets }; }
     else if (url.pathname === "/api/v1/ai/draft-reply") body = { draft: "Thank you. I will review it." };
     else if (url.pathname === "/api/v1/ai/compose") body = { subject: "AI subject", draft: "User-reviewed generated draft." };
-    else if (url.pathname === "/api/v1/ai/extract") body = { events: [{ title: "Review meeting", date: "tomorrow", start: null, end: null, location: "Room 1" }], tasks: [{ title: "Submit review", due_date: "2026-10-12" }] };
+    else if (url.pathname === "/api/v1/ai/extract") body = extraction;
     else if (url.pathname === "/api/v1/calendar/events") { calendarCalls.push(route.request().postDataJSON()); await new Promise(resolve => setTimeout(resolve, 250)); body = { id: "event-1", created: true, htmlLink: "https://calendar.google.com/event?eid=fixture" }; }
     else if (url.pathname === "/api/v1/emails/send") { sendCalls++; body = { status: "sent" }; }
     else body = {};
     await route.fulfill({ json: body });
   });
-  await page.goto("/"); await expect(page.locator("[data-email]")).toBeVisible();
-  return { summaryCalls: () => summaryCalls, sendCalls: () => sendCalls, calendarCalls };
+  await page.goto("/"); await expect(page.locator("[data-email]").first()).toBeVisible();
+  return { summaryCalls: () => summaryCalls, sendCalls: () => sendCalls, preferences: () => preferences, calendarCalls };
 }
 
 for (const width of [1280, 320]) {
@@ -60,7 +75,11 @@ for (const width of [1280, 320]) {
     await expect(page.locator('[data-cal-field="title"]')).toHaveValue("Reviewed event");
     const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
     expect(results.violations.map(v => ({ id: v.id, nodes: v.nodes.map(n => n.target) }))).toEqual([]);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const pageOverflows = await page.evaluate(() => [...document.querySelectorAll("body *")].filter(element => {
+      const box = element.getBoundingClientRect();
+      return box.right > innerWidth + 1 || box.left < -1;
+    }).slice(0, 8).map(element => ({ tag: element.tagName, className: element.className, right: element.getBoundingClientRect().right, width: element.getBoundingClientRect().width })));
+    expect(pageOverflows).toEqual([]);
     await page.locator("[data-confirm-calendar]").click();
     await expect(page.locator("[data-confirm-calendar]")).toBeDisabled();
     await expect(page.getByRole("link", { name: "Open in Google Calendar" })).toBeVisible();
@@ -82,24 +101,64 @@ test("custom compose and Sent retain the reviewed sending contract", async ({ pa
   await expect(page.locator("[data-email]")).toHaveCount(1);
 });
 
-test("Tasks and Calendar separate and remove their own suggestions", async ({ page }) => {
+for (const width of [1280, 320]) {
+  test(`Tasks and Calendar separate their suggestions in responsive views at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const errors = [];
+    page.on("pageerror", error => errors.push(error.message));
+    await fixture(page, { extraction: { events: [{ title: "Review meeting", date: "12 October 2026", time: "2 pm", start: "2026-10-12T14:00", end: "2026-10-12T15:00", location: "Room 1" }], tasks: [{ title: "Submit review", due_date: "2026-10-12" }] } });
+    await page.locator("[data-email]").click();
+    await page.locator("[data-ai-extract]").click();
+
+    await page.locator('[data-nav="tasks"]').click();
+    await expect(page.getByRole("heading", { name: "Tasks", exact: true })).toBeVisible();
+    await expect(page.getByText("Submit review", { exact: true })).toBeVisible();
+    await expect(page.getByText("Review meeting", { exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "Remove task suggestion" }).click();
+    await expect(page.getByRole("heading", { name: "No tasks at the moment" })).toBeVisible();
+
+    await page.locator('[data-nav="calendar"]').click();
+    await expect(page.getByRole("heading", { name: "Calendar", exact: true })).toBeVisible();
+    await expect(page.getByText("October 2026", { exact: true })).toBeVisible();
+    await expect(page.locator('.calendar-day[aria-label*="12"]')).toContainText("Review meeting");
+    await expect(page.getByText("Review meeting", { exact: true })).toBeVisible();
+    await expect(page.getByText("Submit review", { exact: true })).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    if (width === 320) expect(await page.locator(".calendar-scroll").evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
+    const accessibility = await new AxeBuilder({ page }).include(".calendar-shell").withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
+    expect(accessibility.violations.map(violation => ({ id: violation.id, nodes: violation.nodes.map(node => node.target) }))).toEqual([]);
+    await page.getByRole("button", { name: "Remove event suggestion" }).click();
+    await expect(page.getByText("No calendar events at the moment")).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+}
+
+test("voice suggestion chips follow the saved interface language", async ({ page }) => {
   await fixture(page);
+  await page.locator("[data-voice]").click();
+  await expect(page.locator('[data-command="Generate a reply to this email"]')).toBeVisible();
+  await expect(page.getByRole("button", { name: "为这封邮件生成回复" })).toHaveCount(0);
+  await page.locator("[data-close-voice]").click();
+  await page.locator('[data-nav="settings"]').click();
+  await page.locator('[data-preference="language"]').selectOption("zh-CN");
+  await page.getByRole("button", { name: "收件箱", exact: true }).click();
+  await page.locator("[data-voice]").click();
+  await expect(page.locator('[data-command="为这封邮件生成回复"]')).toBeVisible();
+  await expect(page.locator('[data-command="查看我的任务"]')).toBeVisible();
+});
+
+test("show tasks does not report calendar events as tasks", async ({ page }) => {
+  await fixture(page, { extraction: { events: [{ title: "Calendar-only meeting", start: "2026-10-12T14:00" }], tasks: [] } });
   await page.locator("[data-email]").click();
   await page.locator("[data-ai-extract]").click();
-
-  await page.locator('[data-nav="tasks"]').click();
-  await expect(page.getByRole("heading", { name: "Tasks", exact: true })).toBeVisible();
-  await expect(page.getByText("Submit review", { exact: true })).toBeVisible();
-  await expect(page.getByText("Review meeting", { exact: true })).toHaveCount(0);
-  await page.getByRole("button", { name: "Remove task suggestion" }).click();
-  await expect(page.getByText("No tasks were extracted from the selected email.")).toBeVisible();
-
-  await page.locator('[data-nav="calendar"]').click();
-  await expect(page.getByRole("heading", { name: "Calendar", exact: true })).toBeVisible();
-  await expect(page.getByText("Review meeting", { exact: true })).toBeVisible();
-  await expect(page.getByText("Submit review", { exact: true })).toHaveCount(0);
-  await page.getByRole("button", { name: "Remove event suggestion" }).click();
-  await expect(page.getByText("No calendar events were extracted from the selected email.")).toBeVisible();
+  await page.getByRole("button", { name: "Inbox", exact: true }).click();
+  await page.locator("[data-voice]").click();
+  await page.locator("#voice-transcript").fill("Show my tasks");
+  await page.locator("[data-run-command]").click();
+  await page.locator("[data-run-command]").click();
+  await expect(page.locator(".collection-empty")).toContainText("No tasks at the moment");
+  await expect(page.locator(".voice-result-copy")).toHaveText("There are no tasks at the moment.");
+  await expect(page.locator(".voice-result-copy")).not.toContainText("Calendar-only meeting");
 });
 
 test("formatted email hides preheaders and does not stack long words vertically", async ({ page }) => {
@@ -161,7 +220,7 @@ for (const width of [1280, 320]) {
   test(`settings, keyboard voice review, and accessibility at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     const errors = []; page.on("pageerror", error => errors.push(error.message));
-    const calls = await fixture(page);
+    const calls = await fixture(page, { summaryBullets: ["Repeated key point must stay in the email Summary card."] });
     await page.locator('[data-nav="settings"]').click();
     await page.locator('[data-preference="theme"]').selectOption("dark");
     await expect(page.locator("body")).toHaveAttribute("data-theme", "dark");
@@ -181,17 +240,42 @@ for (const width of [1280, 320]) {
     await page.locator("[data-email]").focus(); await page.keyboard.press("Enter");
     await page.locator("[data-voice]").click();
     await expect(page.locator("#voice-transcript")).toBeFocused();
+    const inputPane = await page.locator(".voice-input-pane").boundingBox();
+    const outputPane = await page.locator(".voice-output-pane").boundingBox();
+    expect(inputPane).not.toBeNull(); expect(outputPane).not.toBeNull();
+    if (width > 760) {
+      expect(outputPane.x).toBeGreaterThan(inputPane.x + inputPane.width);
+      expect(Math.abs(outputPane.y - inputPane.y)).toBeLessThan(4);
+      const privacyBox = await page.locator(".privacy-note").boundingBox();
+      const outputHeadingBox = await page.locator("#voice-output-title").boundingBox();
+      const privacyPadding = await page.locator(".privacy-note").evaluate(element => parseFloat(getComputedStyle(element).paddingLeft));
+      expect(Math.abs(privacyBox.x + privacyPadding - outputHeadingBox.x)).toBeLessThan(3);
+    } else {
+      expect(outputPane.y).toBeGreaterThan(inputPane.y + inputPane.height);
+    }
+    const transcriptBox = await page.locator("#voice-transcript").boundingBox();
+    expect(transcriptBox.x - inputPane.x).toBeGreaterThanOrEqual(width > 760 ? 5 : 0);
+    expect(await page.locator(".voice-modal").evaluate(element => {
+      const box = element.getBoundingClientRect();
+      return box.top >= 0 && box.bottom <= innerHeight && box.left >= 0 && box.right <= innerWidth;
+    })).toBe(true);
     await page.locator("#voice-transcript").fill("delete every email");
     await page.locator("[data-run-command]").click();
-    await expect(page.getByRole("alert").filter({ hasText: "Unsupported command" })).toBeVisible();
+    await expect(page.getByRole("alert").filter({ hasText: "Voice cannot send" })).toBeVisible();
     expect(calls.summaryCalls()).toBe(0);
-    await page.locator("#voice-transcript").fill("Summarise the current email");
+    await page.locator("#voice-transcript").fill("Help me summarize this email.");
     await page.waitForTimeout(900); // Let the mailbox fixture's sync completion update the app.
-    await expect(page.locator("#voice-transcript")).toHaveValue("Summarise the current email");
+    await expect(page.locator("#voice-transcript")).toHaveValue("Help me summarize this email.");
+    expect(calls.summaryCalls()).toBe(0);
+    await page.locator("[data-run-command]").click();
+    await expect(page.getByRole("heading", { name: "Command preview" })).toBeVisible();
     expect(calls.summaryCalls()).toBe(0);
     await page.locator("[data-run-command]").click();
     await expect.poll(calls.summaryCalls).toBe(1);
-    await page.locator("[data-voice]").click();
+    await expect(page.getByRole("dialog").getByRole("heading", { name: "Summary", exact: true })).toBeVisible();
+    await expect(page.locator(".voice-result-copy")).toContainText("Review the proposal.");
+    await expect(page.locator(".voice-result-copy")).not.toContainText("Repeated key point");
+    await page.screenshot({ path: `build/module7-browser-results/voice-split-${width}.png`, fullPage: true });
     await page.keyboard.press("Escape");
     await expect(page.locator('[role="dialog"]')).toHaveCount(0);
     await expect(page.locator("[data-voice]")).toBeFocused();
@@ -222,10 +306,79 @@ test("drafts survive voice modal and send requires a separate confirmation", asy
   await expect.poll(calls.sendCalls).toBe(1);
 });
 
-test("real browser media capture pauses, releases and requires review", async ({ browser }) => {
+test("global voice review resolves ranked candidates and requires target confirmation", async ({ page }) => {
+  const calls = await fixture(page, { messages: [
+    { id: "low-new", sender: "news@example.com", recipients: ["reader@example.com"], subject: "Newest low", preview: "News", body_plain: "News", unread: false, starred: false, category: "Primary", attachments: [], priority: "low", receivedAt: "2026-10-06T04:00:00Z" },
+    { id: "high-old", sender: "lead@example.com", recipients: ["reader@example.com"], subject: "Important action", preview: "Please review", body_plain: "Please review", unread: true, starred: false, category: "Primary", attachments: [], priority: "high", receivedAt: "2026-10-05T04:00:00Z" },
+  ] });
+  await page.locator("[data-voice]").click();
+  await expect(page.getByText("Context: whole mailbox. Name or describe an email in your command.")).toBeVisible();
+  await page.locator("#voice-transcript").fill("Summarise my most important recent email");
+  await page.locator("[data-run-command]").click();
+  await expect(page.locator("[data-voice-candidate]")).toHaveCount(2);
+  await expect(page.locator(".voice-candidates strong").first()).toContainText("Important action");
+  expect(calls.summaryCalls()).toBe(0);
+  await page.locator("[data-voice-candidate]").first().check();
+  await page.locator("[data-run-command]").click();
+  await expect.poll(calls.summaryCalls).toBe(1);
+  await expect(page.getByRole("heading", { name: "Result ready" })).toBeVisible();
+});
+
+test("whole-mailbox current-email wording asks the user to specify a target", async ({ page }) => {
+  await fixture(page);
+  await page.locator("[data-voice]").click();
+  await page.locator("#voice-transcript").fill("Help me summarize this email.");
+  await page.locator("[data-run-command]").click();
+  await expect(page.getByRole("dialog").getByRole("alert")).toHaveText("Please specify which email you want, for example by sender, subject, or recency.");
+  await expect(page.getByRole("heading", { name: "Command preview" })).toHaveCount(0);
+  await expect(page.locator("[data-run-command]")).toHaveText("Review command");
+  await expect(page.locator("#voice-transcript")).toBeEditable();
+});
+
+test("broad, unmatched and low-confidence mailbox commands never leave a dead confirmation", async ({ page }) => {
+  await fixture(page);
+  await page.locator("[data-voice]").click();
+  await page.locator("#voice-transcript").fill("Help me summarize the highest priority email.");
+  await page.locator("[data-run-command]").click();
+  await expect(page.getByRole("heading", { name: "Command preview" })).toBeVisible();
+  await expect(page.locator(".voice-selected")).toContainText("Fixture planning");
+
+  await page.locator("#voice-transcript").fill("Summarise the email from the missing sender");
+  await page.locator("[data-run-command]").click();
+  await expect(page.getByRole("dialog").getByRole("alert")).toHaveText("No matching emails were found. Please specify a sender, subject, unread or starred status, or recency.");
+  await expect(page.getByRole("heading", { name: "Command preview" })).toHaveCount(0);
+  await expect(page.locator("[data-run-command]")).toHaveText("Review command");
+
+  await page.locator("#voice-transcript").fill("Unclear request");
+  await page.locator("[data-run-command]").click();
+  await expect(page.getByRole("dialog").getByRole("alert")).toHaveText("I couldn't identify a specific command. Please name the action and describe the email you want.");
+  await expect(page.getByRole("heading", { name: "Command preview" })).toHaveCount(0);
+  await expect(page.locator("#voice-transcript")).toBeEditable();
+});
+
+test("voice playback updates preserve the output scroll position", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 650 });
+  await fixture(page, { voiceEnabled: true, voiceAutoPlay: false, summaryText: "Review the proposal. ".repeat(80) });
+  await page.locator("[data-email]").click();
+  await page.locator("[data-voice]").click();
+  await page.locator("#voice-transcript").fill("Help me summarize this email.");
+  await page.locator("[data-run-command]").click();
+  await page.locator("[data-run-command]").click();
+  await expect(page.locator(".voice-result-copy")).toBeVisible();
+  const pane = page.locator(".voice-output-pane");
+  await expect.poll(() => pane.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+  await pane.evaluate(element => { element.scrollTop = element.scrollHeight; });
+  const before = await pane.evaluate(element => element.scrollTop);
+  expect(before).toBeGreaterThan(0);
+  await page.locator("[data-speak]").click();
+  await page.waitForTimeout(300);
+  expect(await pane.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+});
+
+test("real browser media capture enables consent, pauses, releases and requires two-step review", async ({ browser }) => {
   const context = await browser.newContext({ permissions: ["microphone"] });
   const page = await context.newPage();
-  await fixture(page, { voiceEnabled: true });
+  const calls = await fixture(page, { voiceEnabled: false, voiceAutoPlay: false });
   const mediaProbe = await page.evaluate(async () => {
     let stage = "getUserMedia";
     try {
@@ -239,16 +392,27 @@ test("real browser media capture pauses, releases and requires review", async ({
   });
   expect(mediaProbe).toBe("ok");
   await page.locator("[data-voice]").click();
+  await expect(page.locator("[data-record]")).toBeEnabled();
   await page.locator("[data-record]").click();
-  await expect.poll(async () => ({ status: await page.locator("[data-voice-status]").textContent(), errors: await page.locator('[role="dialog"] [role="alert"]').allTextContents() })).toEqual({ status: "Recording…", errors: [] });
-  await expect(page.locator("[data-voice-status]")).toHaveText("Recording…");
+  await expect.poll(() => calls.preferences().voiceEnabled).toBe(true);
+  await expect.poll(async () => ({ status: await page.locator("[data-voice-status]").textContent(), errors: await page.locator('[role="dialog"] [role="alert"]').allTextContents() })).toEqual({ status: "Microphone on — recording", errors: [] });
+  await expect(page.locator("[data-voice-status]")).toHaveText("Microphone on — recording");
   await page.locator("[data-pause]").click();
-  await expect(page.locator("[data-voice-status]")).toHaveText("Paused");
+  await expect(page.locator("[data-voice-status]")).toHaveText("Paused — microphone muted; capture session remains open");
+  const pausedTime = await page.locator(".microphone-status time").textContent();
+  expect(pausedTime).toMatch(/^\d{2}:\d{2}$/);
+  await page.waitForTimeout(1100);
+  await expect(page.locator(".microphone-status time")).toHaveText(pausedTime);
+  expect(await page.locator(".microphone-status time").evaluate(element => getComputedStyle(element).whiteSpace)).toBe("nowrap");
+  const pausedButtons = await Promise.all(["[data-pause]", "[data-finish-recording]", "[data-cancel-recording]", "[data-restart-recording]"].map(selector => page.locator(selector).boundingBox()));
+  expect(Math.max(...pausedButtons.map(box => box.width)) - Math.min(...pausedButtons.map(box => box.width))).toBeLessThan(2);
   await page.locator("[data-pause]").click();
   await page.waitForTimeout(500);
   await page.locator("[data-finish-recording]").click();
   await expect(page.locator("#voice-transcript")).toHaveValue("Show my tasks");
   await expect(page.locator('[role="dialog"]')).toBeVisible();
+  await page.locator("[data-run-command]").click();
+  await expect(page.getByRole("heading", { name: "Command preview" })).toBeVisible();
   await page.locator("[data-run-command]").click();
   await expect(page.getByRole("heading", { name: "Tasks", exact: true })).toBeVisible();
   await expect(page.getByText("Project Meeting", { exact: true })).toHaveCount(0);

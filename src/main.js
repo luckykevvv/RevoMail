@@ -1,11 +1,13 @@
 import "./style.css";
 import { DEFAULT_PREFERENCES, PreferenceWriter } from "./preferences.js";
 import { VoiceController } from "./voice/controller.js";
-import { validateCommand } from "./voice/commands.js";
+import { filterCandidates, needsMessage, parseOrdinal } from "./voice/commands.js";
+import { VoicePlayback } from "./voice/playback.js";
 import { preferencesView, voiceView } from "./module7-views.js";
 import { captureFocus, restoreFocus, syncDialog } from "./accessibility.js";
 import { translate, translateUI } from "./i18n.js";
 import { messageFrameDocument } from "./email-html.js";
+import { calendarCells, eventDateKey, monthKeyForEvents, shiftMonth } from "./calendar-view.js";
 import { calendarPayload, eventDraftFromExtraction, formatMailTime, formatFullMailTime, replySubject, applyClassifications, applyMailboxPage, formatLocalDateTime, LatestRequestCoordinator, mailboxContentState, matchesMailboxCategory, selectAfterMailboxRefresh } from "./mailbox-state.js";
 import {
   AlignLeft,
@@ -128,7 +130,7 @@ const state = {
   preferences: { ...DEFAULT_PREFERENCES },
   settingsStatus: "loading", settingsError: false, allowedAiModels: [],
   capabilities: null,
-  voice: { status: "idle", text: "", error: "", targetId: null, targetSubject: "" },
+  voice: { status: "idle", text: "", error: "", source: "typed", intent: null, candidates: [], selectedTargetId: null, resultText: "", playback: { status: "idle", muted: false } },
   compose: { to: "", subject: "", body: "" },
   toastError: false,
   voiceOpen: false,
@@ -152,7 +154,8 @@ const state = {
   aiExtractionLoading: false,
   aiDraft: "",
   aiDraftLoading: false,
-  aiDraftTone: "professional"
+  aiDraftTone: "professional",
+  calendarMonth: ""
 };
 
 function escapeHtml(value = "") {
@@ -407,15 +410,35 @@ function replyView() {
   </section>`;
 }
 
-function tasksView(calendarOnly = false) {
-  const extraction = state.aiExtraction;
-  const title = calendarOnly ? "Calendar" : "Tasks";
-  const content = extraction
-    ? renderExtraction(extraction, calendarOnly
-      ? { tasks: false, removable: true, empty: "No calendar events were extracted from the selected email." }
-      : { events: false, removable: true, empty: "No tasks were extracted from the selected email." })
-    : `<p>No extracted ${calendarOnly ? "calendar events" : "tasks"} yet. Open an email and choose Extract.</p>`;
-  return `<header class="page-header"><div><h1>${title}</h1><p>Extracted from the selected email</p></div></header><section class="task-card extraction-card">${content}</section><p>${calendarOnly ? "AI suggestions require review before adding to your calendar." : "Remove suggestions that are not useful; this does not change the source email."}</p><button class="floating-mic" data-voice aria-label="Voice commands">${icon("mic")}</button>`;
+function tasksView() {
+  const tasks = state.aiExtraction?.tasks || [];
+  const content = tasks.length
+    ? `<ul class="task-list">${tasks.map((task, index) => `<li class="task-item"><span class="task-check" aria-hidden="true">${icon("square-check-big")}</span><span class="task-item-copy"><strong data-user-content>${escapeHtml(task.title || t("Task"))}</strong>${task.due_date ? `<small data-user-content>${escapeHtml(`${t("Due")} ${task.due_date}`)}</small>` : `<small>${t("No due date")}</small>`}</span><button class="text-button remove-action" data-remove-extraction="tasks" data-remove-index="${index}" aria-label="${t("Remove task suggestion")}">${t("Remove")}</button></li>`).join("")}</ul>`
+    : `<div class="collection-empty" role="status">${icon("square-check-big")}<h2>${t("No tasks at the moment")}</h2><p>${t("Tasks explicitly extracted from an email will appear here.")}</p></div>`;
+  return `<header class="page-header"><div><h1>${t("Tasks")}</h1><p>${t("Actions extracted from the selected email")}</p></div></header><section class="task-card extraction-card">${content}</section><p>${t("Remove suggestions that are not useful; this does not change the source email.")}</p><button class="floating-mic" data-voice aria-label="${t("Voice commands")}">${icon("mic")}</button>`;
+}
+
+function calendarView() {
+  const events = state.aiExtraction?.events || [];
+  const monthKey = monthKeyForEvents(events, state.calendarMonth);
+  const [year, month] = monthKey.split("-").map(Number);
+  const locale = state.preferences.language === "zh-CN" ? "zh-CN" : "en-AU";
+  const monthLabel = new Intl.DateTimeFormat(locale, { month: "long", year: "numeric" }).format(new Date(year, month - 1, 1));
+  const weekdays = Array.from({ length: 7 }, (_value, index) => new Intl.DateTimeFormat(locale, { weekday: "short", timeZone: "UTC" }).format(new Date(Date.UTC(2024, 0, 7 + index))));
+  const indexedEvents = events.map((event, index) => ({ event, index, date: eventDateKey(event) }));
+  const resolved = indexedEvents.filter(item => item.date);
+  const unresolved = indexedEvents.filter(item => !item.date);
+  const today = eventDateKey({ date: new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()) });
+  const cellItems = calendarCells(monthKey).map(cell => {
+    if (!cell) return `<div class="calendar-day is-outside" role="gridcell" aria-label="${t("Outside the current month")}"></div>`;
+    const dayEvents = resolved.filter(item => item.date === cell.key);
+    const dateLabel = new Intl.DateTimeFormat(locale, { dateStyle: "full" }).format(new Date(`${cell.key}T12:00:00`));
+    return `<div class="calendar-day ${cell.key === today ? "is-today" : ""}" role="gridcell" aria-label="${escapeHtml(dateLabel)}"><time datetime="${cell.key}">${cell.day}</time><div class="calendar-events">${dayEvents.map(({ event, index }) => `<article class="calendar-event"><strong data-user-content>${escapeHtml(event.title || t("Event"))}</strong>${event.time || event.location ? `<small data-user-content>${escapeHtml([event.time, event.location].filter(Boolean).join(" · "))}</small>` : ""}<div><button class="text-button" data-add-calendar="${index}">${t("Review and add")}</button><button class="text-button remove-action" data-remove-extraction="events" data-remove-index="${index}" aria-label="${t("Remove event suggestion")}">${t("Remove")}</button></div></article>`).join("")}</div></div>`;
+  });
+  const rows = Array.from({ length: 6 }, (_value, index) => `<div class="calendar-row" role="row">${cellItems.slice(index * 7, index * 7 + 7).join("")}</div>`).join("");
+  const empty = events.length ? "" : `<div class="calendar-empty" role="status">${t("No calendar events at the moment")}</div>`;
+  const needsDate = unresolved.length ? `<section class="undated-events" aria-labelledby="undated-title"><h2 id="undated-title">${t("Needs a date")}</h2><p>${t("These events were not placed on the calendar because their dates are unclear.")}</p><ul>${unresolved.map(({ event, index }) => `<li><span><strong data-user-content>${escapeHtml(event.title || t("Event"))}</strong>${event.date ? `<small data-user-content>${escapeHtml(event.date)}</small>` : ""}</span><span><button class="text-button" data-add-calendar="${index}">${t("Review date")}</button><button class="text-button remove-action" data-remove-extraction="events" data-remove-index="${index}" aria-label="${t("Remove event suggestion")}">${t("Remove")}</button></span></li>`).join("")}</ul></section>` : "";
+  return `<header class="page-header calendar-page-header"><div><h1>${t("Calendar")}</h1><p>${t("Events extracted from the selected email")}</p></div><div class="calendar-month-controls" aria-label="${t("Calendar month navigation")}"><button class="icon-button" data-calendar-month="${shiftMonth(monthKey, -1)}" aria-label="${t("Previous month")}">${icon("arrow-left")}</button><strong aria-live="polite">${escapeHtml(monthLabel)}</strong><button class="icon-button" data-calendar-month="${shiftMonth(monthKey, 1)}" aria-label="${t("Next month")}">${icon("arrow-right")}</button></div></header>${empty}<section class="calendar-shell" aria-label="${escapeHtml(monthLabel)}"><div class="calendar-scroll"><div class="calendar-grid" role="grid"><div class="calendar-weekdays" role="row">${weekdays.map(day => `<span role="columnheader">${escapeHtml(day)}</span>`).join("")}</div><div class="calendar-days" role="rowgroup">${rows}</div></div></div></section>${needsDate}<p>${t("AI suggestions require review before adding to your calendar.")}</p><button class="floating-mic" data-voice aria-label="${t("Voice commands")}">${icon("mic")}</button>`;
 }
 
 function settingsView() {
@@ -468,7 +491,7 @@ function placeholderView(title, navIcon) {
 }
 
 function voiceModal() {
-  return state.voiceOpen ? voiceView({ voice: state.voice, enabled: state.preferences.voiceEnabled, capabilities: state.capabilities, escape: escapeHtml, t }) : "";
+  return state.voiceOpen ? voiceView({ voice: state.voice, enabled: state.preferences.voiceEnabled, capabilities: state.capabilities, currentEmail: ["reading", "reply"].includes(state.view) && Boolean(state.selectedEmail), escape: escapeHtml, t }) : "";
 }
 
 function toast() {
@@ -480,7 +503,7 @@ function currentViewContent() {
   if (state.view === "reading") return readingView();
   if (state.view === "reply") return replyView();
   if (state.view === "tasks") return tasksView();
-  if (state.view === "calendar") return tasksView(true);
+  if (state.view === "calendar") return calendarView();
   if (state.view === "settings") return settingsView();
   if (state.view === "compose") return composeView();
   if (state.view === "starred") return placeholderView("Starred", "star");
@@ -549,7 +572,7 @@ let toastTimer;
 let searchTimer;
 let syncTimer;
 
-function navigate(view, { render: shouldRender = true } = {}) {
+function navigate(view, { render: shouldRender = true, preserveVoice = false } = {}) {
   if (view !== "compose") { cancelRequest("ai-compose"); state.composeLoading = false; }
   if (view !== "sent") { cancelRequest("sent-list"); state.sentLoading = false; }
   if (view !== "inbox") {
@@ -566,7 +589,7 @@ function navigate(view, { render: shouldRender = true } = {}) {
     state.aiExtractionLoading = false;
     state.aiDraftLoading = false;
   }
-  if (state.voiceOpen) closeVoice(false);
+  if (state.voiceOpen && !preserveVoice) closeVoice(false);
   state.view = view;
   if (view === "sent") void fetchSent();
   if (shouldRender) { render(); app.querySelector("[data-workspace] h1")?.focus(); }
@@ -583,8 +606,36 @@ function showToast(message, error = true) {
 
 function openVoice() {
   if (state.sendConfirmation || state.calendarDraft) return;
-  state.voice = { status: "idle", text: "", error: "", targetId: state.selectedEmail?.id, targetSubject: state.selectedEmail?.subject || "" };
+  state.voice = { status: "idle", text: "", error: "", source: "typed", intent: null, candidates: [], selectedTargetId: null, resultText: "", playback: { status: "idle", muted: voicePlayback?.muted || false } };
   state.voiceOpen = true; render();
+}
+
+async function openMessage(selected, { preserveVoice = false, markRead = true } = {}) {
+  if (!selected) return null;
+  state.aiSummary = null;
+  state.aiExtraction = null;
+  state.calendarMonth = "";
+  state.aiDraft = "";
+  const hasBody = selected.bodyText || selected.body_plain || selected.bodyHtmlSafe || selected.body_html;
+  state.selectedEmail = { ...selected, _loading: !hasBody };
+  if (markRead) state.selectedEmail.unread = false;
+  navigate("reading", { preserveVoice });
+  if (!state.selectedEmail._loading) return state.selectedEmail;
+  const controller = beginRequest("message-detail");
+  try {
+    state.selectedEmail = await api(`/api/v1/emails/${encodeURIComponent(selected.id)}`, { signal: controller.signal });
+    const cached = emails.find(item => String(item.id) === String(selected.id));
+    if (markRead && cached?.unread) void updateMessageState(cached, { unread: false });
+    render();
+    return state.selectedEmail;
+  } catch (error) {
+    if (isAbortError(error)) return null;
+    state.selectedEmail._loading = false;
+    showToast(error.message);
+    return null;
+  } finally {
+    finishRequest("message-detail", controller);
+  }
 }
 
 function bindEvents() {
@@ -620,30 +671,10 @@ function bindEvents() {
   queryAll("[data-view]").forEach((button) => button.addEventListener("click", () => navigate(button.dataset.view)));
   queryAll("[data-email]").forEach((row) => {
     row.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); row.click(); } });
-    row.addEventListener("click", async (event) => {
+    row.addEventListener("click", (event) => {
     if (event.target.closest("button")) return;
     const selected = [...emails, ...state.sent].find((email) => String(email.id) === row.dataset.email);
-    if (!selected) return;
-    state.aiSummary = null;
-    state.aiExtraction = null;
-    state.aiDraft = "";
-    state.selectedEmail = { ...selected, _loading: !selected.body_plain && !selected.body_html };
-    state.selectedEmail.unread = false;
-    navigate("reading");
-    if (!state.selectedEmail._loading) return;
-    const controller = beginRequest("message-detail");
-    try {
-      state.selectedEmail = await api(`/api/v1/emails/${encodeURIComponent(selected.id)}`, { signal: controller.signal });
-      const cached = emails.find((item) => String(item.id) === String(selected.id));
-      if (cached?.unread) void updateMessageState(cached, { unread: false });
-      render();
-    } catch (error) {
-      if (isAbortError(error)) return;
-      state.selectedEmail._loading = false;
-      showToast(error.message);
-    } finally {
-      finishRequest("message-detail", controller);
-    }
+    if (selected) void openMessage(selected);
     });
   });
   queryAll("[data-star]").forEach((button) => button.addEventListener("click", (event) => { event.stopPropagation(); const email = [...emails, ...state.sent].find((item) => String(item.id) === button.dataset.star); if (email) void updateMessageState(email, { starred: !email.starred }); }));
@@ -690,17 +721,33 @@ function bindEvents() {
   }));
   query("[data-retry-save]")?.addEventListener("click", () => void writer.flush());
   query("[data-retry-settings]")?.addEventListener("click", () => void loadPreferences());
-  query("[data-record]")?.addEventListener("click", startRecording);
-  query("[data-restart-recording]")?.addEventListener("click", startRecording);
-  query("[data-cancel-recording]")?.addEventListener("click", () => { state.voice.text = ""; voiceController.cancel(); });
+  query("[data-record]")?.addEventListener("click", () => void startRecording());
+  query("[data-restart-recording]")?.addEventListener("click", () => void startRecording({ restart: true }));
+  query("[data-cancel-recording]")?.addEventListener("click", () => {
+    cancelRequest("voice-intent"); cancelRequest("voice-targets");
+    state.voice = { ...state.voice, text: "", error: "", intent: null, candidates: [], selectedTargetId: null, resultText: "" };
+    voiceController.cancel();
+  });
   query("[data-pause]")?.addEventListener("click", () => state.voice.status === "paused" ? voiceController.resume() : voiceController.pause());
   query("[data-finish-recording]")?.addEventListener("click", () => voiceController.finish());
   query("#voice-transcript")?.addEventListener("input", event => {
-    state.voice.text = event.target.value; state.voice.error = "";
+    state.voice.text = event.target.value; state.voice.error = ""; state.voice.source = "typed";
+    state.voice.intent = null; state.voice.candidates = []; state.voice.selectedTargetId = null; state.voice.resultText = "";
     const run = app.querySelector("[data-run-command]"); if (run) run.disabled = !state.voice.text.trim();
   });
-  queryAll("[data-command]").forEach(button => button.addEventListener("click", () => { state.voice.text = button.dataset.command; state.voice.error = ""; render(); }));
+  queryAll("[data-command]").forEach(button => button.addEventListener("click", () => {
+    state.voice = { ...state.voice, status: "review", text: button.dataset.command, source: "typed", error: "", intent: null, candidates: [], selectedTargetId: null, resultText: "" }; render();
+  }));
+  queryAll("[data-voice-candidate]").forEach(input => input.addEventListener("change", () => {
+    state.voice.selectedTargetId = input.dataset.voiceCandidate; state.voice.status = "ready"; state.voice.error = ""; render();
+  }));
   query("[data-run-command]")?.addEventListener("click", () => void runVoiceCommand());
+  query("[data-speak]")?.addEventListener("click", () => void speakVoiceResult());
+  query("[data-pause-speech]")?.addEventListener("click", () => voicePlayback.pause());
+  query("[data-resume-speech]")?.addEventListener("click", () => voicePlayback.resume());
+  query("[data-stop-speech]")?.addEventListener("click", () => voicePlayback.stop());
+  query("[data-replay-speech]")?.addEventListener("click", () => void voicePlayback.replay());
+  query("[data-mute-speech]")?.addEventListener("click", () => voicePlayback.toggleMute());
   queryAll("[data-ai-instructions]").forEach(input => input.addEventListener("input", () => { state.aiInstructions[input.dataset.aiInstructions] = input.value; }));
   queryAll("[data-custom-draft]").forEach(button => button.addEventListener("click", () => button.dataset.customDraft === "reply" ? void aiDraftReply(state.aiDraftTone) : void aiCompose()));
   queryAll("[data-add-calendar]").forEach(button => button.addEventListener("click", () => openCalendarDialog(Number(button.dataset.addCalendar))));
@@ -712,6 +759,10 @@ function bindEvents() {
     if (!items[index]) return;
     state.aiExtraction = { ...state.aiExtraction, [kind]: items.filter((_item, itemIndex) => itemIndex !== index) };
     showToast(kind === "events" ? "Event suggestion removed" : "Task suggestion removed", false);
+  }));
+  queryAll("[data-calendar-month]").forEach(button => button.addEventListener("click", () => {
+    state.calendarMonth = button.dataset.calendarMonth;
+    render();
   }));
   query("[data-cancel-calendar]")?.addEventListener("click", closeCalendar);
   query("[data-confirm-calendar]")?.addEventListener("click", () => void submitCalendar());
@@ -909,6 +960,7 @@ function resetMailbox() {
   state.sync = null;
   state.aiSummary = null;
   state.aiExtraction = null;
+  state.calendarMonth = "";
   state.aiDraft = "";
 }
 
@@ -919,6 +971,7 @@ async function aiSummarise() {
   render();
   try {
     state.aiSummary = await api("/api/v1/ai/summarise", { method: "POST", body: JSON.stringify({ message_id: String(state.selectedEmail.id) }), signal: controller.signal });
+    return state.aiSummary;
   } catch (error) {
     if (isAbortError(error)) return;
     showToast(error.message);
@@ -936,6 +989,8 @@ async function aiExtract() {
   render();
   try {
     state.aiExtraction = await api("/api/v1/ai/extract", { method: "POST", body: JSON.stringify({ message_id: String(state.selectedEmail.id) }), signal: controller.signal });
+    state.calendarMonth = "";
+    return state.aiExtraction;
   } catch (error) {
     if (isAbortError(error)) return;
     showToast(error.message);
@@ -955,6 +1010,7 @@ async function aiDraftReply(tone) {
   try {
     const payload = await api("/api/v1/ai/draft-reply", { method: "POST", body: JSON.stringify({ message_id: String(state.selectedEmail.id), tone, instructions: state.aiInstructions.reply, current_draft: state.aiDraft }), signal: controller.signal });
     state.aiDraft = payload.draft;
+    return state.aiDraft;
   } catch (error) {
     if (isAbortError(error)) return;
     showToast(error.message);
@@ -1037,23 +1093,76 @@ const voiceController = new VoiceController({
   }),
   changed: update => {
     if (!state.voiceOpen) return;
+    if (update.status === "review" && state.voice.awaitingOrdinal) {
+      const index = parseOrdinal(update.text);
+      const candidate = state.voice.candidates[index];
+      if (!candidate) {
+        state.voice = { ...state.voice, status: "selecting", awaitingOrdinal: false, error: "Say or choose a number from the displayed email list." };
+      } else {
+        state.voice = { ...state.voice, status: "ready", awaitingOrdinal: false, selectedTargetId: candidate.id, error: "", selectionTranscript: update.text };
+      }
+      render();
+      return;
+    }
     state.voice = { ...state.voice, error: "", ...update };
+    if (update.status === "review") state.voice.source = "voice";
     render();
   }
 });
 
-function startRecording() {
-  if (!state.preferences.voiceEnabled || !state.capabilities?.available || writer.saving || state.settingsStatus === "error") {
-    state.voice.error = "Enable voice input in Settings to record. You can type below."; render(); return;
+async function speechApi(text, language, signal) {
+  const response = await fetch("/api/v1/voice/speech", {
+    method: "POST", credentials: "same-origin", signal,
+    headers: { accept: "audio/mpeg", "content-type": "application/json", ...(state.csrfToken ? { "x-csrf-token": state.csrfToken } : {}) },
+    body: JSON.stringify({ text, language })
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    const error = new Error(payload?.error?.message || "Speech playback is unavailable.");
+    error.code = payload?.error?.code; throw error;
   }
-  state.voice.text = "";
-  void voiceController.start(state.capabilities, state.preferences.speechLanguage);
+  return response.blob();
+}
+
+const voicePlayback = new VoicePlayback({
+  fetchSpeech: speechApi,
+  changed: update => {
+    if (!state.voiceOpen) return;
+    state.voice.playback = { ...state.voice.playback, ...update };
+    if (["generating", "speaking", "paused"].includes(update.status)) state.voice.status = "speaking";
+    else if (["complete", "stopped", "error"].includes(update.status) && state.voice.resultText) state.voice.status = "complete";
+    render();
+  }
+});
+
+async function startRecording({ restart = false } = {}) {
+  const available = state.capabilities?.transcriptionAvailable ?? state.capabilities?.available;
+  if (!available) { state.voice.error = "Cloud transcription is unavailable. You can type below."; render(); return; }
+  if (writer.saving || state.settingsStatus === "error") { state.voice.error = "Wait for Settings to finish saving, then try again."; render(); return; }
+  voicePlayback.stop({ announce: false });
+  if (!state.preferences.voiceEnabled) {
+    state.voice.status = "requesting"; state.voice.error = ""; render();
+    try {
+      const payload = await api("/api/v1/settings", { method: "PATCH", body: JSON.stringify({ voiceEnabled: true }) });
+      state.preferences = payload.settings; state.settingsStatus = "saved";
+    } catch (error) {
+      state.voice.status = "error"; state.voice.error = error.message; render(); return;
+    }
+  }
+  const choosing = !restart && state.voice.intent && state.voice.candidates.length > 1 && !state.voice.selectedTargetId;
+  state.voice = {
+    ...state.voice, status: "requesting", error: "", source: "voice", awaitingOrdinal: choosing,
+    ...(choosing ? {} : { text: "", intent: null, candidates: [], selectedTargetId: null, resultText: "" })
+  };
+  await voiceController.start(state.capabilities, state.preferences.speechLanguage);
 }
 
 function closeVoice(shouldRender = true) {
   state.voiceOpen = false;
+  cancelRequest("voice-intent"); cancelRequest("voice-targets");
   voiceController.cancel();
-  state.voice = { status: "idle", text: "", error: "", targetId: null, targetSubject: "" };
+  voicePlayback.stop({ announce: false });
+  state.voice = { status: "idle", text: "", error: "", source: "typed", intent: null, candidates: [], selectedTargetId: null, resultText: "", playback: { status: "idle", muted: voicePlayback.muted } };
   if (shouldRender) render();
 }
 
@@ -1063,22 +1172,187 @@ function closeActiveDialog() {
   else closeVoice();
 }
 
-async function replyAction() {
+async function replyAction({ preserveVoice = false } = {}) {
   if (!state.selectedEmail) return false;
-  navigate("reply");
+  navigate("reply", { preserveVoice });
   return state.aiDraft ? true : aiDraftReply(state.aiDraftTone);
 }
 
+function voiceQuery(target) {
+  const quote = value => `"${String(value).replace(/["\\]/g, " ").trim()}"`;
+  return [target.terms, target.sender ? `from:${quote(target.sender)}` : "", target.subject ? `subject:${quote(target.subject)}` : ""].filter(Boolean).join(" ");
+}
+
+async function classifyVoiceCandidates(messages, signal) {
+  const classifications = {};
+  for (let index = 0; index < messages.length; index += 25) {
+    const batch = messages.slice(index, index + 25);
+    if (!batch.length) continue;
+    const payload = await api("/api/v1/ai/classify", {
+      method: "POST", signal,
+      body: JSON.stringify({ messages: batch.map(message => ({ id: String(message.id), sender: message.sender || "", subject: message.subject || "", preview: message.preview || "" })) })
+    });
+    Object.assign(classifications, payload.classifications || {});
+  }
+  return messages.map(message => {
+    const classification = classifications[String(message.id)];
+    return classification ? { ...message, priority: classification.priority, priorityReason: classification.reason } : message;
+  });
+}
+
+async function findVoiceCandidates(target, signal) {
+  const query = new URLSearchParams({ max_results: "50" });
+  const providerQuery = voiceQuery(target);
+  if (providerQuery) query.set("query", providerQuery);
+  if (target.unread != null) query.set("unread", String(target.unread));
+  if (target.starred != null) query.set("starred", String(target.starred));
+  const payload = await api(`/api/v1/emails?${query}`, { signal });
+  const classified = await classifyVoiceCandidates(payload.messages || [], signal).catch(error => {
+    if (isAbortError(error)) throw error;
+    return payload.messages || [];
+  });
+  return filterCandidates(classified, target).map(message => ({
+    ...message,
+    _localDate: formatFullMailTime(message.receivedAt || message.date || "", { locale: state.preferences.language })
+  }));
+}
+
+async function reviewVoiceCommand() {
+  const ordinal = state.voice.candidates.length ? parseOrdinal(state.voice.text) : -1;
+  if (ordinal >= 0 && state.voice.candidates[ordinal]) {
+    state.voice.selectedTargetId = state.voice.candidates[ordinal].id; state.voice.status = "ready"; state.voice.error = ""; render(); return;
+  }
+  const controller = beginRequest("voice-intent");
+  state.voice.status = "resolving"; state.voice.error = ""; state.voice.intent = null; state.voice.candidates = []; state.voice.selectedTargetId = null; render();
+  try {
+    const intent = await api("/api/v1/voice/intents", {
+      method: "POST", signal: controller.signal,
+      body: JSON.stringify({
+        transcript: state.voice.text.trim(), language: state.preferences.speechLanguage,
+        context: { view: state.view, currentMessageId: ["reading", "reply"].includes(state.view) ? String(state.selectedEmail?.id || "") || null : null }
+      })
+    });
+    if (!finishRequest("voice-intent", controller)) return;
+    if (intent.confidence === "low") {
+      clarifyVoiceCommand("I couldn't identify a specific command. Please name the action and describe the email you want.");
+      return;
+    }
+    const hasCurrentEmail = ["reading", "reply"].includes(state.view) && Boolean(state.selectedEmail);
+    if (needsMessage(intent.action) && intent.target.mode === "current" && !hasCurrentEmail) {
+      clarifyVoiceCommand("Please specify which email you want, for example by sender, subject, or recency.");
+      return;
+    }
+    state.voice.intent = intent;
+    if (!needsMessage(intent.action) && intent.action !== "search_messages") {
+      state.voice.status = "ready"; render(); return;
+    }
+    let candidates = [];
+    if (intent.target.mode === "current") {
+      if (["reading", "reply"].includes(state.view) && state.selectedEmail) candidates = [{ ...state.selectedEmail, _localDate: formatFullMailTime(state.selectedEmail.receivedAt || state.selectedEmail.date || "", { locale: state.preferences.language }) }];
+    } else if (intent.target.mode === "search") {
+      const targetController = beginRequest("voice-targets");
+      candidates = await findVoiceCandidates(intent.target, targetController.signal);
+      if (!finishRequest("voice-targets", targetController)) return;
+    }
+    state.voice.candidates = candidates;
+    if (!candidates.length) {
+      clarifyVoiceCommand(intent.target.mode === "current"
+        ? "Please specify which email you want, for example by sender, subject, or recency."
+        : "No matching emails were found. Please specify a sender, subject, unread or starred status, or recency.");
+      return;
+    } else if (intent.action === "search_messages") {
+      state.voice.status = "ready";
+    } else if (candidates.length === 1) {
+      state.voice.selectedTargetId = candidates[0].id; state.voice.status = "ready";
+    } else {
+      state.voice.status = "selecting";
+    }
+    render();
+  } catch (error) {
+    if (isAbortError(error)) return;
+    finishRequest("voice-intent", controller);
+    state.voice.status = "error"; state.voice.error = error.message; render();
+  }
+}
+
+function clarifyVoiceCommand(message) {
+  state.voice = { ...state.voice, status: "review", error: message, intent: null, candidates: [], selectedTargetId: null, resultText: "" };
+  render();
+}
+
+function extractionSpeech(extraction, language, { includeEvents = true, includeTasks = true } = {}) {
+  const events = includeEvents ? (extraction?.events || []).map(item => [item.title, item.date, item.time, item.location].filter(Boolean).join(", ")) : [];
+  const tasks = includeTasks ? (extraction?.tasks || []).map(item => [item.title, item.due_date].filter(Boolean).join(", ")) : [];
+  if (!events.length && !tasks.length) {
+    if (includeTasks && !includeEvents) return language === "zh-CN" ? "目前没有任务。" : "There are no tasks at the moment.";
+    if (includeEvents && !includeTasks) return language === "zh-CN" ? "目前没有日历事件。" : "There are no calendar events at the moment.";
+    return language === "zh-CN" ? "没有找到明确的任务或日历事件。" : "No explicit tasks or calendar events were found.";
+  }
+  return language === "zh-CN"
+    ? [`事件：${events.join("；")}`, `任务：${tasks.join("；")}`].filter(line => !line.endsWith("：")).join("。")
+    : [`Events: ${events.join("; ")}`, `Tasks: ${tasks.join("; ")}`].filter(line => !line.endsWith(": ")).join(". ");
+}
+
+async function executeVoiceCommand() {
+  const intent = state.voice.intent;
+  if (!intent) return;
+  const target = state.voice.candidates.find(item => String(item.id) === String(state.voice.selectedTargetId));
+  if (needsMessage(intent.action) && !target) {
+    if (state.voice.candidates.length) { state.voice.status = "selecting"; state.voice.error = "Choose a target email before running this command."; render(); }
+    else clarifyVoiceCommand("No matching emails were found. Please specify a sender, subject, unread or starred status, or recency.");
+    return;
+  }
+  state.voice.status = "executing"; state.voice.error = ""; state.voice.resultText = ""; render();
+  try {
+    let resultText = "";
+    if (target && !await openMessage(target, { preserveVoice: true, markRead: false })) throw new Error("The selected email could not be opened.");
+    if (intent.action === "search_messages") {
+      emails = state.voice.candidates.map(({ _localDate, ...message }) => message);
+      state.search = ""; state.category = "All"; state.priority = "All"; state.nextPageToken = null;
+      navigate("inbox", { preserveVoice: true });
+      resultText = intent.detectedLanguage === "zh-CN" ? `已显示 ${emails.length} 封最匹配的邮件。` : `Showing the ${emails.length} best matching emails.`;
+    } else if (intent.action === "open_message") {
+      resultText = intent.detectedLanguage === "zh-CN" ? `已打开邮件：${target.subject}` : `Opened email: ${target.subject}`;
+    } else if (intent.action === "summarize_message") {
+      const summary = await aiSummarise();
+      if (!summary) throw new Error("The summary could not be generated.");
+      resultText = String(summary.summary || "").trim()
+        || (summary.bullets || []).map(item => String(item || "").trim()).filter(Boolean).join(". ");
+      if (!resultText) throw new Error("The summary could not be generated.");
+    } else if (intent.action === "draft_reply") {
+      navigate("reply", { preserveVoice: true });
+      resultText = state.aiDraft || await aiDraftReply(state.aiDraftTone);
+      if (!resultText) throw new Error("The reply draft could not be generated.");
+    } else if (intent.action === "extract_details") {
+      const extraction = await aiExtract();
+      if (!extraction) throw new Error("Details could not be extracted.");
+      resultText = extractionSpeech(extraction, intent.detectedLanguage);
+    } else if (intent.action === "show_tasks" || intent.action === "show_calendar") {
+      navigate(intent.action === "show_tasks" ? "tasks" : "calendar", { preserveVoice: true });
+      resultText = extractionSpeech(state.aiExtraction, intent.detectedLanguage, {
+        includeEvents: intent.action === "show_calendar",
+        includeTasks: intent.action === "show_tasks"
+      });
+    } else if (intent.action === "navigate") {
+      navigate(intent.destination, { preserveVoice: true });
+      resultText = intent.detectedLanguage === "zh-CN" ? `已前往${t(navItems.find(item => item[0] === intent.destination)?.[1] || intent.destination)}。` : `Opened ${intent.destination}.`;
+    }
+    state.voice.status = "complete"; state.voice.resultText = resultText; render();
+    if (state.voice.source === "voice" && state.preferences.voiceAutoPlay && state.capabilities?.synthesisAvailable && resultText) void voicePlayback.speak(resultText, intent.detectedLanguage);
+  } catch (error) {
+    state.voice.status = "error"; state.voice.error = error.message; render();
+  }
+}
+
+function speakVoiceResult() {
+  if (!state.voice.resultText || !state.voice.intent) return;
+  return voicePlayback.speak(state.voice.resultText, state.voice.intent.detectedLanguage);
+}
+
 async function runVoiceCommand() {
-  if (["executing", "requesting", "recording", "paused", "transcribing"].includes(state.voice.status)) return;
-  let command;
-  try { command = validateCommand(state.voice.text, state.voice.targetId, state.selectedEmail?.id); }
-  catch (error) { state.voice.error = error.message; render(); return; }
-  state.voice.status = "executing";
-  closeVoice(false);
-  if (command === "tasks") navigate("tasks");
-  else if (command === "reply") await replyAction();
-  else { navigate("reading"); await aiSummarise(); }
+  if (["executing", "requesting", "recording", "paused", "transcribing", "resolving"].includes(state.voice.status)) return;
+  if (!state.voice.text.trim()) return;
+  if (state.voice.intent) await executeVoiceCommand(); else await reviewVoiceCommand();
 }
 
 function renderOverlays() {
@@ -1088,8 +1362,13 @@ function renderOverlays() {
   const content = voiceModal() + sendConfirmationModal() + calendarModal();
   if (host._content !== content) {
     const focus = captureFocus(host);
+    const scroll = [...host.querySelectorAll("[data-preserve-scroll]")].map(element => [element.dataset.preserveScroll, element.scrollTop, element.scrollLeft]);
     host.innerHTML = content; host._content = content;
     restoreFocus(host, focus);
+    for (const [key, top, left] of scroll) {
+      const element = [...host.querySelectorAll("[data-preserve-scroll]")].find(candidate => candidate.dataset.preserveScroll === key);
+      if (element) { element.scrollTop = top; element.scrollLeft = left; }
+    }
   }
   overlays.querySelector("[data-toast-host]").innerHTML = toast();
 }
