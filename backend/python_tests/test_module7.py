@@ -88,6 +88,8 @@ def test_voice_intent_review_and_tts_boundaries(client, monkeypatch, caplog):
     assert intent.status_code == 200
     assert intent.json()["action"] == "summarize_message"
     assert intent.json()["target"]["mode"] == "current"
+    assert intent.json()["detectedLanguage"] == "zh-CN"
+    assert intent.json()["displayText"] == "Summarise the selected email"
     polite_intent = client.post("/api/v1/voice/intents", headers=h, json={
         "transcript": "Help me summarize this email.", "language": "auto",
         "context": {"view": "reading", "currentMessageId": "message-1", "followUpMessageId": "reviewed-message"},
@@ -199,7 +201,7 @@ def test_complex_voice_intent_uses_strict_structured_output(monkeypatch):
     result = voice_intent.parse_intent(
         "Summarise the newest unread budget message", "auto", {"view": "inbox"}, settings,
     )
-    assert result == parsed_payload
+    assert result == {**parsed_payload, "displayText": "Summarise the selected email"}
     assert captured["response_format"]["type"] == "json_schema"
     assert captured["response_format"]["json_schema"]["strict"] is True
     assert captured["response_format"]["json_schema"]["schema"]["additionalProperties"] is False

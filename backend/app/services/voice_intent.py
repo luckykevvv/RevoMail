@@ -64,27 +64,33 @@ def _language(text: str, requested: str) -> str:
     return "en"
 
 
+def _english_display(action: str, destination: str | None = None) -> str:
+    if action == "navigate":
+        return f"Open {destination or 'the requested page'}"
+    return {
+        "search_messages": "Search for matching emails",
+        "open_message": "Open the selected email",
+        "summarize_message": "Summarise the selected email",
+        "draft_reply": "Generate a reply draft for the selected email",
+        "extract_details": "Extract tasks and events from the selected email",
+        "show_tasks": "Show tasks",
+        "show_calendar": "Show calendar",
+    }.get(action, "Review the requested action")
+
+
 def _result(action, language, display, mode="none", destination=None):
     return {
         "detectedLanguage": language,
         "action": action,
         "target": {"mode": mode, "newest": True},
         "destination": destination,
-        "displayText": display,
+        "displayText": _english_display(action, destination),
         "confidence": "high",
     }
 
 
 def _mailbox_result(action: str, language: str, sender: str) -> dict:
-    labels = {
-        "search_messages": (f"Search for emails from {sender}", f"查找来自 {sender} 的邮件"),
-        "open_message": (f"Open an email from {sender}", f"打开来自 {sender} 的邮件"),
-        "summarize_message": (f"Summarise an email from {sender}", f"总结来自 {sender} 的邮件"),
-        "draft_reply": (f"Draft a reply to an email from {sender}", f"为来自 {sender} 的邮件生成回复草稿"),
-        "extract_details": (f"Extract details from an email from {sender}", f"从来自 {sender} 的邮件提取详情"),
-    }
-    english, chinese = labels[action]
-    result = _result(action, language, chinese if language == "zh-CN" else english, "search")
+    result = _result(action, language, "", "search")
     result["target"]["sender"] = sender
     return result
 
@@ -182,7 +188,7 @@ summarising, opening, drafting, or extracting it, return the final requested act
 do not reduce it to search_messages. Otherwise use search and extract conservative
 filters from the user's words. For 'most important', 'highest priority', or 'recent', keep priority null and set newest true so
 the client can rank all candidates by priority and then date; set priority only when explicitly requested.
-Use detectedLanguage en or zh-CN and a short displayText in that language.
+Use detectedLanguage en or zh-CN to report the input language, but always write displayText in English.
 Set confidence high, medium, or low. If the command is unsupported or ambiguous return
 action unsupported with the other fields set to safe empty values. Always return every field in the
 provided schema and never add fields."""
@@ -220,4 +226,5 @@ def parse_intent(transcript: str, requested_language: str, context: dict, settin
         raise AppError("VOICE_INTENT_FAILED", "The command could not be understood. Review the transcript or try a suggested command.", 502, True) from exc
     if parsed.get("action") == "unsupported":
         raise AppError("VOICE_UNSUPPORTED_COMMAND", "This command is not supported. Try searching, opening, summarising, drafting, extracting, or navigating.", 422)
+    parsed["displayText"] = _english_display(parsed["action"], parsed.get("destination"))
     return parsed

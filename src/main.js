@@ -1284,17 +1284,15 @@ function clarifyVoiceCommand(message) {
   render();
 }
 
-function extractionSpeech(extraction, language, { includeEvents = true, includeTasks = true } = {}) {
+function extractionSpeech(extraction, { includeEvents = true, includeTasks = true } = {}) {
   const events = includeEvents ? (extraction?.events || []).map(item => [item.title, item.date, item.time, item.location].filter(Boolean).join(", ")) : [];
   const tasks = includeTasks ? (extraction?.tasks || []).map(item => [item.title, item.due_date].filter(Boolean).join(", ")) : [];
   if (!events.length && !tasks.length) {
-    if (includeTasks && !includeEvents) return language === "zh-CN" ? "目前没有任务。" : "There are no tasks at the moment.";
-    if (includeEvents && !includeTasks) return language === "zh-CN" ? "目前没有日历事件。" : "There are no calendar events at the moment.";
-    return language === "zh-CN" ? "没有找到明确的任务或日历事件。" : "No explicit tasks or calendar events were found.";
+    if (includeTasks && !includeEvents) return "There are no tasks at the moment.";
+    if (includeEvents && !includeTasks) return "There are no calendar events at the moment.";
+    return "No explicit tasks or calendar events were found.";
   }
-  return language === "zh-CN"
-    ? [`事件：${events.join("；")}`, `任务：${tasks.join("；")}`].filter(line => !line.endsWith("：")).join("。")
-    : [`Events: ${events.join("; ")}`, `Tasks: ${tasks.join("; ")}`].filter(line => !line.endsWith(": ")).join(". ");
+  return [`Events: ${events.join("; ")}`, `Tasks: ${tasks.join("; ")}`].filter(line => !line.endsWith(": ")).join(". ");
 }
 
 async function executeVoiceCommand() {
@@ -1314,9 +1312,9 @@ async function executeVoiceCommand() {
       emails = state.voice.candidates.map(({ _localDate, ...message }) => message);
       state.search = ""; state.category = "All"; state.priority = "All"; state.nextPageToken = null;
       navigate("inbox", { preserveVoice: true });
-      resultText = intent.detectedLanguage === "zh-CN" ? `已显示 ${emails.length} 封最匹配的邮件。` : `Showing the ${emails.length} best matching emails.`;
+      resultText = `Showing the ${emails.length} best matching emails.`;
     } else if (intent.action === "open_message") {
-      resultText = intent.detectedLanguage === "zh-CN" ? `已打开邮件：${target.subject}` : `Opened email: ${target.subject}`;
+      resultText = `Opened email: ${target.subject}`;
     } else if (intent.action === "summarize_message") {
       const summary = await aiSummarise();
       if (!summary) throw new Error("The summary could not be generated.");
@@ -1330,20 +1328,20 @@ async function executeVoiceCommand() {
     } else if (intent.action === "extract_details") {
       const extraction = await aiExtract();
       if (!extraction) throw new Error("Details could not be extracted.");
-      resultText = extractionSpeech(extraction, intent.detectedLanguage);
+      resultText = extractionSpeech(extraction);
     } else if (intent.action === "show_tasks" || intent.action === "show_calendar") {
       navigate(intent.action === "show_tasks" ? "tasks" : "calendar", { preserveVoice: true });
-      resultText = extractionSpeech(state.aiExtraction, intent.detectedLanguage, {
+      resultText = extractionSpeech(state.aiExtraction, {
         includeEvents: intent.action === "show_calendar",
         includeTasks: intent.action === "show_tasks"
       });
     } else if (intent.action === "navigate") {
       navigate(intent.destination, { preserveVoice: true });
-      resultText = intent.detectedLanguage === "zh-CN" ? `已前往${t(navItems.find(item => item[0] === intent.destination)?.[1] || intent.destination)}。` : `Opened ${intent.destination}.`;
+      resultText = `Opened ${intent.destination}.`;
     }
     if (target) state.voice.contextTarget = target;
     state.voice.status = "complete"; state.voice.resultText = resultText; render();
-    if (state.voice.source === "voice" && state.preferences.voiceAutoPlay && state.capabilities?.synthesisAvailable && resultText) void voicePlayback.speak(resultText, intent.detectedLanguage);
+    if (state.voice.source === "voice" && state.preferences.voiceAutoPlay && state.capabilities?.synthesisAvailable && resultText) void voicePlayback.speak(resultText, "en");
   } catch (error) {
     state.voice.status = "error"; state.voice.error = error.message; render();
   }
@@ -1351,7 +1349,7 @@ async function executeVoiceCommand() {
 
 function speakVoiceResult() {
   if (!state.voice.resultText || !state.voice.intent) return;
-  return voicePlayback.speak(state.voice.resultText, state.voice.intent.detectedLanguage);
+  return voicePlayback.speak(state.voice.resultText, "en");
 }
 
 async function runVoiceCommand() {

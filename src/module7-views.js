@@ -41,21 +41,27 @@ export function voiceView({ voice: v, enabled, capabilities, currentEmail, escap
   const runButton = `<button class="primary-button voice-command-button" data-run-command ${busy || capturing || !v.text.trim() || needsSelection ? "disabled" : ""}>${t(commandButton)}</button>`;
   const elapsed = Math.max(0, Number(v.elapsed) || 0);
   const elapsedText = `${String(Math.floor(elapsed / 60)).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}`;
+  const microphoneErrors = new Set([
+    "Microphone recording is unavailable. Type a command instead.",
+    "Microphone permission was denied. Type a command or change browser permissions.",
+    "Microphone unavailable. Check the device or type a command."
+  ]);
+  const errorText = microphoneErrors.has(v.error) ? v.error : t(v.error);
   return `<div class="modal-backdrop"><section class="voice-modal" data-preserve-scroll="voice-dialog" role="dialog" aria-modal="true" aria-labelledby="voice-title" tabindex="-1">
     <div class="modal-header"><h2 id="voice-title">${t("Voice commands")}</h2><button class="icon-button" data-close-voice aria-label="${t("Close voice commands")}">×</button></div>
-    <div class="voice-intro"><p>${t("Use English or Chinese to search, open, summarise, draft, extract, or navigate. Every command is reviewed before it runs.")}</p>
-    <p class="privacy-note">${t("Starting records only after permission. Finished audio is sent to OpenAI for transcription; text selected for playback is sent for speech generation. RevoMail does not persist recordings, transcripts, or generated audio. The playback voice is AI-generated.")} <a href="https://developers.openai.com/api/docs/guides/your-data" target="_blank" rel="noopener noreferrer">${t("Provider data policy")}</a></p></div>
+    <div class="voice-intro"><p>${t("Use voice commands to search, open, summarise, draft, extract, or navigate. Every command is reviewed before it runs.")}</p>
+    <p class="privacy-note" lang="en">Starting records only after permission. Finished audio is sent to OpenAI for transcription; text selected for playback is sent for speech generation. RevoMail does not persist recordings, transcripts, or generated audio. The playback voice is AI-generated. <a href="https://developers.openai.com/api/docs/guides/your-data" target="_blank" rel="noopener noreferrer">Provider data policy</a></p></div>
     <div class="voice-workspace">
       <section class="voice-pane voice-input-pane" data-preserve-scroll="voice-input" aria-labelledby="voice-input-title"><h3 id="voice-input-title">${t("Voice and command input")}</h3>
-        <div class="microphone-status ${statusClass}" data-microphone-state="${statusClass}" role="status" aria-live="polite"><span class="status-dot" aria-hidden="true"></span><span data-voice-status>${t(labels[v.status] || labels.idle)}</span>${v.status === "recording" ? `<span class="voice-level" aria-label="${t("Microphone level")}" style="--voice-level:${Math.max(.08, Number(v.level) || 0)}"><i></i><i></i><i></i><i></i></span>` : ""}${capturing && Number.isFinite(v.elapsed) ? `<time datetime="PT${elapsed}S">${elapsedText}</time>` : ""}</div>
-        ${v.error ? `<p role="alert">${e(t(v.error))}</p>` : ""}
-        ${!enabled ? `<p>${t("Voice input is off. Choosing Start recording will save your consent, then request system microphone permission. You can always type instead.")}</p>` : !available ? `<p>${t("Cloud transcription is unavailable. You can type below.")}</p>` : ""}
+        <div class="microphone-status ${statusClass}" data-microphone-state="${statusClass}" role="status" aria-live="polite"><span class="status-dot" aria-hidden="true"></span><span data-voice-status ${v.status === "requesting" ? 'lang="en"' : ""}>${v.status === "requesting" ? labels.requesting : t(labels[v.status] || labels.idle)}</span>${v.status === "recording" ? `<span class="voice-level" aria-label="${t("Microphone level")}" style="--voice-level:${Math.max(.08, Number(v.level) || 0)}"><i></i><i></i><i></i><i></i></span>` : ""}${capturing && Number.isFinite(v.elapsed) ? `<time datetime="PT${elapsed}S">${elapsedText}</time>` : ""}</div>
+        ${v.error ? `<p role="alert" ${microphoneErrors.has(v.error) ? 'lang="en"' : ""}>${e(errorText)}</p>` : ""}
+        ${!enabled ? `<p lang="en">Voice input is off. Choosing Start recording will save your consent, then request system microphone permission. You can always type instead.</p>` : !available ? `<p>${t("Cloud transcription is unavailable. You can type below.")}</p>` : ""}
         <div class="voice-controls voice-capture-controls">${capturing ? `<button class="secondary-button" data-pause>${t(v.status === "paused" ? "Resume" : "Pause")}</button><button class="primary-button" data-finish-recording>${t("Finish and transcribe")}</button>` : `<button class="secondary-button" data-record ${!available || busy ? "disabled" : ""}>${t("Start recording")}</button>`}
         <button class="secondary-button" data-cancel-recording ${v.status === "executing" ? "disabled" : ""}>${t("Cancel recording")}</button>
         <button class="secondary-button" data-restart-recording ${!available || v.status === "executing" ? "disabled" : ""}>${t("Restart recording")}</button></div>
         <p class="voice-context">${currentEmail ? t("Context: a current email is available when you say ‘this email’. No target is selected until your command is reviewed.") : t("Context: whole mailbox. Name or describe an email in your command.")}</p>
         ${v.contextTarget ? `<p class="voice-context voice-follow-up"><strong>${t("Follow-up target:")}</strong> <span data-user-content>${e(v.contextTarget.subject || t("No subject"))}</span> <button class="link-button" data-clear-voice-context>${t("Clear follow-up target")}</button></p>` : ""}
-        <label for="voice-transcript">${t("Review or type an English or Chinese command")}</label>
+        <label for="voice-transcript">${t("Review or type a command")}</label>
         <textarea id="voice-transcript" maxlength="2000" rows="4" ${busy || capturing ? "disabled" : ""}>${e(v.text)}</textarea>
         <div class="voice-hints">${["Summarise this email", "Find my most important recent email", "Generate a reply to this email", "Show my tasks"].map(command => `<button data-command="${e(t(command))}" ${busy || capturing ? "disabled" : ""}>${t(command)}</button>`).join("")}</div>
         ${v.intent ? "" : runButton}

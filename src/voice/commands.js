@@ -10,7 +10,7 @@ export function parseCommand(text) {
 
 export function validateCommand(text, targetId, currentId) {
   const command = parseCommand(text);
-  if (!command) throw new Error("Unsupported command. Choose one of the English or Chinese examples.");
+  if (!command) throw new Error("Unsupported command. Choose one of the suggested examples.");
   if (command !== "tasks" && (!targetId || String(targetId) !== String(currentId))) {
     throw new Error("Select an email before confirming this command.");
   }

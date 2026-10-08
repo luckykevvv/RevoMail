@@ -108,6 +108,7 @@ The user message contains tagged sections:
 Rules:
 - Base the reply on the original email and the user's instructions. Do not invent facts, dates,
   commitments or attachments that neither of them states.
+- Write the reply in English, even when the original email or user instructions use another language.
 - Do not include a subject line.
 - {sign_off}
 - Return the reply body text only — no extra commentary."""

@@ -4,7 +4,7 @@ import AxeBuilder from "@axe-core/playwright";
 async function fixture(page, initial = {}) {
   const { message: messageOverrides = {}, messages: messageFixtures, transcriptionText = "Show my tasks", summaryText = "Review the proposal.", summaryBullets = [], extraction = { events: [{ title: "Review meeting", date: "tomorrow", start: null, end: null, location: "Room 1" }], tasks: [{ title: "Submit review", due_date: "2026-10-12" }] }, ...preferenceOverrides } = initial;
   let preferences = { language: "en", theme: "light", reducedMotion: false, defaultAiModel: "fixture-model", replyLength: "medium", speechLanguage: "auto", voiceEnabled: false, voiceAutoPlay: true, ...preferenceOverrides };
-  let summaryCalls = 0; let sendCalls = 0; const calendarCalls = []; const intentContexts = [];
+  let summaryCalls = 0; let sendCalls = 0; const calendarCalls = []; const intentContexts = []; const speechRequests = [];
   const message = { id: "fixture-1", sender: "tester@example.com", recipients: ["reader@example.com"], subject: "Fixture planning", preview: "Review the proposal.", body_plain: "Please review the proposal.", unread: false, starred: false, category: "Primary", attachments: [], ...messageOverrides };
   const messages = messageFixtures || [message];
   await page.route("**/api/v1/**", async route => {
@@ -17,6 +17,10 @@ async function fixture(page, initial = {}) {
       body = { settings: preferences, allowedAiModels: ["fixture-model"] };
     } else if (url.pathname === "/api/v1/voice/capabilities") body = { available: true, transcriptionAvailable: true, synthesisAvailable: true, intentAvailable: true, maxBytes: 10485760, maxSeconds: 60, maxSpeechChars: 4096, languages: ["auto", "en-AU", "en-US", "zh-CN"] };
     else if (url.pathname === "/api/v1/voice/transcriptions") body = { text: transcriptionText };
+    else if (url.pathname === "/api/v1/voice/speech") {
+      speechRequests.push(route.request().postDataJSON());
+      await route.fulfill({ contentType: "audio/mpeg", body: "fixture-audio" }); return;
+    }
     else if (url.pathname === "/api/v1/voice/intents") {
       const request = route.request().postDataJSON();
       const transcript = request.transcript.toLowerCase();
@@ -52,7 +56,7 @@ async function fixture(page, initial = {}) {
     await route.fulfill({ json: body });
   });
   await page.goto("/"); await expect(page.locator("[data-email]").first()).toBeVisible();
-  return { summaryCalls: () => summaryCalls, sendCalls: () => sendCalls, preferences: () => preferences, calendarCalls, intentContexts };
+  return { summaryCalls: () => summaryCalls, sendCalls: () => sendCalls, preferences: () => preferences, calendarCalls, intentContexts, speechRequests };
 }
 
 for (const width of [1280, 320]) {
@@ -150,6 +154,26 @@ test("voice suggestion chips follow the saved interface language", async ({ page
   await page.locator("[data-voice]").click();
   await expect(page.locator('[data-command="为这封邮件生成回复"]')).toBeVisible();
   await expect(page.locator('[data-command="查看我的任务"]')).toBeVisible();
+  await expect(page.getByText("Starting records only after permission. Finished audio is sent to OpenAI for transcription; text selected for playback is sent for speech generation. RevoMail does not persist recordings, transcripts, or generated audio. The playback voice is AI-generated.", { exact: false })).toBeVisible();
+  await expect(page.getByText("Voice input is off. Choosing Start recording will save your consent, then request system microphone permission. You can always type instead.")).toBeVisible();
+});
+
+test("voice accepts Chinese input but keeps demo guidance and output in English", async ({ page }) => {
+  const calls = await fixture(page, { voiceAutoPlay: false });
+  await page.locator("[data-email]").click();
+  await page.locator("[data-voice]").click();
+  await expect(page.getByText("Use voice commands to search, open, summarise, draft, extract, or navigate. Every command is reviewed before it runs.")).toBeVisible();
+  await expect(page.getByText("Review or type a command", { exact: true })).toBeVisible();
+  await expect(page.getByRole("dialog")).not.toContainText("or Chinese");
+  await expect(page.getByText("Voice input is off. Choosing Start recording will save your consent, then request system microphone permission. You can always type instead.")).toBeVisible();
+
+  await page.locator("#voice-transcript").fill("总结这封邮件");
+  await page.locator("[data-run-command]").click();
+  await expect(page.locator(".voice-review")).toContainText("Summarise the current email");
+  await page.locator("[data-run-command]").click();
+  await expect(page.locator(".voice-result-copy")).toHaveText("Review the proposal.");
+  await page.locator("[data-speak]").click();
+  await expect.poll(() => calls.speechRequests.at(-1)).toEqual({ text: "Review the proposal.", language: "en" });
 });
 
 test("show tasks does not report calendar events as tasks", async ({ page }) => {
