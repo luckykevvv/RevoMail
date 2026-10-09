@@ -1,4 +1,6 @@
+import asyncio
 import logging
+from contextlib import suppress
 from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
@@ -13,8 +15,12 @@ from backend.app.audit import AuditRepository
 from backend.app.errors import AppError, error_payload
 from backend.app.idempotency import IdempotencyRepository
 from backend.app.jobs import JobRepository
+from backend.app.mailbox import MailboxRepository
 from backend.app.persistence import build_persistence
-from backend.app.routers import accounts, ai, auth, calendar, emails, health
+from backend.app.routers import accounts, ai, auth, calendar, emails, health, preferences, voice
+from backend.app.preferences import PreferencesRepository
+from backend.app.services.speech import SpeechService
+from backend.app.services.mailbox import MailboxSyncService
 
 
 logger = logging.getLogger("revomail.api")
@@ -40,7 +46,19 @@ def create_app(app_settings: Settings = settings) -> FastAPI:
         app.state.idempotency = IdempotencyRepository(database)
         app.state.audit = AuditRepository(database)
         app.state.job_repository.recover_interrupted()
-        yield
+        app.state.mailbox_repository = MailboxRepository(database, auth_repository.protector)
+        app.state.mailbox_sync = MailboxSyncService(app.state.mailbox_repository, auth_repository, app.state.job_repository)
+        app.state.settings = app_settings
+        app.state.preferences = PreferencesRepository(database, app_settings)
+        app.state.speech = SpeechService(app_settings)
+        worker = asyncio.create_task(app.state.mailbox_sync.run())
+        try:
+            yield
+        finally:
+            app.state.mailbox_sync.stop()
+            worker.cancel()
+            with suppress(asyncio.CancelledError):
+                await worker
 
     app = FastAPI(
         title="RevoMail API",
@@ -95,6 +113,8 @@ def create_app(app_settings: Settings = settings) -> FastAPI:
     app.include_router(emails.router, prefix="/api/v1/emails", tags=["emails"])
     app.include_router(calendar.router, prefix="/api/v1/calendar", tags=["calendar"])
     app.include_router(ai.router, prefix="/api/v1/ai", tags=["ai"])
+    app.include_router(preferences.router, prefix="/api/v1/settings", tags=["settings"])
+    app.include_router(voice.router, prefix="/api/v1/voice", tags=["voice"])
 
     dist_path = PROJECT_ROOT / "dist"
 

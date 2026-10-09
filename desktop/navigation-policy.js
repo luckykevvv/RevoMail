@@ -12,3 +12,11 @@ export function isAllowedNavigation(target, { appOrigin = null, allowProviderAut
     return false;
   }
 }
+
+export function isAllowedExternalNavigation(target) {
+  try {
+    return new Set(["http:", "https:", "mailto:"]).has(new URL(target).protocol);
+  } catch {
+    return false;
+  }
+}

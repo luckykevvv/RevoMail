@@ -1,231 +1,178 @@
-"""
-Gmail service — wraps the Google Gmail API.
-
-Responsibilities:
-- Build an authenticated Gmail API client from the session tokens.
-- List messages (with basic metadata, including unread/starred state) for the inbox.
-- Fetch and parse a single message body (plain-text and HTML).
-- Mark a message as read in Gmail.
-- Send a message (new or reply) through Gmail, working out the correct reply recipient.
-- Sanitise HTML bodies so scripts / tracking pixels cannot execute.
-"""
+"""Provider-neutral Gmail adapter and compatibility helpers."""
 
 import base64
-import email as email_lib
 import re
+import socket
+from email.header import decode_header, make_header
 from email.message import EmailMessage
-from email.utils import formataddr, getaddresses
+from email.utils import parsedate_to_datetime, getaddresses, formataddr
 from typing import Any
 
 import bleach
+from bleach.css_sanitizer import CSSSanitizer
+import google.oauth2.credentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
-from backend.app.services.google_credentials import build_credentials
 
-# HTML tags and attributes we allow through the sanitiser.
-# Everything else (scripts, iframes, forms, event handlers…) is stripped.
-ALLOWED_TAGS = list(bleach.sanitizer.ALLOWED_TAGS) + [
-    "p", "br", "div", "span", "pre", "blockquote",
-    "h1", "h2", "h3", "h4", "h5", "h6",
-    "ul", "ol", "li", "table", "thead", "tbody", "tr", "th", "td",
-    "strong", "em", "b", "i", "u", "s", "code",
-    "img",
+class MailProviderError(RuntimeError):
+    code = "PROVIDER_FAILED"
+    retryable = True
+
+
+class InvalidAuthorization(MailProviderError):
+    code = "AUTHORIZATION_EXPIRED"
+    retryable = False
+
+
+class ProviderRateLimited(MailProviderError):
+    code = "PROVIDER_RATE_LIMITED"
+
+
+class ProviderTimeout(MailProviderError):
+    code = "PROVIDER_TIMEOUT"
+
+
+class MessageNotFound(MailProviderError):
+    code = "MESSAGE_NOT_FOUND"
+    retryable = False
+
+
+class HistoryExpired(MailProviderError):
+    code = "SYNC_CURSOR_EXPIRED"
+
+
+ALLOWED_TAGS = [
+    "a", "abbr", "acronym", "b", "blockquote", "br", "code", "div", "em", "h1", "h2", "h3", "h4",
+    "h5", "h6", "i", "img", "li", "ol", "p", "pre", "s", "span", "strong", "table", "tbody", "td",
+    "tfoot", "th", "thead", "tr", "u", "ul",
 ]
-ALLOWED_ATTRS = {
-    **bleach.sanitizer.ALLOWED_ATTRIBUTES,
-    "a": ["href", "title"],
-    "img": ["src", "alt", "width", "height"],
-}
+HTML_FORMAT_MARKER = "<!--revomail-html-v4-->"
+MAX_INLINE_IMAGE_BYTES = 2 * 1024 * 1024
+CSS_SANITIZER = CSSSanitizer(allowed_css_properties=frozenset({
+    "background-color", "border", "border-bottom", "border-collapse", "border-color", "border-left",
+    "border-radius", "border-right", "border-spacing", "border-style", "border-top", "border-width", "color",
+    "display", "font", "font-family", "font-size", "font-style", "font-weight", "height", "letter-spacing",
+    "line-height", "margin", "margin-bottom", "margin-left", "margin-right", "margin-top", "max-height",
+    "max-width", "min-height", "min-width", "padding", "padding-bottom", "padding-left", "padding-right",
+    "padding-top", "text-align", "text-decoration", "vertical-align", "white-space", "width", "word-break",
+    "word-spacing", "word-wrap",
+}))
 
 
-# Mailbox views the inbox API may list. Anything else is rejected by the router.
-MAILBOX_LABELS = ("INBOX", "SENT")
+def _allowed_html_attribute(tag: str, name: str, value: str) -> bool:
+    if name == "style":
+        return True
+    if name in {"align", "aria-hidden", "class", "dir", "hidden", "id", "title"}:
+        return True
+    if tag == "a" and name == "href":
+        return bool(re.match(r"^(?:https?://|mailto:)", value, flags=re.IGNORECASE))
+    if tag == "img" and name == "src":
+        return bool(re.match(r"^(?:https://|data:image/(?:png|jpeg|gif|webp);base64,)", value, flags=re.IGNORECASE))
+    if tag == "img" and name in {"alt", "width", "height"}:
+        return True
+    if tag in {"table", "td", "th"} and name in {"bgcolor", "border", "cellpadding", "cellspacing", "colspan", "rowspan", "width"}:
+        return True
+    return False
 
-MAX_RECIPIENTS = 20
-_ADDRESS_RE = re.compile(r"^[^@\s<>,;\"]+@[^@\s<>,;\"]+\.[^@\s<>,;\"]+$")
 
-
-class MessageValidationError(ValueError):
-    """The message cannot be sent as requested (bad recipient, header injection, …)."""
-
-
-def _build_gmail(tokens: dict) -> Any:
-    """Return an authenticated Gmail API client built from stored session tokens."""
-    return build("gmail", "v1", credentials=build_credentials(tokens))
+def _decode_header(value: str) -> str:
+    try:
+        return str(make_header(decode_header(value)))
+    except (LookupError, UnicodeDecodeError):
+        return value
 
 
 def _decode_body(data: str) -> str:
-    """Base64url-decode a Gmail message part body."""
-    padded = data + "=" * (4 - len(data) % 4)
+    padded = data + "=" * (-len(data) % 4)
     return base64.urlsafe_b64decode(padded).decode("utf-8", errors="replace")
 
 
-def _extract_parts(payload: dict) -> tuple[str, str]:
-    """
-    Recursively walk a Gmail message payload and return
-    (plain_text, html_text) — either may be empty.
-
-    Handles nested structures like:
-      multipart/mixed
-        └── multipart/alternative
-              ├── text/plain
-              └── text/html
-    and concatenates all text/plain parts so long threaded emails
-    are not silently truncated.
-    """
-    mime = payload.get("mimeType", "")
-    body_data = payload.get("body", {}).get("data", "")
-
-    if mime == "text/plain" and body_data:
-        return _decode_body(body_data), ""
-    if mime == "text/html" and body_data:
-        return "", _decode_body(body_data)
-
-    plain_parts: list[str] = []
-    html_parts: list[str] = []
-
-    for part in payload.get("parts", []):
-        p, h = _extract_parts(part)
-        if p:
-            plain_parts.append(p)
-        if h:
-            html_parts.append(h)
-
-    # Prefer the first HTML version found; concatenate all plain parts
-    return "\n\n".join(plain_parts), html_parts[0] if html_parts else ""
-
-
 def _header(headers: list[dict], name: str) -> str:
-    """Pull a single header value by name (case-insensitive)."""
-    name_lower = name.lower()
-    for h in headers:
-        if h["name"].lower() == name_lower:
-            return h["value"]
+    target = name.lower()
+    for header in headers:
+        if str(header.get("name", "")).lower() == target:
+            return _decode_header(str(header.get("value", "")))
     return ""
 
 
-def _internal_date(detail: dict) -> int | None:
-    """Gmail's own timestamp for the message (milliseconds since the epoch, UTC), or None.
+def _addresses(headers: list[dict], *names: str) -> list[str]:
+    values: list[str] = []
+    for name in names:
+        raw = _header(headers, name)
+        if raw:
+            values.extend(item.strip() for item in raw.split(",") if item.strip())
+    return values
 
-    Unlike the Date header, which the sender controls and which may be missing, malformed or in any time zone,
-    this is always a precise instant, so the UI can show it in the viewer's local time.
-    """
-    try:
-        return int(detail["internalDate"])
-    except (KeyError, TypeError, ValueError):
-        return None
+
+def _extract_parts(payload: dict) -> tuple[str, str, list[dict]]:
+    mime = str(payload.get("mimeType", ""))
+    body = payload.get("body") or {}
+    filename = _decode_header(str(payload.get("filename") or ""))
+    attachments: list[dict] = []
+    if filename:
+        attachments.append({"id": body.get("attachmentId"), "filename": filename, "mimeType": mime or "application/octet-stream", "size": int(body.get("size") or 0)})
+        return "", "", attachments
+    data = str(body.get("data") or "")
+    if mime == "text/plain" and data:
+        return _decode_body(data), "", attachments
+    if mime == "text/html" and data:
+        return "", _decode_body(data), attachments
+    plain_parts: list[str] = []
+    html_parts: list[str] = []
+    for part in payload.get("parts") or []:
+        plain, html, nested = _extract_parts(part)
+        if plain:
+            plain_parts.append(plain)
+        if html:
+            html_parts.append(html)
+        attachments.extend(nested)
+    return "\n\n".join(plain_parts), "\n".join(html_parts), attachments
 
 
 def _sanitise_html(html: str) -> str:
-    """Strip dangerous tags/attributes and block remote images."""
-    # Remove <style> and <script> blocks entirely (tag + content).
-    # bleach.clean with strip=True removes the tag but leaves the text
-    # content, which causes raw CSS to appear as visible text.
-    html = re.sub(r"<style[\s\S]*?</style>", "", html, flags=re.IGNORECASE)
-    html = re.sub(r"<script[\s\S]*?</script>", "", html, flags=re.IGNORECASE)
-
-    clean = bleach.clean(html, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRS, strip=True)
-
-    return clean
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-def list_messages(
-    tokens: dict,
-    max_results: int = 20,
-    page_token: str | None = None,
-    label: str = "INBOX",
-) -> dict:
-    """
-    Return a page of messages for one mailbox view (INBOX or SENT) with metadata only (no bodies).
-
-    Returns:
-        {
-          "messages": [...],
-          "next_page_token": str | None,
-        }
-    """
-    if label not in MAILBOX_LABELS:
-        raise ValueError("Unsupported mailbox label.")
-    gmail = _build_gmail(tokens)
-
-    kwargs: dict = {
-        "userId": "me",
-        "labelIds": [label],
-        "maxResults": max_results,
-    }
-    if page_token:
-        kwargs["pageToken"] = page_token
-
-    result = gmail.users().messages().list(**kwargs).execute()
-    raw_messages = result.get("messages", [])
-    next_page_token = result.get("nextPageToken")
-
-    messages = []
-    for msg in raw_messages:
-        # Fetch metadata fields only — much cheaper than full message
-        detail = gmail.users().messages().get(
-            userId="me",
-            id=msg["id"],
-            format="metadata",
-            metadataHeaders=["From", "To", "Subject", "Date"],
-        ).execute()
-
-        headers = detail.get("payload", {}).get("headers", [])
-        snippet = detail.get("snippet", "")
-        label_ids = detail.get("labelIds", [])
-
-        messages.append({
-            "id": detail["id"],
-            "thread_id": detail.get("threadId"),
-            "sender": _header(headers, "From"),
-            "to": _header(headers, "To"),
-            "subject": _header(headers, "Subject") or "(no subject)",
-            "date": _header(headers, "Date"),
-            "internal_date": _internal_date(detail),
-            "preview": snippet,
-            "unread": "UNREAD" in label_ids,
-            "starred": "STARRED" in label_ids,
-            "category": _category(label_ids),
-        })
-
-    return {"messages": messages, "next_page_token": next_page_token}
+    html = re.sub(r"<(script|style|form|iframe|object|embed|svg|math)\b[\s\S]*?</\1\s*>", "", html, flags=re.IGNORECASE)
+    html = re.sub(r"<(script|style|form|iframe|object|embed|svg|math)\b[^>]*?/?>", "", html, flags=re.IGNORECASE)
+    cleaned = bleach.clean(
+        html,
+        tags=ALLOWED_TAGS,
+        attributes=_allowed_html_attribute,
+        protocols=["http", "https", "mailto", "data"],
+        css_sanitizer=CSS_SANITIZER,
+        strip=True,
+    )
+    return HTML_FORMAT_MARKER + cleaned
 
 
-def get_message(tokens: dict, message_id: str) -> dict:
-    """
-    Return the full content of a single message, with a sanitised HTML body.
-    """
-    gmail = _build_gmail(tokens)
-    detail = gmail.users().messages().get(
-        userId="me",
-        id=message_id,
-        format="full",
-    ).execute()
+def _inline_image_data(payload: dict) -> dict[str, str]:
+    images: dict[str, str] = {}
+    for part in [payload, *(payload.get("parts") or [])]:
+        if part is not payload:
+            images.update(_inline_image_data(part))
+        mime = str(part.get("mimeType") or "").lower()
+        if mime not in {"image/png", "image/jpeg", "image/gif", "image/webp"}:
+            continue
+        content_id = _header(part.get("headers") or [], "Content-ID").strip().strip("<>")
+        data = str((part.get("body") or {}).get("data") or "")
+        if not content_id or not data:
+            continue
+        try:
+            decoded = base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+        except (ValueError, TypeError):
+            continue
+        if len(decoded) <= MAX_INLINE_IMAGE_BYTES:
+            images[content_id] = f"data:{mime};base64,{base64.b64encode(decoded).decode('ascii')}"
+    return images
 
-    headers = detail.get("payload", {}).get("headers", [])
-    label_ids = detail.get("labelIds", [])
-    plain, html = _extract_parts(detail.get("payload", {}))
 
-    return {
-        "id": detail["id"],
-        "thread_id": detail.get("threadId"),
-        "sender": _header(headers, "From"),
-        "to": _header(headers, "To"),
-        "subject": _header(headers, "Subject") or "(no subject)",
-        "date": _header(headers, "Date"),
-        "internal_date": _internal_date(detail),
-        "unread": "UNREAD" in label_ids,
-        "starred": "STARRED" in label_ids,
-        "category": _category(label_ids),
-        "reply_to": reply_recipients(headers, label_ids),
-        "body_plain": plain,
-        "body_html": _sanitise_html(html) if html else None,
-        "body_html_clean": _sanitise_html(html) if html else None,
-    }
+def _replace_inline_images(html: str, payload: dict) -> str:
+    for content_id, data_uri in _inline_image_data(payload).items():
+        html = re.sub(
+            rf"(?i)([\"'])cid:{re.escape(content_id)}\1",
+            lambda match: f'{match.group(1)}{data_uri}{match.group(1)}',
+            html,
+        )
+    return html
 
 
 def mark_read(tokens: dict, message_id: str) -> dict:
@@ -241,6 +188,222 @@ def mark_read(tokens: dict, message_id: str) -> dict:
     ).execute()
     return {"id": detail.get("id", message_id), "unread": "UNREAD" in detail.get("labelIds", [])}
 
+
+def _category(label_ids: list[str]) -> str:
+    for label, category in (("CATEGORY_SOCIAL", "Social"), ("CATEGORY_PROMOTIONS", "Promotions"), ("CATEGORY_UPDATES", "Updates"), ("CATEGORY_FORUMS", "Forums")):
+        if label in label_ids:
+            return category
+    return "Primary"
+
+
+def _received_at(detail: dict, headers: list[dict]) -> str:
+    internal = detail.get("internalDate")
+    if internal:
+        from datetime import datetime, timezone
+        return datetime.fromtimestamp(int(internal) / 1000, timezone.utc).isoformat()
+    raw = _header(headers, "Date")
+    if raw:
+        try:
+            parsed = parsedate_to_datetime(raw)
+            if parsed.tzinfo is None:
+                from datetime import timezone
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.isoformat()
+        except (TypeError, ValueError, OverflowError):
+            pass
+    from backend.app.persistence import utc_now
+    return utc_now().isoformat()
+
+
+def normalise_message(detail: dict) -> dict:
+    payload = detail.get("payload") or {}
+    headers = payload.get("headers") or []
+    labels = list(detail.get("labelIds") or [])
+    plain, html, attachments = _extract_parts(payload)
+    return {
+        "id": str(detail["id"]), "threadId": detail.get("threadId"), "historyId": detail.get("historyId"),
+        "reply_to": reply_recipients(headers, labels), "references": _header(headers, "References"),
+        "rfcMessageId": _header(headers, "Message-ID"), "sender": _header(headers, "From"),
+        "recipients": _addresses(headers, "To", "Cc", "Bcc"), "subject": _header(headers, "Subject") or "(no subject)",
+        "receivedAt": _received_at(detail, headers), "preview": str(detail.get("snippet") or ""),
+        "unread": "UNREAD" in labels, "starred": "STARRED" in labels, "category": _category(labels),
+        "attachments": attachments, "bodyText": plain,
+        "bodyHtmlSafe": _sanitise_html(_replace_inline_images(html, payload)) if html else "",
+    }
+
+
+class GmailAdapter:
+    def __init__(self, tokens: dict):
+        credentials = google.oauth2.credentials.Credentials(
+            token=tokens["token"], refresh_token=tokens.get("refresh_token"), token_uri=tokens["token_uri"],
+            client_id=tokens["client_id"], client_secret=tokens["client_secret"], scopes=tokens.get("scopes"),
+        )
+        self.gmail = build("gmail", "v1", credentials=credentials, cache_discovery=False)
+
+    def _execute(self, request, *, history: bool = False, message_lookup: bool = False):
+        try:
+            return request.execute()
+        except HttpError as exc:
+            status = getattr(exc.resp, "status", 0)
+            content = bytes(getattr(exc, "content", b"")).lower()
+            if history and status == 404:
+                raise HistoryExpired() from exc
+            if message_lookup and status == 404:
+                raise MessageNotFound() from exc
+            if status == 429 or b"ratelimit" in content or b"quotaexceeded" in content:
+                raise ProviderRateLimited() from exc
+            if status in {401, 403}:
+                raise InvalidAuthorization() from exc
+            raise MailProviderError() from exc
+        except (socket.timeout, TimeoutError) as exc:
+            raise ProviderTimeout() from exc
+
+    def get_message(self, message_id: str) -> dict:
+        detail = self._execute(
+            self.gmail.users().messages().get(userId="me", id=message_id, format="full"),
+            message_lookup=True,
+        )
+        self._hydrate_inline_images(detail)
+        message = normalise_message(detail)
+        message["_inInbox"] = "INBOX" in set(detail.get("labelIds") or [])
+        return message
+
+    def _hydrate_inline_images(self, detail: dict) -> None:
+        def visit(part: dict) -> None:
+            mime = str(part.get("mimeType") or "").lower()
+            content_id = _header(part.get("headers") or [], "Content-ID")
+            body = part.get("body") or {}
+            attachment_id = body.get("attachmentId")
+            if (
+                mime in {"image/png", "image/jpeg", "image/gif", "image/webp"}
+                and content_id
+                and attachment_id
+                and not body.get("data")
+                and int(body.get("size") or 0) <= MAX_INLINE_IMAGE_BYTES
+            ):
+                attachment = self._execute(
+                    self.gmail.users().messages().attachments().get(
+                        userId="me", messageId=str(detail["id"]), id=str(attachment_id),
+                    ),
+                    message_lookup=True,
+                )
+                if attachment.get("data"):
+                    body["data"] = attachment["data"]
+                    part["body"] = body
+            for child in part.get("parts") or []:
+                visit(child)
+
+        visit(detail.get("payload") or {})
+
+    def list_messages(self, limit: int = 50, page_cursor: str | None = None, query: str = "", label_ids: list[str] | None = None) -> dict:
+        kwargs: dict[str, Any] = {"userId": "me", "maxResults": limit, "labelIds": label_ids or ["INBOX"]}
+        if page_cursor:
+            kwargs["pageToken"] = page_cursor
+        if query:
+            kwargs["q"] = query
+        result = self._execute(self.gmail.users().messages().list(**kwargs))
+        items = [self.get_message(str(item["id"])) for item in result.get("messages") or []]
+        for item in items:
+            item.pop("_inInbox", None)
+        return {"items": items, "nextCursor": result.get("nextPageToken")}
+
+    def list_history(self, history_id: str, page_cursor: str | None = None) -> dict:
+        kwargs: dict[str, Any] = {"userId": "me", "startHistoryId": history_id, "maxResults": 100}
+        if page_cursor:
+            kwargs["pageToken"] = page_cursor
+        result = self._execute(self.gmail.users().history().list(**kwargs), history=True)
+        changed: set[str] = set()
+        deleted: set[str] = set()
+        for record in result.get("history") or []:
+            for field in ("messagesAdded", "labelsAdded", "labelsRemoved"):
+                for entry in record.get(field) or []:
+                    message = entry.get("message") or {}
+                    if message.get("id"):
+                        changed.add(str(message["id"]))
+            for entry in record.get("messagesDeleted") or []:
+                message = entry.get("message") or {}
+                if message.get("id"):
+                    deleted.add(str(message["id"]))
+        changed.difference_update(deleted)
+        messages: list[dict] = []
+        for message_id in changed:
+            try:
+                message = self.get_message(message_id)
+            except MessageNotFound:
+                deleted.add(message_id)
+                continue
+            if message.pop("_inInbox", False):
+                messages.append(message)
+            else:
+                deleted.add(message_id)
+        return {"items": messages, "deletedIds": sorted(deleted), "nextCursor": result.get("nextPageToken"), "historyId": str(result.get("historyId") or history_id)}
+
+    def modify_message(self, message_id: str, unread: bool | None = None, starred: bool | None = None) -> dict:
+        add: list[str] = []
+        remove: list[str] = []
+        if unread is not None:
+            (add if unread else remove).append("UNREAD")
+        if starred is not None:
+            (add if starred else remove).append("STARRED")
+        result = self._execute(self.gmail.users().messages().modify(userId="me", id=message_id, body={"addLabelIds": add, "removeLabelIds": remove}))
+        return {"id": result.get("id", message_id), "unread": unread, "starred": starred}
+
+    def send_message(self, payload: dict) -> dict:
+        message = EmailMessage()
+        message["To"] = ", ".join(payload["to"])
+        if payload.get("cc"):
+            message["Cc"] = ", ".join(payload["cc"])
+        if payload.get("bcc"):
+            message["Bcc"] = ", ".join(payload["bcc"])
+        message["Subject"] = payload["subject"]
+        body: dict[str, Any] = {}
+        if payload.get("inReplyToMessageId"):
+            source = self.get_message(payload["inReplyToMessageId"])
+            if source.get("rfcMessageId"):
+                message["In-Reply-To"] = source["rfcMessageId"]
+                message["References"] = (source.get("references", "") + " " + source["rfcMessageId"]).strip()
+            if source.get("threadId"):
+                body["threadId"] = source["threadId"]
+        message.set_content(payload["bodyText"])
+        body["raw"] = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii").rstrip("=")
+        try:
+            result = self._execute(self.gmail.users().messages().send(userId="me", body=body))
+        except (InvalidAuthorization, ProviderRateLimited):
+            raise
+        except MailProviderError as exc:
+            raise ProviderTimeout() from exc
+        return {"providerMessageId": str(result["id"]), "threadId": result.get("threadId")}
+
+
+def _build_gmail(tokens: dict) -> Any:
+    return GmailAdapter(tokens).gmail
+
+
+def list_messages(tokens: dict, max_results: int = 20, page_token: str | None = None) -> dict:
+    page = GmailAdapter(tokens).list_messages(max_results, page_token)
+    messages = [{
+        "id": item["id"], "thread_id": item.get("threadId"), "sender": item["sender"], "to": ", ".join(item["recipients"]),
+        "subject": item["subject"], "date": item["receivedAt"], "preview": item["preview"], "unread": item["unread"],
+        "starred": item["starred"], "category": item["category"],
+    } for item in page["items"]]
+    return {"messages": messages, "next_page_token": page["nextCursor"]}
+
+
+def get_message(tokens: dict, message_id: str) -> dict:
+    item = GmailAdapter(tokens).get_message(message_id)
+    return {
+        "id": item["id"], "thread_id": item.get("threadId"), "sender": item["sender"], "to": ", ".join(item["recipients"]),
+        "subject": item["subject"], "date": item["receivedAt"], "unread": item["unread"], "starred": item["starred"],
+        "category": item["category"], "attachments": item["attachments"], "body_plain": item["bodyText"],
+        "body_html": item["bodyHtmlSafe"] or None, "body_html_clean": item["bodyHtmlSafe"] or None,
+    }
+
+
+MAX_RECIPIENTS = 50
+_ADDRESS_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+class MessageValidationError(ValueError):
+    pass
 
 def parse_recipients(raw: str) -> list[str]:
     """Parse and validate a To field. Raises MessageValidationError on anything unsafe or malformed."""
@@ -303,62 +466,3 @@ def build_mime(
         message["References"] = (references + " " + in_reply_to).strip() if references else in_reply_to
     message.set_content(body)
     return message
-
-
-def send_message(
-    tokens: dict,
-    to: str | None,
-    subject: str,
-    body: str,
-    reply_to_message_id: str | None = None,
-) -> dict:
-    """
-    Send a message through Gmail. Requires the gmail.send scope.
-
-    For a reply the recipient is taken from the original message (Reply-To, else From; the
-    original's To for a message you sent) — never from client input — and the reply is placed in the
-    same Gmail thread with In-Reply-To/References set.
-    """
-    gmail = _build_gmail(tokens)
-    thread_id = None
-    in_reply_to = ""
-    references = ""
-
-    if reply_to_message_id:
-        original = gmail.users().messages().get(
-            userId="me",
-            id=reply_to_message_id,
-            format="metadata",
-            metadataHeaders=["From", "To", "Reply-To", "Subject", "Message-ID", "References"],
-        ).execute()
-        headers = original.get("payload", {}).get("headers", [])
-        recipients = reply_recipients(headers, original.get("labelIds", []))
-        if not recipients:
-            raise MessageValidationError("This message has no valid address to reply to.")
-        subject = subject.strip() or reply_subject(_header(headers, "Subject"))
-        thread_id = original.get("threadId")
-        in_reply_to = _header(headers, "Message-ID").strip()
-        references = _header(headers, "References").strip()
-    else:
-        recipients = parse_recipients(to or "")
-
-    message = build_mime(recipients, subject, body, in_reply_to, references)
-    raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
-    request_body: dict = {"raw": raw}
-    if thread_id:
-        request_body["threadId"] = thread_id
-    sent = gmail.users().messages().send(userId="me", body=request_body).execute()
-    return {"id": sent.get("id"), "thread_id": sent.get("threadId", thread_id)}
-
-
-def _category(label_ids: list[str]) -> str:
-    """Map Gmail category labels to a simple category string."""
-    if "CATEGORY_SOCIAL" in label_ids:
-        return "Social"
-    if "CATEGORY_PROMOTIONS" in label_ids:
-        return "Promotions"
-    if "CATEGORY_UPDATES" in label_ids:
-        return "Updates"
-    if "CATEGORY_FORUMS" in label_ids:
-        return "Forums"
-    return "Primary"

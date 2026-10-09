@@ -1,63 +1,114 @@
-from backend.app.services.gmail import _sanitise_html
+import base64
+from unittest.mock import MagicMock
+
+import pytest
+
+from backend.app.services.gmail import GmailAdapter, MessageNotFound, ProviderTimeout, _sanitise_html, normalise_message
 
 
-def test_email_html_removes_executable_content():
-    cleaned = _sanitise_html('<p>Hello</p><script>alert(1)</script><img src="https://tracker.example/pixel">')
+def test_email_html_keeps_safe_layout_and_https_images_but_removes_executable_content():
+    cleaned = _sanitise_html('<div id="preheader" class="mcnPreviewText" aria-hidden="true">Preview</div><p style="color: red; position: fixed">Hello</p><script>alert(1)</script><img src="https://images.example/photo.png"><a href="javascript:alert(2)">bad</a>')
     assert "script" not in cleaned
     assert "alert(1)" not in cleaned
     assert "Hello" in cleaned
+    assert "color: red" in cleaned
+    assert "position" not in cleaned
+    assert 'src="https://images.example/photo.png"' in cleaned
+    assert 'class="mcnPreviewText"' in cleaned
+    assert 'aria-hidden="true"' in cleaned
+    assert 'id="preheader"' in cleaned
+    assert "javascript:" not in cleaned
 
 
-class _Call:
-    def __init__(self, result):
-        self.result = result
-
-    def execute(self):
-        return self.result
-
-
-class _FakeMessages:
-    def __init__(self, details):
-        self.details = details
-
-    def list(self, **_kwargs):
-        return _Call({"messages": [{"id": key} for key in self.details]})
-
-    def get(self, id, **_kwargs):
-        return _Call(self.details[id])
-
-
-class _FakeGmail:
-    def __init__(self, details):
-        self._messages = _FakeMessages(details)
-
-    def users(self):
-        return self
-
-    def messages(self):
-        return self._messages
+def test_message_payload_is_normalised_without_remote_content():
+    encoded_plain = base64.urlsafe_b64encode(b"Plain body").decode("ascii")
+    encoded_html = base64.urlsafe_b64encode(b'<p>Formatted</p><a href="javascript:alert(1)">bad</a>').decode("ascii")
+    message = normalise_message({
+        "id": "gmail-1", "threadId": "thread-1", "historyId": "12", "internalDate": "1700000000000",
+        "labelIds": ["INBOX", "UNREAD", "STARRED", "CATEGORY_UPDATES"], "snippet": "Preview",
+        "payload": {"mimeType": "multipart/mixed", "headers": [
+            {"name": "From", "value": "Sender <sender@example.com>"}, {"name": "To", "value": "user@example.com"},
+            {"name": "Subject", "value": "Update"}, {"name": "Message-ID", "value": "<message@example.com>"},
+        ], "parts": [
+            {"mimeType": "multipart/alternative", "parts": [
+                {"mimeType": "text/plain", "body": {"data": encoded_plain}},
+                {"mimeType": "text/html", "body": {"data": encoded_html}},
+            ]},
+            {"mimeType": "application/pdf", "filename": "brief.pdf", "body": {"attachmentId": "a1", "size": 42}},
+        ]},
+    })
+    assert message["bodyText"] == "Plain body"
+    assert "Formatted" in message["bodyHtmlSafe"]
+    assert "javascript:" not in message["bodyHtmlSafe"]
+    assert message["attachments"] == [{"id": "a1", "filename": "brief.pdf", "mimeType": "application/pdf", "size": 42}]
+    assert message["unread"] is True and message["starred"] is True
 
 
-def _detail(message_id, internal_date):
-    detail = {
-        "id": message_id,
-        "threadId": "t",
-        "labelIds": ["INBOX"],
-        "snippet": "hi",
-        "payload": {"mimeType": "text/plain", "headers": [{"name": "Date", "value": "Mon, 28 Sep 2026 00:11:12 +1000"}], "body": {"data": ""}},
+def test_message_payload_embeds_safe_cid_images():
+    encoded_html = base64.urlsafe_b64encode(b'<p>Logo</p><img src="cid:logo-1">').decode("ascii")
+    encoded_image = base64.urlsafe_b64encode(b"small-png-placeholder").decode("ascii")
+    message = normalise_message({
+        "id": "gmail-inline", "labelIds": ["INBOX"],
+        "payload": {"mimeType": "multipart/related", "headers": [], "parts": [
+            {"mimeType": "text/html", "body": {"data": encoded_html}},
+            {"mimeType": "image/png", "headers": [{"name": "Content-ID", "value": "<logo-1>"}], "body": {"data": encoded_image}},
+        ]},
+    })
+
+    assert f'data:image/png;base64,{encoded_image}' in message["bodyHtmlSafe"]
+
+
+def _history_adapter(monkeypatch, result, messages):
+    adapter = object.__new__(GmailAdapter)
+    adapter.gmail = MagicMock()
+    monkeypatch.setattr(adapter, "_execute", lambda _request, **_kwargs: result)
+
+    def get_message(message_id):
+        value = messages[message_id]
+        if isinstance(value, Exception):
+            raise value
+        return dict(value)
+
+    monkeypatch.setattr(adapter, "get_message", get_message)
+    return adapter
+
+
+def test_history_keeps_only_messages_that_remain_in_the_inbox(monkeypatch):
+    result = {
+        "history": [{
+            "labelsRemoved": [{"message": {"id": "archived"}}],
+            "messagesAdded": [
+                {"message": {"id": "incoming"}},
+                {"message": {"id": "sent"}},
+            ],
+        }],
+        "historyId": "22",
     }
-    if internal_date is not None:
-        detail["internalDate"] = internal_date
-    return detail
+    adapter = _history_adapter(monkeypatch, result, {
+        "archived": {"id": "archived", "_inInbox": False},
+        "incoming": {"id": "incoming", "_inInbox": True},
+        "sent": {"id": "sent", "_inInbox": False},
+    })
+
+    page = adapter.list_history("21")
+
+    assert page["items"] == [{"id": "incoming"}]
+    assert page["deletedIds"] == ["archived", "sent"]
 
 
-def test_messages_carry_gmails_own_timestamp(monkeypatch):
-    from backend.app.services import gmail
+def test_history_deletes_only_explicitly_missing_messages(monkeypatch):
+    result = {"history": [{"labelsAdded": [{"message": {"id": "missing"}}]}], "historyId": "23"}
+    adapter = _history_adapter(monkeypatch, result, {"missing": MessageNotFound()})
 
-    details = {"a": _detail("a", "1790518272000"), "b": _detail("b", None), "c": _detail("c", "garbage")}
-    monkeypatch.setattr(gmail, "_build_gmail", lambda _t: _FakeGmail(details))
-    listed = {m["id"]: m for m in gmail.list_messages({})["messages"]}
-    assert listed["a"]["internal_date"] == 1790518272000
-    assert listed["b"]["internal_date"] is None and listed["c"]["internal_date"] is None
-    assert listed["a"]["date"] == "Mon, 28 Sep 2026 00:11:12 +1000"  # the header is still returned
-    assert gmail.get_message({}, "a")["internal_date"] == 1790518272000
+    page = adapter.list_history("22")
+
+    assert page["items"] == []
+    assert page["deletedIds"] == ["missing"]
+
+
+def test_history_propagates_retryable_message_read_failures(monkeypatch):
+    result = {"history": [{"labelsAdded": [{"message": {"id": "delayed"}}]}], "historyId": "24"}
+    adapter = _history_adapter(monkeypatch, result, {"delayed": ProviderTimeout()})
+
+    with pytest.raises(ProviderTimeout):
+        adapter.list_history("23")

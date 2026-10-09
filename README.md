@@ -2,21 +2,38 @@
 
 RevoMail is an AI-assisted email client for email summarization, reply drafting, voice commands, and task/calendar extraction.
 
-> **Current status:** RevoMail uses Python/FastAPI for its active API and SQLite for active server-side sessions, encrypted provider credentials, user/account records, settings, tasks, audits, idempotency records, and recoverable jobs. Google OAuth, Gmail reads, and OpenAI operations are implemented with simulated provider coverage; real Google and OpenAI calls remain unverified. Replies and new messages can be sent through Gmail after an explicit confirmation step and appear in the Sent tab; this is covered by simulated-provider tests only and has not been run against a real Gmail account. Events extracted from an email can be added to Google Calendar after confirming them in a dialog (also covered by simulated-provider tests only). Microsoft and Speech-to-Text remain pending.
+> **Current status:** RevoMail is a Gmail-only, single-user MVP. Python/FastAPI and SQLite provide active sessions, encrypted credentials and cached message bodies, recoverable Gmail synchronization through the original `/api/v1/emails` contract, safe reading, message-state changes, and confirmed idempotent sending. Google and OpenAI provider calls remain covered by sanitized fixtures until the dedicated test account is exercised. Cloud Speech-to-Text and confirmed Google Calendar creation are implemented with fixture coverage; real-provider verification remains pending.
 
 ## Current Prototype
 
 The frontend currently demonstrates:
 
-- Google and Microsoft sign-in states backed by the authentication API.
+- Google sign-in backed by the authentication API.
 - Searchable and filterable inbox with AI priority labels (High, Medium, Low) and priority filters.
 - Email reading with an AI summary and extracted information.
 - Editable and regeneratable AI reply drafts.
-- Voice-command simulation.
+- Optional cloud transcription with editable, explicitly confirmed English/Chinese commands and a keyboard alternative.
 - Task and calendar extraction.
 - Light, dark, desktop, and mobile layouts.
+- Persistent per-user English/Chinese interface, system/light/dark theme, reduced motion, AI model, reply length, and voice preferences.
 
-The inbox keeps demo data while signed out or unconnected and loads Gmail data after a configured Google session. OAuth and OpenAI actions are enabled only when their server-side credentials are configured. Sending and adding extracted events to Google Calendar use the connected Google account; the demo Tasks & events page still shows simulated data.
+## Voice, preferences, and accessibility
+
+Voice input is off by default. Start recording remains available when the provider is configured: choosing it after reading the English disclosure saves voice consent and then requests system microphone permission. The dialog distinguishes permission waiting, active capture, muted pause, released microphone, transcription, target resolution, confirmation, execution, and AI-generated playback. The displayed recording timer freezes while capture is paused. On wider screens it separates recording/transcript input from command review and generated output; narrow screens use one internally scrolling column, and playback updates preserve the reader's output position. Finish and transcribe releases capture before uploading the recording to the server-side OpenAI adapter. English and Chinese input remain supported, while voice command previews, generated results, and speech playback use English. Keyboard input remains available when voice is disabled or unavailable. The native operating-system microphone prompt follows the host language and cannot be overridden by the renderer.
+
+The reviewed assistant accepts English and Simplified Chinese commands for mailbox search, target selection, opening mail, summaries, reply drafts, task/event extraction, task/calendar views, and safe navigation. It does not preselect a target when opened. “This email” resolves only from a reading/reply view; from a whole-mailbox page the assistant asks for a sender, subject, or relative date instead of leaving an unusable current-email preview. Other descriptions search up to 50 accessible messages, rank candidates by AI priority then newest local time, and show at most five. “Highest priority” and similar comparative requests use this ranked candidate set instead of requiring an exact High label. Multiple matches require a click or a spoken ordinal before a second Run confirmation. Low-confidence interpretations and searches with no matches return to editable review with specific clarification guidance; they never expose a dead confirmation. Sending, deleting, archiving, starring, read-state changes, task creation, and calendar writes are rejected. Generated summaries, full drafts, and extraction results can be played with an explicitly disclosed AI voice; voice-originated commands auto-play when the persisted preference is enabled.
+
+Voice suggestion chips follow the saved interface language. “Show my tasks” displays and reads only extracted tasks, with an explicit empty state when none exist; it does not present extracted calendar events as tasks. The Calendar view is a navigable month grid: events with validated concrete dates appear in their date cells, while unresolved dates remain in a separate review section rather than being guessed. Extracted tasks and events remain suggestions from the currently selected email and can be removed independently.
+
+The cloud adapters use `OPENAI_API_KEY`, `SPEECH_MODEL` (default `gpt-transcribe`), and `TTS_MODEL` (default `gpt-4o-mini-tts`). Optional speech/TTS URL, size, character, rate, timeout, and deployment-level voice (`alloy`) variables are documented in `.env.example`. The recording deadline is enforced by the client; the server independently caps streamed request bytes and rate-limits transcription and synthesis. Recording requires a secure browser context (HTTPS or loopback), a supported MediaRecorder format, and microphone permission. The desktop application restricts audio permission to the trusted top-level mailbox window and shows a native confirmation.
+
+RevoMail keeps recording buffers only during processing and never persists audio or transcripts. Cancel discards local state and aborts the client request; it cannot recall data already uploaded. OpenAI's own handling is described in its [data policy](https://developers.openai.com/api/docs/guides/your-data). A failed transcription must be retried explicitly by recording again or typing; recordings are not retained for retries.
+
+Preferences are stored in the existing SQLite UserSettings table and survive logout and restart. The available AI model list starts with `OPENAI_MODEL`; administrators may extend it with the JSON-array environment variable `AI_ALLOWED_MODELS`. Only configured models are offered. Reply length and model settings affect AI requests. English and Simplified Chinese interface copy and commands are supported; email content is not translated. Reduced motion is enabled when either the user or operating system requests it. Desktop launcher preferences remain separate from mailbox preferences.
+
+Run `npm run test:browser` after `npm run build` and `npx playwright install chromium` for fixture-based desktop/320px keyboard and axe checks. Set `BROWSER_CHANNEL=msedge` or `chrome` to use an installed browser when the bundled runtime cannot capture audio. The tests use a synthetic microphone and intercepted provider responses; they do not establish real cloud transcription, physical microphone quality, screen-reader conformance, or macOS/Linux compatibility.
+
+The authenticated inbox contains only synchronized provider data. Gmail synchronization is paginated and recoverable, HTML is sanitized and isolated from the application document, and sending requires a final review plus an idempotency key. Extracted events open an editable confirmation dialog before creating an event in the primary Google Calendar. Sent mail is fetched separately from the inbox cache.
 
 ## Quick Start
 
@@ -33,11 +50,11 @@ npm ci
 npm run desktop
 ```
 
-`npm ci` automatically creates the ignored repository `.venv` and installs `backend/requirements.txt`. Source start, test, and packaging commands repeat this check and install only when the environment is missing or the requirements file changed. If Python is not installed, setup stops with an actionable message; it does not make system-wide changes. Packaged desktop builds launch their bundled standalone backend and do not require Node.js or Python on the target machine. Google and OpenAI buttons remain unavailable until the relevant server-side credentials are supplied. Register `${APP_BASE_URL}/api/v1/auth/google/callback` with Google. RevoMail requests the `gmail.modify` scope so that reading an email in RevoMail also marks it read in Gmail, and `gmail.send` so it can send replies; accounts connected earlier with read-only access must use Reconnect in Settings once.
+`npm ci` automatically creates the ignored repository `.venv` and installs `backend/requirements.txt`. Source start, test, and packaging commands repeat this check and install only when the environment is missing or the requirements file changed. If Python is not installed, setup stops with an actionable message; it does not make system-wide changes. Packaged desktop builds launch their bundled standalone backend and do not require Node.js or Python on the target machine. Google and OpenAI buttons remain unavailable until the relevant server-side credentials are supplied. Register `${APP_BASE_URL}/api/v1/auth/google/callback` with Google. RevoMail requests the `gmail.modify` scope so that reading an email in RevoMail also marks it read in Gmail; accounts connected earlier with read-only access must use Reconnect in Settings once.
 
 On Windows, contributors can instead double-click the root-level `RevoMail.cmd`. It checks for Node.js and npm, compares the current `package-lock.json` with the installed Node environment, runs `npm ci` when dependencies are missing or stale (preparing the Python environment through the npm post-install hook), builds the frontend, and opens Electron. Node.js LTS and Python 3.11 or newer are the only source-development prerequisites. No prebuilt executable is committed; `RevoMail.cmd` is the one-click source launcher.
 
-The standalone-backend build keeps the Gmail v1 discovery definition and removes the hundreds of unrelated Google API discovery documents bundled by the generic client library. This keeps the packaged backend compact without removing any currently supported provider behavior.
+The standalone-backend build keeps the Gmail v1 and OAuth2 v2 profile discovery definitions and removes the hundreds of unrelated Google API discovery documents bundled by the generic client library. This keeps the packaged backend compact without breaking Gmail operations or the Google sign-in callback.
 
 Desktop packaging includes only the English and Simplified Chinese Electron locales, the active desktop/runtime files, and the two Node packages used by the Electron main process. Legacy Node backend sources and build-time frontend dependencies remain in the repository but are not copied into the packaged runtime.
 
@@ -82,11 +99,16 @@ Supported runtime variables:
 | `TOKEN_ENCRYPTION_KEY` | Auto-generated | Fernet key for stored provider credentials; optional, generated and stored in `data/revomail-server.key` on first startup |
 | `JOB_LEASE_SECONDS` | `60` | Lease duration before an interrupted job can be recovered |
 | `JOB_MAX_ATTEMPTS` | `3` | Maximum attempts before a recovered job is marked failed |
+| `MAIL_SEND_LIMIT_PER_MINUTE` | `10` | Per-user confirmed-send attempt limit |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Empty | Google OAuth application credentials |
 | `GOOGLE_REDIRECT_URI` | `${APP_BASE_URL}/api/v1/auth/google/callback` | Registered Google callback override |
-| `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET` | Empty | Microsoft OAuth application credentials |
 | `OPENAI_API_KEY` | Empty | OpenAI server-side API key |
 | `OPENAI_MODEL` | `gpt-4o` | OpenAI model used by the merged AI service |
+| `SPEECH_MODEL`, `SPEECH_API_URL` | `gpt-transcribe`, OpenAI transcription endpoint | Server-side speech-to-text adapter |
+| `SPEECH_MAX_SECONDS`, `SPEECH_MAX_BYTES` | `60`, `10485760` | Client duration contract and server upload limit |
+| `SPEECH_LIMIT_PER_MINUTE`, `SPEECH_TIMEOUT_SECONDS` | `6`, `30` | Per-user process-local transcription limit and provider timeout |
+| `TTS_MODEL`, `TTS_API_URL`, `TTS_VOICE` | `gpt-4o-mini-tts`, OpenAI speech endpoint, `alloy` | Server-side text-to-speech adapter and deployment-level voice |
+| `TTS_MAX_CHARS`, `TTS_LIMIT_PER_MINUTE`, `TTS_TIMEOUT_SECONDS` | `4096`, `12`, `30` | Per-segment synthesis limits and provider timeout |
 
 Process variables take precedence over the ignored root `.env`, followed by code defaults. Production startup rejects an insecure public URL. `SECRET_KEY` and `TOKEN_ENCRYPTION_KEY` are optional: when empty, RevoMail generates both on first startup and stores them in the ignored `data/revomail-server.key`, so sessions and encrypted credentials stay stable across restarts without manual key configuration. Electron supplies its private database and encryption-key paths under `userData`. Real `.env` files are ignored and must never be committed.
 
@@ -142,7 +164,7 @@ RevoMail/
 |   |-- README.md              # Backend layering and implementation rules
 |   |-- app/                   # Active FastAPI application
 |   |   |-- routers/           # HTTP transport and validation
-|   |   |-- services/          # Gmail, OAuth, and AI use cases
+|   |   |-- services/          # Mailbox synchronization, Gmail, OAuth, and AI use cases
 |   |   |-- config.py          # Typed environment configuration
 |   |   |-- persistence.py     # SQLite migrations, sessions, and credentials
 |   |   |-- jobs.py            # Recoverable asynchronous-job foundation
@@ -171,7 +193,7 @@ Backend dependency rules:
 1. Routes and controllers handle HTTP concerns only.
 2. Services implement application use cases and the human-confirmation workflow.
 3. Domain code contains provider-independent business rules.
-4. Providers isolate Gmail, Microsoft Graph, LLM, calendar, and speech SDKs.
+4. Providers isolate Gmail, LLM, calendar, and speech SDKs.
 5. Repositories isolate persistence.
 6. Shared contracts define the frontend/backend boundary without importing provider SDKs.
 
@@ -188,3 +210,11 @@ Before coding:
 5. Run validation proportional to the change and report anything not verified.
 
 Do not mark mocked UI behavior as a completed production integration. The full requirements, priorities, out-of-scope items, and MVP definition of done are maintained in [todo.md](todo.md).
+
+## Main integration: Calendar, Sent, and guided drafts
+
+Enable Google Calendar API in the same test project as Gmail, then reconnect existing accounts to grant the least-privilege `calendar.events` scope. Extraction does not create events: review the title, date, time, location and displayed local time zone, then explicitly confirm. Missing or ambiguous dates require correction. Unknown provider outcomes must be checked in Google Calendar before another attempt; the application retains the request key across dialog retries.
+
+Reply and compose views accept instructions and can revise existing drafts. Model and reply length come from persisted account settings. Sending always uses a separate final confirmation. Sent mail has independent pagination and does not contaminate the inbox cache. The desktop backend includes Calendar discovery documents and the pinned tzdata package for Windows time-zone support.
+
+Run `npm run test:browser` for fixture-based browser and axe checks. On this Windows host use `$env:BROWSER_CHANNEL='msedge'` for synthetic media capture. No test uses personal mailbox contents. Provider OAuth, real Calendar creation, cloud transcription and physical microphone checks remain unverified without a dedicated test account.

@@ -23,8 +23,7 @@ REQUESTED_SCOPE = (
     "openid https://www.googleapis.com/auth/userinfo.email "
     "https://www.googleapis.com/auth/userinfo.profile "
     "https://www.googleapis.com/auth/gmail.modify "
-    "https://www.googleapis.com/auth/gmail.send "
-    "https://www.googleapis.com/auth/calendar"
+    "https://www.googleapis.com/auth/gmail.send"
 )
 
 # What Google actually sends back in the callback query string in this bug report: normalised

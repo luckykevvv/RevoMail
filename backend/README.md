@@ -2,7 +2,7 @@
 
 FastAPI is RevoMail's active HTTP backend. It serves the built Vite frontend and exposes the same-origin `/api/v1` contract used by the retained Module 1 account UI. SQLite is the active persistence layer for server-side sessions, encrypted credentials, OAuth transactions, user/account records, settings, tasks, audits, jobs, and idempotency keys.
 
-Implemented Python paths include Google OAuth, session bootstrap, connected-account actions, Gmail inbox/message reads, and OpenAI-backed summary, extraction, and reply-draft endpoints. Microsoft remains pending. Real Google authorization initiation has been verified, while callback exchange, Gmail, refresh, revocation, and OpenAI calls have not yet completed test-account verification; automated tests use local fakes.
+Implemented Python paths include Google OAuth, session bootstrap, connected-account actions, recoverable Gmail full/history synchronization through `/api/v1/emails`, cached search and reading, Gmail-backed unread/starred changes, safe HTML handling, confirmed idempotent sending, and OpenAI-backed summary, extraction, and reply drafts. The current MVP is Gmail-only and single-user. Real Google authorization initiation has been verified, while Gmail synchronization, mutation, and sending still require the dedicated provider test account; automated tests use sanitized local fakes.
 
 ## Layout
 
@@ -10,11 +10,11 @@ Implemented Python paths include Google OAuth, session bootstrap, connected-acco
 | --- | --- |
 | `app/config.py` | Root `.env` loading and runtime configuration |
 | `app/main.py` | FastAPI application, error mapping, routes, and static frontend |
-| `app/persistence.py` | SQLite migrations, encrypted credentials, sessions, and repositories |
+| `app/persistence.py`, `app/mailbox.py` | SQLite migrations, encrypted credentials/content, sessions, mailbox cache, and idempotency |
 | `app/jobs.py` | Lease-based recoverable job foundation |
 | `app/contracts.py` | Provider-neutral v1 request and response models |
 | `app/routers/` | Authentication, accounts, Gmail, AI, and health HTTP endpoints |
-| `app/services/` | Gmail parsing and OpenAI operations |
+| `app/services/` | Gmail adapter, recoverable mailbox synchronization, parsing, and OpenAI operations |
 | `python_tests/` | OAuth, account-contract, Gmail, AI, and content tests |
 | `requirements.txt` | Locked direct Python dependencies |
 | `run.py` | Stable production entry point used by npm, PM2, and Electron |

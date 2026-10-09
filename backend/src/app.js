@@ -70,24 +70,24 @@ export function createApp({ authService, config, distPath, healthCheck = async (
     } catch (error) { next(error); }
   });
 
-  app.get("/api/v1/auth/:provider/start", async (request, response, next) => {
+  app.get("/api/v1/auth/google/start", async (request, response, next) => {
     try {
-      const url = await authService.beginAuthorization(request.params.provider, request.query.returnTo);
+      const url = await authService.beginAuthorization("google", request.query.returnTo);
       response.redirect(302, url);
     } catch (error) { next(error); }
   });
 
-  app.get("/api/v1/auth/:provider/callback", async (request, response) => {
+  app.get("/api/v1/auth/google/callback", async (request, response) => {
     try {
       if (request.query.error) throw new AppError("AUTHORIZATION_DENIED", "Authorization was cancelled or denied.", 400, true);
-      const result = await authService.completeAuthorization(request.params.provider, request.query);
+      const result = await authService.completeAuthorization("google", request.query);
       response.cookie(SESSION_COOKIE, result.sessionToken, cookieOptions);
       const destination = new URL(result.returnTo, config.APP_BASE_URL);
       destination.searchParams.set("auth", "success");
       response.redirect(302, `${destination.pathname}${destination.search}${destination.hash}`);
     } catch (error) {
       const normalized = error instanceof AppError ? error : new AppError("AUTHORIZATION_FAILED", "Sign-in could not be completed. Please try again.", 502, true);
-      logger.warn?.({ event: "oauth_callback_failed", provider: request.params.provider, code: normalized.code, correlationId: request.correlationId });
+      logger.warn?.({ event: "oauth_callback_failed", provider: "google", code: normalized.code, correlationId: request.correlationId });
       response.redirect(302, `/?authError=${encodeURIComponent(normalized.code)}`);
     }
   });
@@ -109,7 +109,7 @@ export function createApp({ authService, config, distPath, healthCheck = async (
     try {
       const account = (await authService.accounts(request.session.userId)).find((item) => item.id === request.params.id);
       if (!account) throw new AppError("ACCOUNT_NOT_FOUND", "The connected account was not found.", 404, false);
-      const authorizationUrl = await authService.beginAuthorization(account.provider, "/?view=settings", "consent");
+      const authorizationUrl = await authService.beginAuthorization("google", "/?view=settings", "consent");
       response.json({ authorizationUrl });
     } catch (error) { next(error); }
   });

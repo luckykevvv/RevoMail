@@ -1,6 +1,6 @@
 """
-Run an action with a side effect outside RevoMail (sending mail, creating a calendar event) at most once
-per idempotency key, and leave an audit record. Used by the email-send and calendar-create routes.
+Create a calendar event at most once per idempotency key and leave an audit record.
+Email sending retains its existing mailbox repository and send:gmail namespace.
 """
 
 import json
@@ -127,6 +127,8 @@ async def execute_once(
                 f"The {config.api_name} is not enabled for RevoMail's Google Cloud project.{where}",
                 403,
             ) from exc
+        if status == 429 or reasons & {"rateLimitExceeded", "userRateLimitExceeded"}:
+            raise ProviderError("CALENDAR_RATE_LIMITED", "Google Calendar is rate limiting requests. Wait before trying again.", 429, True) from exc
         if status == 403:
             raise AppError("INSUFFICIENT_PERMISSIONS", config.permission_message, 403) from exc
         if status == 404 and config.not_found:

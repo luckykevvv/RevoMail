@@ -46,7 +46,7 @@ class IdempotencyRepository:
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
-                connection.execute('DELETE FROM "IdempotencyKey" WHERE "expiresAt"<=?', (now.isoformat(),))
+                connection.execute('DELETE FROM "IdempotencyKey" WHERE "expiresAt"<=? AND "operation"=?', (now.isoformat(), operation))
                 row = connection.execute(
                     'SELECT "requestHash", "response", "status", "createdAt" FROM "IdempotencyKey" WHERE "key"=? AND "userId"=? AND "operation"=?',
                     (key, user_id, operation),

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Request
 
 from backend.app.contracts import CalendarMutationRequest
-from backend.app.dependencies import require_session, require_tokens
+from backend.app.dependencies import require_csrf, require_tokens
 from backend.app.errors import AppError
 from backend.app.idempotency import request_hash
 from backend.app.once import OnceConfig, execute_once
@@ -29,7 +29,7 @@ CREATE_ONCE = OnceConfig(
 async def create_event(
     payload: CalendarMutationRequest,
     request: Request,
-    session=Depends(require_session),
+    session=Depends(require_csrf),
     tokens: dict = Depends(require_tokens),
 ):
     """

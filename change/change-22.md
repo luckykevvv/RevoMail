@@ -1,34 +1,59 @@
-# Add extracted events to Google Calendar
+# Integrate the Module 7 branch baseline
 
-Date: 2026-10-04
+Date: 2026-09-28
 
 ## Task Scope
 
-Joel asked that an event extracted from an email can be added to Google Calendar from a button, creating a real calendar event.
+Create `module-7-voice-settings-accessibility` from `origin/email_classification` and integrate the newer `origin/main` mailbox, sending, security, and navigation-performance work without losing AI priority classification or the real Google OAuth scope-normalisation fix.
 
 ## Changes
 
-- `backend/app/services/calendar.py` (new): validates and builds a Google Calendar event (title, IANA time zone, local start/end, all-day with Google's exclusive end date, 1-hour default, end after start) and inserts it on the primary calendar. `backend/app/routers/calendar.py` (new): `POST /api/v1/calendar/events`, which requires `confirmed: true` and an idempotency key. Registered in `backend/app/main.py`; the reserved `CalendarMutationRequest` in `backend/app/contracts.py` was filled in. No new Google scope was needed (`calendar` was already requested) and no migration.
-- `backend/app/once.py` (new): the "do this at most once and audit it" logic that the email-send route had inline (idempotency check, replay, duplicate/in-progress/unknown-outcome handling, Gmail/Google error mapping, audit record) is now shared. `backend/app/routers/emails.py` was refactored to use it with unchanged behaviour and error codes; the existing email-send tests pass unchanged. `backend/app/services/google_credentials.py` (new) holds the credential building that `gmail.py` previously did inline.
-- `backend/app/services/ai.py`, `backend/app/routers/ai.py`: extraction now receives the email's sent date and returns each event's `start`, `end` and `all_day` in addition to the original text fields. Values are only kept when they are real dates in the expected format; the prompt says to use null when unsure and treats the email as untrusted. The extraction JSON is otherwise unchanged.
-- `src/main.js`, `src/mailbox-state.js`, `src/style.css`: each extracted event in "Key details" gets an "Add to Google Calendar" button. It opens a dialog pre-filled from the extraction (title, date, start/end, all day, location, shows the time zone) that the user can edit; nothing is created until "Add to calendar" is pressed. Missing date or start time is flagged in the dialog instead of guessed. A failed attempt keeps the dialog open and a retry reuses the same idempotency key, so a lost response cannot create a duplicate. After success the event shows "Added to Google Calendar" with an Open link, and that state survives re-running the extraction on the same email (events are matched by content, not list position). The time zone is the browser's.
-- Tests: `backend/python_tests/test_calendar.py` (new, 36 cases), plus new cases in `src/mailbox-state.test.js`. Docs: `docs/api/v1-contracts.md`, `README.md`.
+- Created the Module 7 working branch from `origin/email_classification`.
+- Integrated `origin/main` and resolved the overlapping frontend, mailbox, OAuth, API-test, documentation, and task-history changes.
+- Retained the latest mailbox cache, synchronization, safe HTML rendering, confirmed idempotent sending, CSRF checks, request cancellation, persistent application shell, and repeated-navigation performance fixes from `origin/main`.
+- Retained the AI High/Medium/Low classification endpoint, inbox badges and filters, classification tests, and Google OAuth relaxed scope handling from `email_classification`.
+- Diagnosed the real Google callback failure to the token-exchange connection. Its exception chain ended in `PermissionError`, proving that the restricted launch environment denied the backend's outbound Google connection rather than Google rejecting the OAuth configuration. Added bounded connect-only retries, a 15-second timeout, stage-specific safe diagnostics, and an actionable `AUTHORIZATION_NETWORK_FAILED` UI message; read retries remain disabled so an authorization code is never replayed after an uncertain response.
+- Disabled Uvicorn request-target access logging because an OAuth callback URL contains a short-lived authorization code. Application diagnostics now retain only a correlation ID, request stage, and exception class chain.
+- Separated the initial mailbox synchronisation placeholder from the completed empty-mailbox state. A zero-message mailbox now announces `Synchronising your inbox…` while the provider job is active and displays `Your inbox is empty` only after synchronisation finishes.
+- Formatted provider timestamps with the browser's local timezone, kept list dates on one line, and retained the original ISO value in semantic `datetime` attributes.
+- Upgraded formatted-email rendering to preserve allowlisted inline CSS, HTTPS images, safe links, and raster CID images up to 2 MB while continuing to strip scripts, active embeds, SVG, dangerous URLs, and unsupported CSS. The sandboxed message frame uses a restrictive CSP and no-referrer policy.
+- Added a safe one-time provider refresh when opening HTML cached by the earlier destructive sanitiser, then stores a version marker so subsequent opens remain cache-only. Cached content remains readable if that refresh cannot reach Gmail.
+- Fixed the Desktop control room falsely reporting `FAILED` when a healthy RevoMail backend already owns the configured port. Startup now verifies the endpoint identity before spawning, reuses an existing `revomail-api` without claiming its process, labels it `Existing service`, and keeps stop/restart controls disabled for an externally managed process. Unrelated HTTP services are never adopted.
+- Preserved both branches' colliding task records by keeping the classification record at `change/change-16.md` and archiving the main Module 3 and both active branch records as `change/change-19.md` through `change/change-21.md`.
+
+## Reason
+
+Module 7 must build on the more advanced email-classification branch, while the latest main branch contains the fix for progressive UI blocking after repeatedly opening different emails and newer mailbox/security behavior required by the project.
 
 ## Key Commands
 
-- `python -m pytest` and `node --test src/mailbox-state.test.js` in a throwaway Linux copy of the repository (outside the project); Vite plus headless Chromium against a mocked API with the browser time zone set to Australia/Melbourne.
+- `git fetch origin email_classification`
+- `git switch -c module-7-voice-settings-accessibility origin/email_classification`
+- `git merge --no-commit --no-ff origin/main`
+- `git commit -m "merge: establish module 7 baseline"`
+- `git push -u origin module-7-voice-settings-accessibility`
+- `npm test`
+- `npm run build`
+- `npm run setup`
+- `npm run desktop:dev`
+- `npm run start`
+- `Invoke-RestMethod http://127.0.0.1:4173/api/v1/health`
+- `Invoke-WebRequest http://127.0.0.1:4173/`
+- Real Google sign-in retry with sanitized OAuth callback logging
 
 ## Validation
 
-- 121 backend tests passed (Python 3.10 in the throwaway environment; project targets 3.11+), covering event building and validation, extraction normalisation, confirmation requirement, idempotent replay, key reuse, validation failures releasing the key, 403 mapping, unknown-outcome locking, and that event details are not stored in the database.
-- 16 JS tests passed with a minimal stand-in for Vitest (not the real runner).
-- Headless-browser run against a mock API passed: one button per event, dialog pre-fill, cancel creates nothing, failed attempt then retry with the same key, edited values and the browser's time zone in the payload, all-day events, an event with no resolvable date blocked until the user supplies it, "Added" state persisting, and hostile event titles shown as text.
+- All 67 JavaScript tests passed, including regression coverage for synchronising, completed empty-mailbox, invalid-date, local-timezone, existing-service reuse, and rejection of unrelated services.
+- All 57 Python tests passed, including safe email CSS/HTTPS-image handling and CID-image embedding.
+- The Vite production build passed.
+- The production FastAPI process started successfully; `/api/v1/health` returned `ok` with the database check `ok`, and `/` returned the built frontend with HTTP 200.
+- The real Electron development launcher started while the existing backend owned port 4173. It reused PID 29264 without spawning another backend, opened live connections from its renderer, and left the original listener healthy.
+- A real Google consent flow reached the callback with all requested scopes. Stage-specific logging identified `ConnectionError > MaxRetryError > NewConnectionError > PermissionError` during token exchange in the restricted process. Credential-free probes reached Google's token endpoint, and the same backend was restarted with outbound-network permission for the final interactive retry.
+- The contributor confirmed that real Google login and Gmail message reading succeeded after the backend was restarted with outbound-network permission.
+- `git diff --cached --check` passed before publication.
 
 ## Known Issues and Remaining Work
 
-- Not run against real Google Calendar or OpenAI (no network from the build environment). How reliably the AI resolves "tomorrow" or "next Friday" from real emails is unverified, which is why the dialog always shows the values for the user to check.
-- Timed events are single-day: an extracted event that ends on a later date is pre-filled with no end time (1 hour by default). Events have no attendees, reminders or recurrence. The user's primary calendar is always used.
-- The time zone comes from the browser, not from the email, so an event stated in another zone needs its time adjusted in the dialog.
-- Accounts connected before the `calendar` scope was requested get "Reconnect your Google account in Settings" (403) until reconnected.
-- The demo "Tasks & events" page (static sample data) still has its old fake "Add to calendar" button; it is unrelated to extracted events.
-- Not run: `npm test`, `npm run build`. Rebuild and restart the backend to pick up the changes.
+- OpenAI and microphone behavior are not exercised by this baseline merge.
+- Repeated email navigation is covered by the imported regression tests and implementation review; a long real-Gmail stress walkthrough was not performed in this task.
+- Module 7 voice, settings, and accessibility implementation has not started; this task establishes its safe baseline.

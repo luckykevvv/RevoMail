@@ -1,6 +1,6 @@
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
@@ -10,7 +10,16 @@ from backend.app.services import ai as ai_service
 from backend.app.services import gmail as gmail_service
 
 
-router = APIRouter()
+async def configure_preferences(request: Request, session=Depends(require_session)):
+    preferences = request.app.state.preferences.get(session.user["id"])
+    token = ai_service.request_preferences.set({**preferences, "apiKey": request.app.state.settings.openai_api_key})
+    try:
+        yield
+    finally:
+        ai_service.request_preferences.reset(token)
+
+
+router = APIRouter(dependencies=[Depends(configure_preferences)])
 
 
 class EmailRef(BaseModel):

@@ -96,16 +96,27 @@ class Settings(BaseSettings):
     database_url: str = "file:./data/revomail.db"
     job_lease_seconds: int = Field(default=60, ge=5, le=3600)
     job_max_attempts: int = Field(default=3, ge=1, le=20)
+    mail_send_limit_per_minute: int = Field(default=10, ge=1, le=100)
 
     google_client_id: str = ""
     google_client_secret: str = ""
     google_redirect_uri: str = ""
 
-    microsoft_client_id: str = ""
-    microsoft_client_secret: str = ""
-
     openai_api_key: str = ""
     openai_model: str = "gpt-4o"
+    ai_allowed_models: list[str] = Field(default_factory=list)
+    speech_model: str = "gpt-transcribe"
+    speech_api_url: str = "https://api.openai.com/v1/audio/transcriptions"
+    speech_max_seconds: int = Field(default=60, ge=1, le=300)
+    speech_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1024, le=25 * 1024 * 1024)
+    speech_limit_per_minute: int = Field(default=6, ge=1, le=60)
+    speech_timeout_seconds: int = Field(default=30, ge=1, le=120)
+    tts_model: str = "gpt-4o-mini-tts"
+    tts_api_url: str = "https://api.openai.com/v1/audio/speech"
+    tts_voice: str = "alloy"
+    tts_max_chars: int = Field(default=4096, ge=1, le=4096)
+    tts_limit_per_minute: int = Field(default=12, ge=1, le=120)
+    tts_timeout_seconds: int = Field(default=30, ge=1, le=120)
 
     @model_validator(mode="after")
     def validate_runtime(self):

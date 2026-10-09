@@ -6,7 +6,7 @@ event lands at the time the user confirmed regardless of the server's own time z
 """
 
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -59,7 +59,7 @@ def build_event_body(
     if not title:
         raise EventValidationError("Enter a title for the event.")
     try:
-        ZoneInfo(time_zone)
+        zone = ZoneInfo(time_zone)
     except Exception as exc:  # unknown key, empty string, path-like values…
         raise EventValidationError("The time zone is not valid.") from exc
 
@@ -77,6 +77,12 @@ def build_event_body(
         end = _parse_datetime(ends_at) if ends_at else start + DEFAULT_DURATION
         if end <= start:
             raise EventValidationError("The end time must be after the start time.")
+        for value in (start, end):
+            aware = value.replace(tzinfo=zone)
+            if aware.astimezone(timezone.utc).astimezone(zone).replace(tzinfo=None) != value:
+                raise EventValidationError("This local time does not exist because of daylight saving. Choose another time.")
+            if aware.utcoffset() != value.replace(tzinfo=zone, fold=1).utcoffset():
+                raise EventValidationError("This local time is ambiguous because of daylight saving. Choose another time.")
         body["start"] = {"dateTime": start.isoformat(timespec="seconds"), "timeZone": time_zone}
         body["end"] = {"dateTime": end.isoformat(timespec="seconds"), "timeZone": time_zone}
     if location.strip():

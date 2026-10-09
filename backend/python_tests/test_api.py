@@ -11,6 +11,8 @@ from backend.app.services.oauth_transactions import OAuthTransactionStore, oauth
 
 
 class FakeFlow:
+    authorization_options = None
+
     def __init__(self):
         self.credentials = SimpleNamespace(
             token="access-token",
@@ -21,15 +23,16 @@ class FakeFlow:
             scopes=list(auth.SCOPES),
         )
 
-    def authorization_url(self, **_kwargs):
+    def authorization_url(self, **kwargs):
+        type(self).authorization_options = kwargs
         return "https://accounts.example/authorize?state=test-state", "test-state"
 
-    def fetch_token(self, code):
+    def fetch_token(self, code, **_kwargs):
         assert code == "valid-code"
 
 
 class FakeUserInfoRequest:
-    def execute(self):
+    def execute(self, **_kwargs):
         return {
             "id": "user-1",
             "email": "tester@example.com",
@@ -49,7 +52,7 @@ class FakeOAuthService:
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
     oauth_transactions.clear()
-    monkeypatch.setattr(auth, "_providers", lambda: {"google": True, "microsoft": False})
+    monkeypatch.setattr(auth, "_providers", lambda: {"google": True})
     monkeypatch.setattr(auth, "_build_flow", FakeFlow)
     monkeypatch.setattr(auth, "build", lambda *_args, **_kwargs: FakeOAuthService())
     test_settings = Settings(
@@ -79,7 +82,27 @@ def test_health_and_signed_out_session(client):
     assert health.headers["x-correlation-id"]
     session = client.get("/api/v1/auth/session").json()
     assert session["authenticated"] is False
-    assert session["providers"] == {"google": True, "microsoft": False}
+    assert session["providers"] == {"google": True}
+
+
+def test_google_authorization_does_not_merge_legacy_grants(client):
+    FakeFlow.authorization_options = None
+    response = client.get("/api/v1/auth/google/start", follow_redirects=False)
+    assert response.status_code == 307
+    assert FakeFlow.authorization_options == {"access_type": "offline", "prompt": "consent"}
+
+
+def test_google_flow_retries_connect_failures_without_read_retries(monkeypatch):
+    mounted = {}
+    fake_flow = SimpleNamespace(oauth2session=SimpleNamespace(mount=lambda prefix, adapter: mounted.update({prefix: adapter})))
+    monkeypatch.setattr(auth.Flow, "from_client_config", lambda **_kwargs: fake_flow)
+
+    assert auth._build_flow() is fake_flow
+    retry = mounted["https://"].max_retries
+    assert retry.connect == 2
+    assert retry.read == 0
+    assert retry.status == 0
+    assert "POST" in retry.allowed_methods
 
 
 def test_google_callback_preserves_account_ui_contract(client):
@@ -101,10 +124,12 @@ def test_google_callback_preserves_account_ui_contract(client):
 
 def test_disconnect_and_logout(client):
     authenticate(client)
+    csrf = client.get("/api/v1/auth/session").json()["csrfToken"]
+    headers = {"X-CSRF-Token": csrf}
     account_id = client.get("/api/v1/accounts").json()["accounts"][0]["id"]
-    assert client.delete(f"/api/v1/accounts/{account_id}").status_code == 204
+    assert client.delete(f"/api/v1/accounts/{account_id}", headers=headers).status_code == 204
     assert client.get("/api/v1/accounts").json() == {"accounts": []}
-    assert client.post("/api/v1/auth/logout").status_code == 204
+    assert client.post("/api/v1/auth/logout", headers=headers).status_code == 204
     assert client.get("/api/v1/auth/session").json()["authenticated"] is False
 
 
@@ -112,14 +137,13 @@ def test_gmail_and_ai_routes_use_authenticated_provider(client, monkeypatch):
     from backend.app.routers import ai, emails
 
     authenticate(client)
-    monkeypatch.setattr(
-        emails.gmail_service,
-        "list_messages",
-        lambda _tokens, _max, _page, _label: {
-            "messages": [{"id": "gmail-1", "subject": "Project update"}],
-            "next_page_token": None,
-        },
-    )
+    account_id = client.get("/api/v1/accounts").json()["accounts"][0]["id"]
+    client.app.state.mailbox_repository.upsert_messages(account_id, [{
+        "id": "gmail-1", "threadId": "thread-1", "historyId": "10", "sender": "sender@example.com",
+        "recipients": ["tester@example.com"], "subject": "Project update", "receivedAt": "2026-08-20T00:00:00+00:00",
+        "preview": "The meeting is tomorrow.", "unread": True, "starred": False, "category": "Primary",
+        "attachments": [], "bodyText": "The meeting is tomorrow at ten.", "bodyHtmlSafe": "",
+    }])
     monkeypatch.setattr(
         ai.gmail_service,
         "get_message",
@@ -144,18 +168,22 @@ def test_provider_error_uses_safe_stable_contract(client, monkeypatch):
     from backend.app.routers import emails
 
     authenticate(client)
-    monkeypatch.setattr(
-        emails.gmail_service,
-        "list_messages",
-        lambda *_args: (_ for _ in ()).throw(RuntimeError("fixture-access-token private detail")),
-    )
-    response = client.get("/api/v1/emails", headers={"X-Correlation-ID": "fixture-correlation"})
+    class FailingAdapter:
+        def __init__(self, _tokens):
+            pass
+
+        def list_messages(self, *_args):
+            from backend.app.services.gmail import MailProviderError
+            raise MailProviderError("fixture-access-token private detail")
+
+    monkeypatch.setattr(emails, "GmailAdapter", FailingAdapter)
+    response = client.get("/api/v1/emails?query=fixture", headers={"X-Correlation-ID": "fixture-correlation"})
     assert response.status_code == 502
     assert response.headers["x-correlation-id"] == "fixture-correlation"
     assert response.json() == {
         "error": {
-            "code": "EMAIL_PROVIDER_FAILED",
-            "message": "The mailbox provider could not complete the request.",
+            "code": "PROVIDER_FAILED",
+            "message": "Gmail could not complete the request.",
             "retryable": True,
             "correlationId": "fixture-correlation",
         }
@@ -170,6 +198,22 @@ def test_invalid_state_returns_retryable_frontend_status(client):
         follow_redirects=False,
     )
     assert response.headers["location"] == "/?authError=INVALID_OAUTH_STATE"
+
+
+def test_scope_mismatch_returns_actionable_frontend_status(client, monkeypatch):
+    from backend.app.routers import auth as auth_module
+
+    class ScopeMismatchFlow(FakeFlow):
+        def fetch_token(self, code, **_kwargs):
+            raise Warning("Scope changed")
+
+    monkeypatch.setattr(auth_module, "_build_flow", ScopeMismatchFlow)
+    client.get("/api/v1/auth/google/start", follow_redirects=False)
+    response = client.get(
+        "/api/v1/auth/google/callback?code=valid-code&state=test-state",
+        follow_redirects=False,
+    )
+    assert response.headers["location"] == "/?authError=AUTHORIZATION_SCOPE_MISMATCH"
 
 
 def test_google_callback_survives_loopback_cookie_host_change(client):
@@ -236,7 +280,7 @@ def test_lost_encryption_key_returns_401_not_500(tmp_path, monkeypatch):
     from backend.app.routers import auth as auth_module
 
     oauth_transactions.clear()
-    monkeypatch.setattr(auth_module, "_providers", lambda: {"google": True, "microsoft": False})
+    monkeypatch.setattr(auth_module, "_providers", lambda: {"google": True})
     monkeypatch.setattr(auth_module, "_build_flow", FakeFlow)
     monkeypatch.setattr(auth_module, "build", lambda *_args, **_kwargs: FakeOAuthService())
     database_url = f"file:{(tmp_path / 'lost-key.db').as_posix()}"
@@ -318,51 +362,6 @@ def test_classify_provider_failure_uses_safe_error(client, monkeypatch):
     assert "secret-key" not in response.text
 
 
-def _http_error(status):
-    import httplib2
-    from googleapiclient.errors import HttpError
-
-    return HttpError(httplib2.Response({"status": status}), b'{"error": {"message": "provider detail"}}')
-
-
-def test_mark_read_route_updates_gmail(client, monkeypatch):
-    from backend.app.routers import emails
-
-    authenticate(client)
-    calls = []
-    monkeypatch.setattr(emails.gmail_service, "mark_read", lambda _tokens, message_id: calls.append(message_id) or {"id": message_id, "unread": False})
-    response = client.post("/api/v1/emails/gmail-1/read")
-    assert response.status_code == 200
-    assert response.json() == {"id": "gmail-1", "unread": False}
-    assert calls == ["gmail-1"]
-
-
-def test_mark_read_route_requires_a_session(client):
-    assert client.post("/api/v1/emails/gmail-1/read").status_code == 401
-
-
-def test_mark_read_without_modify_scope_asks_user_to_reconnect(client, monkeypatch):
-    from backend.app.routers import emails
-
-    authenticate(client)
-    monkeypatch.setattr(emails.gmail_service, "mark_read", lambda *_args: (_ for _ in ()).throw(_http_error(403)))
-    response = client.post("/api/v1/emails/gmail-1/read")
-    assert response.status_code == 403
-    error = response.json()["error"]
-    assert error["code"] == "INSUFFICIENT_PERMISSIONS" and error["retryable"] is False
-    assert "Reconnect" in error["message"] and "provider detail" not in response.text
-
-
-def test_mark_read_provider_failure_uses_safe_error(client, monkeypatch):
-    from backend.app.routers import emails
-
-    authenticate(client)
-    monkeypatch.setattr(emails.gmail_service, "mark_read", lambda *_args: (_ for _ in ()).throw(_http_error(500)))
-    response = client.post("/api/v1/emails/gmail-1/read")
-    assert response.status_code == 502
-    assert response.json()["error"]["code"] == "EMAIL_PROVIDER_FAILED" and "provider detail" not in response.text
-
-
 def test_google_callback_logs_error_type_not_message_on_failure(client, monkeypatch, caplog):
     from backend.app.routers import auth as auth_module
 
@@ -372,7 +371,7 @@ def test_google_callback_logs_error_type_not_message_on_failure(client, monkeypa
     monkeypatch.setattr(auth_module, "_build_flow", FakeFlow)
     client.get("/api/v1/auth/google/start", follow_redirects=False)
     monkeypatch.setattr(FakeFlow, "fetch_token", _boom)
-    with caplog.at_level("WARNING", logger="revomail.auth"):
+    with caplog.at_level("WARNING", logger="revomail.api.oauth"):
         response = client.get(
             "/api/v1/auth/google/callback?code=valid-code&state=test-state",
             follow_redirects=False,
@@ -380,3 +379,158 @@ def test_google_callback_logs_error_type_not_message_on_failure(client, monkeypa
     assert response.headers["location"] == "/?authError=AUTHORIZATION_FAILED"
     assert "RuntimeError" in caplog.text
     assert "super-secret-should-never-be-logged" not in caplog.text
+
+
+def test_google_callback_reports_retryable_network_failure_safely(client, monkeypatch, caplog):
+    from requests.exceptions import ConnectionError
+    from backend.app.routers import auth as auth_module
+
+    def _offline(*_args, **_kwargs):
+        raise ConnectionError("token=super-secret-should-never-be-logged")
+
+    monkeypatch.setattr(auth_module, "_build_flow", FakeFlow)
+    client.get("/api/v1/auth/google/start", follow_redirects=False)
+    monkeypatch.setattr(FakeFlow, "fetch_token", _offline)
+    with caplog.at_level("WARNING", logger="revomail.api.oauth"):
+        response = client.get(
+            "/api/v1/auth/google/callback?code=valid-code&state=test-state",
+            follow_redirects=False,
+        )
+    assert response.headers["location"] == "/?authError=AUTHORIZATION_NETWORK_FAILED"
+    assert "stage=token_exchange" in caplog.text
+    assert "ConnectionError" in caplog.text
+    assert "super-secret-should-never-be-logged" not in caplog.text
+
+
+def test_google_callback_retries_and_reports_userinfo_network_failure(client, monkeypatch, caplog):
+    from requests.exceptions import ConnectionError
+    from backend.app.routers import auth as auth_module
+
+    class OfflineUserInfoRequest:
+        def execute(self, **kwargs):
+            assert kwargs == {"num_retries": 2}
+            raise ConnectionError("token=super-secret-should-never-be-logged")
+
+    class OfflineOAuthService:
+        def userinfo(self):
+            return self
+
+        def get(self):
+            return OfflineUserInfoRequest()
+
+    monkeypatch.setattr(auth_module, "build", lambda *_args, **_kwargs: OfflineOAuthService())
+    client.get("/api/v1/auth/google/start", follow_redirects=False)
+    with caplog.at_level("WARNING", logger="revomail.api.oauth"):
+        response = client.get(
+            "/api/v1/auth/google/callback?code=valid-code&state=test-state",
+            follow_redirects=False,
+        )
+    assert response.headers["location"] == "/?authError=AUTHORIZATION_NETWORK_FAILED"
+    assert "stage=userinfo" in caplog.text
+    assert "ConnectionError" in caplog.text
+    assert "super-secret-should-never-be-logged" not in caplog.text
+
+
+def test_single_gmail_api_and_idempotent_confirmed_send(client, monkeypatch):
+    from backend.app.routers import emails
+
+    authenticate(client)
+    session = client.get("/api/v1/auth/session").json()
+    account_id = client.get("/api/v1/accounts").json()["accounts"][0]["id"]
+    csrf_headers = {"X-CSRF-Token": session["csrfToken"]}
+    message = {
+        "id": "gmail-1", "threadId": "thread-1", "historyId": "10", "sender": "sender@example.com",
+        "recipients": ["tester@example.com"], "subject": "Project update", "receivedAt": "2026-08-20T00:00:00+00:00",
+        "preview": "A provider-backed fixture", "unread": True, "starred": False, "category": "Primary",
+        "attachments": [], "bodyText": "Fixture body", "bodyHtmlSafe": "<!--revomail-html-v4--><p>Fixture body</p>",
+    }
+    client.app.state.mailbox_repository.upsert_messages(account_id, [message])
+    database_files = client.app.state.database.path.parent.glob(f"{client.app.state.database.path.name}*")
+    assert all(b"Fixture body" not in path.read_bytes() for path in database_files)
+
+    class FakeAdapter:
+        sent = 0
+
+        def __init__(self, _tokens):
+            pass
+
+        def modify_message(self, message_id, unread, starred):
+            assert message_id == "gmail-1"
+            return {"id": message_id, "unread": unread, "starred": starred}
+
+        def send_message(self, payload):
+            FakeAdapter.sent += 1
+            assert payload["bodyText"] == "Reviewed reply"
+            return {"providerMessageId": "sent-1", "threadId": "thread-1"}
+
+    monkeypatch.setattr(emails, "GmailAdapter", FakeAdapter)
+    page = client.get("/api/v1/emails")
+    assert page.status_code == 200
+    assert page.json()["messages"][0]["id"] == "gmail-1"
+    detail = client.get("/api/v1/emails/gmail-1").json()
+    assert detail["bodyText"] == "Fixture body"
+
+    missing_csrf = client.patch("/api/v1/emails/gmail-1", json={"starred": True})
+    assert missing_csrf.status_code == 403
+    changed = client.patch("/api/v1/emails/gmail-1", json={"starred": True}, headers=csrf_headers)
+    assert changed.status_code == 200
+    assert client.get("/api/v1/emails/gmail-1").json()["starred"] is True
+
+    send_payload = {
+        "to": ["sender@example.com"], "cc": [], "bcc": [], "subject": "Re: Project update",
+        "bodyText": "Reviewed reply", "inReplyToMessageId": "gmail-1", "confirmed": True,
+        "idempotencyKey": "fixture-idempotency-key-0001",
+    }
+    first = client.post("/api/v1/emails/send", json=send_payload, headers=csrf_headers)
+    second = client.post("/api/v1/emails/send", json=send_payload, headers=csrf_headers)
+    assert first.json()["status"] == "sent"
+    assert second.json() == first.json()
+    assert FakeAdapter.sent == 1
+
+    conflict = {**send_payload, "bodyText": "Different reviewed reply"}
+    assert client.post("/api/v1/emails/send", json=conflict, headers=csrf_headers).status_code == 409
+
+
+def test_send_requires_explicit_confirmation(client):
+    authenticate(client)
+    session = client.get("/api/v1/auth/session").json()
+    response = client.post("/api/v1/emails/send", headers={"X-CSRF-Token": session["csrfToken"]}, json={
+        "to": ["sender@example.com"], "subject": "Review", "bodyText": "Not confirmed",
+        "confirmed": False, "idempotencyKey": "fixture-idempotency-key-0002",
+    })
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "INVALID_REQUEST"
+
+
+def test_send_timeout_is_unknown_never_retried_and_is_rate_limited(client, monkeypatch):
+    from backend.app.routers import emails
+    from backend.app.services.gmail import ProviderTimeout
+
+    authenticate(client)
+    session = client.get("/api/v1/auth/session").json()
+    headers = {"X-CSRF-Token": session["csrfToken"]}
+
+    class TimeoutAdapter:
+        calls = 0
+
+        def send_message(self, _payload):
+            TimeoutAdapter.calls += 1
+            raise ProviderTimeout()
+
+    monkeypatch.setattr(emails, "GmailAdapter", lambda _tokens: TimeoutAdapter())
+    client.app.state.settings.mail_send_limit_per_minute = 1
+    payload = {
+        "to": ["sender@example.com"], "subject": "Reviewed", "bodyText": "Reviewed body", "confirmed": True,
+        "idempotencyKey": "fixture-idempotency-timeout-0001",
+    }
+    first = client.post("/api/v1/emails/send", json=payload, headers=headers)
+    second = client.post("/api/v1/emails/send", json=payload, headers=headers)
+    assert first.json()["status"] == "unknown"
+    assert second.json() == first.json()
+    assert TimeoutAdapter.calls == 1
+    database_files = client.app.state.database.path.parent.glob(f"{client.app.state.database.path.name}*")
+    assert all(b"Reviewed body" not in path.read_bytes() for path in database_files)
+
+    limited = client.post("/api/v1/emails/send", json={**payload, "idempotencyKey": "fixture-idempotency-timeout-0002"}, headers=headers)
+    assert limited.status_code == 429
+    assert limited.json()["error"]["code"] == "SEND_RATE_LIMITED"

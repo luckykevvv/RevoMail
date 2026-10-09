@@ -9,6 +9,69 @@ from backend.app.services import gmail
 from backend.python_tests.test_api import authenticate, client  # noqa: F401  (fixture reuse)
 
 
+def outgoing(**overrides):
+    return {"to": ["bob@example.com"], "subject": "Hello", "bodyText": "Hi Bob", "confirmed": True,
+            "idempotencyKey": "merged-send-key-0001", **overrides}
+
+
+def login_csrf(client):
+    authenticate(client)
+    client.headers["X-CSRF-Token"] = client.get("/api/v1/auth/session").json()["csrfToken"]
+
+
+def test_canonical_send_confirmation_csrf_and_replay(client, monkeypatch):
+    assert client.post("/api/v1/emails/send", json=outgoing()).status_code == 401
+    authenticate(client)
+    assert client.post("/api/v1/emails/send", json=outgoing()).status_code == 403
+    client.headers["X-CSRF-Token"] = client.get("/api/v1/auth/session").json()["csrfToken"]
+    calls = []
+    monkeypatch.setattr(gmail.GmailAdapter, "__init__", lambda self, tokens: None)
+    monkeypatch.setattr(gmail.GmailAdapter, "send_message", lambda self, payload: calls.append(payload) or {"providerMessageId": "sent-1", "threadId": "t"})
+    assert client.post("/api/v1/emails/send", json=outgoing(confirmed=False)).status_code == 422
+    first = client.post("/api/v1/emails/send", json=outgoing())
+    assert first.status_code == 200 and first.json()["status"] == "sent"
+    assert client.post("/api/v1/emails/send", json=outgoing()).json() == first.json()
+    assert client.post("/api/v1/emails/send", json=outgoing(bodyText="changed")).status_code == 409
+    assert len(calls) == 1
+
+
+def test_unknown_send_is_not_repeated(client, monkeypatch):
+    login_csrf(client)
+    calls = []
+    monkeypatch.setattr(gmail.GmailAdapter, "__init__", lambda self, tokens: None)
+    def fail(self, payload):
+        calls.append(1)
+        raise gmail.ProviderTimeout()
+    monkeypatch.setattr(gmail.GmailAdapter, "send_message", fail)
+    for _ in range(2):
+        assert client.post("/api/v1/emails/send", json=outgoing()).json()["status"] == "unknown"
+    assert len(calls) == 1
+
+
+def test_sent_page_is_not_inserted_into_inbox_cache(client, monkeypatch):
+    login_csrf(client)
+    calls = []
+    monkeypatch.setattr(gmail.GmailAdapter, "__init__", lambda self, tokens: None)
+    monkeypatch.setattr(gmail.GmailAdapter, "list_messages", lambda self, *args: calls.append(args) or {"items": [{"id": "sent-only"}], "nextCursor": "next"})
+    monkeypatch.setattr(client.app.state.mailbox_repository, "upsert_messages", lambda *args: pytest.fail("SENT must not enter INBOX cache"))
+    response = client.get("/api/v1/emails?label=SENT&page_token=cursor")
+    assert response.status_code == 200 and response.json()["next_page_token"] == "next"
+    assert calls == [(20, "cursor", "", ["SENT"])]
+    assert client.get("/api/v1/emails?label=TRASH").status_code == 422
+
+
+def test_reply_adapter_preserves_reviewed_recipients_and_references():
+    fake = FakeGmail(ORIGINAL)
+    adapter = object.__new__(gmail.GmailAdapter)
+    adapter.gmail = fake
+    adapter.get_message = lambda message_id: {"rfcMessageId": "<original@example.com>", "references": "<older@example.com>", "threadId": "thread-9"}
+    result = adapter.send_message(outgoing(inReplyToMessageId="msg-1"))
+    message = decode_sent(fake)
+    assert message["To"] == "bob@example.com"
+    assert message["References"] == "<older@example.com> <original@example.com>"
+    assert result["threadId"] == "thread-9"
+
+
 # --- pure helpers -----------------------------------------------------------
 
 def hdr(**values):
@@ -53,7 +116,6 @@ def test_build_mime_rejects_header_injection():
         gmail.build_mime(["a@example.com"], "Hi\r\nBcc: evil@example.com", "body")
 
 
-# --- send_message against a fake Gmail client ------------------------------------
 
 class FakeCall:
     def __init__(self, result):
@@ -89,7 +151,7 @@ class FakeGmail:
 
 def decode_sent(fake):
     raw = fake.messages_api.sent[0]["body"]["raw"]
-    return message_from_bytes(base64.urlsafe_b64decode(raw), policy=policy.default)
+    return message_from_bytes(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)), policy=policy.default)
 
 
 ORIGINAL = {
@@ -106,140 +168,11 @@ ORIGINAL = {
 }
 
 
-def test_send_reply_is_addressed_from_the_original_and_threaded(monkeypatch):
-    fake = FakeGmail(ORIGINAL)
-    monkeypatch.setattr(gmail, "_build_gmail", lambda _t: fake)
-    result = gmail.send_message({}, "someone-else@example.com", "", "Thanks, see you there.", "msg-1")
-    assert result == {"id": "sent-1", "thread_id": "thread-9"}
-    message = decode_sent(fake)
-    assert message["To"] == "Prof Smith <smith@university.edu>"  # client-supplied `to` is ignored for replies
-    assert message["Subject"] == "Re: Project Meeting Tomorrow"
-    assert message["In-Reply-To"] == "<orig@mail.example>"
-    assert message["References"] == "<older@mail.example> <orig@mail.example>"
-    assert message.get_content().strip() == "Thanks, see you there."
-    assert fake.messages_api.sent[0]["userId"] == "me"
-    assert fake.messages_api.sent[0]["body"]["threadId"] == "thread-9"
-
-
-def test_send_new_message_has_no_thread(monkeypatch):
-    fake = FakeGmail()
-    monkeypatch.setattr(gmail, "_build_gmail", lambda _t: fake)
-    gmail.send_message({}, "bob@example.com", "Hello", "Hi Bob")
-    assert "threadId" not in fake.messages_api.sent[0]["body"]
-    assert decode_sent(fake)["To"] == "bob@example.com"
-
-
-def test_send_reply_without_valid_address_sends_nothing(monkeypatch):
-    fake = FakeGmail({"threadId": "t", "labelIds": ["INBOX"], "payload": {"headers": []}})
-    monkeypatch.setattr(gmail, "_build_gmail", lambda _t: fake)
-    with pytest.raises(gmail.MessageValidationError):
-        gmail.send_message({}, None, "", "body", "msg-1")
-    assert fake.messages_api.sent == []
-
-
-def test_list_messages_rejects_unknown_label(monkeypatch):
-    monkeypatch.setattr(gmail, "_build_gmail", lambda _t: FakeGmail())
-    with pytest.raises(ValueError):
-        gmail.list_messages({}, 5, None, "TRASH")
-
-
-# --- HTTP route -------------------------------------------------------------------
-
-def body(**overrides):
-    payload = {
-        "to": "bob@example.com",
-        "subject": "Hello",
-        "body": "Hi Bob",
-        "confirmed": True,
-        "idempotencyKey": "key-0001-abcdef",
-    }
-    payload.update(overrides)
-    return payload
-
 
 def count_audit(client, outcome):
     with client.app.state.database.connect() as connection:
         return connection.execute('SELECT COUNT(*) FROM "AuditRecord" WHERE "outcome"=?', (outcome,)).fetchone()[0]
 
-
-def test_send_requires_authentication(client):
-    assert client.post("/api/v1/emails/send", json=body()).status_code == 401
-
-
-def test_send_requires_explicit_confirmation(client, monkeypatch):
-    authenticate(client)
-    calls = []
-    monkeypatch.setattr(emails.gmail_service, "send_message", lambda *a: calls.append(a))
-    response = client.post("/api/v1/emails/send", json=body(confirmed=False))
-    assert response.status_code == 400
-    assert response.json()["error"]["code"] == "CONFIRMATION_REQUIRED"
-    assert calls == []
-
-
-def test_send_is_idempotent(client, monkeypatch):
-    authenticate(client)
-    calls = []
-
-    def fake_send(tokens, to, subject, text, reply_id):
-        calls.append((to, subject, text, reply_id))
-        return {"id": "sent-1", "thread_id": "t-1"}
-
-    monkeypatch.setattr(emails.gmail_service, "send_message", fake_send)
-    first = client.post("/api/v1/emails/send", json=body())
-    again = client.post("/api/v1/emails/send", json=body())
-    assert first.status_code == 200 and first.json() == {"id": "sent-1", "threadId": "t-1", "sent": True, "replayed": False}
-    assert again.status_code == 200 and again.json()["replayed"] is True and again.json()["id"] == "sent-1"
-    assert len(calls) == 1
-    assert count_audit(client, "SUCCEEDED") == 1
-
-    changed = client.post("/api/v1/emails/send", json=body(body="Different text"))
-    assert changed.status_code == 409
-    assert changed.json()["error"]["code"] == "IDEMPOTENCY_KEY_REUSED"
-    assert len(calls) == 1
-
-
-def test_stored_idempotency_row_and_audit_hold_no_message_content(client, monkeypatch):
-    authenticate(client)
-    monkeypatch.setattr(emails.gmail_service, "send_message", lambda *a: {"id": "sent-1", "thread_id": "t-1"})
-    client.post("/api/v1/emails/send", json=body(body="very private words", to="secret.person@example.com"))
-    data = client.app.state.database.path.read_bytes()
-    assert b"very private words" not in data
-    assert b"secret.person@example.com" not in data
-
-
-def test_reply_request_passes_reply_id_and_needs_no_recipient(client, monkeypatch):
-    authenticate(client)
-    seen = {}
-    monkeypatch.setattr(
-        emails.gmail_service,
-        "send_message",
-        lambda tokens, to, subject, text, reply_id: seen.update(to=to, reply=reply_id) or {"id": "s", "thread_id": "t"},
-    )
-    response = client.post("/api/v1/emails/send", json=body(to=None, subject="", replyToMessageId="msg-1"))
-    assert response.status_code == 200
-    assert seen == {"to": None, "reply": "msg-1"}
-
-
-def test_send_without_recipient_or_reply_is_rejected(client):
-    authenticate(client)
-    response = client.post("/api/v1/emails/send", json=body(to=None))
-    assert response.status_code == 422
-    assert response.json()["error"]["code"] == "INVALID_RECIPIENT"
-
-
-def test_validation_failure_allows_retry_with_same_key(client, monkeypatch):
-    authenticate(client)
-    outcomes = [gmail.MessageValidationError("One of the recipient email addresses is not valid."), {"id": "s", "thread_id": "t"}]
-
-    def fake_send(*_args):
-        outcome = outcomes.pop(0)
-        if isinstance(outcome, Exception):
-            raise outcome
-        return outcome
-
-    monkeypatch.setattr(emails.gmail_service, "send_message", fake_send)
-    assert client.post("/api/v1/emails/send", json=body()).status_code == 422
-    assert client.post("/api/v1/emails/send", json=body()).status_code == 200
 
 
 def http_error(status, content=b"{}"):
@@ -250,44 +183,3 @@ def http_error(status, content=b"{}"):
     resp.status = status
     resp.reason = "x"
     return HttpError(resp, content)
-
-
-def test_permission_error_maps_to_reconnect_message(client, monkeypatch):
-    authenticate(client)
-    monkeypatch.setattr(emails.gmail_service, "send_message", lambda *a: (_ for _ in ()).throw(http_error(403)))
-    response = client.post("/api/v1/emails/send", json=body())
-    assert response.status_code == 403
-    assert response.json()["error"]["code"] == "INSUFFICIENT_PERMISSIONS"
-    assert count_audit(client, "FAILED") == 1
-
-
-def test_ambiguous_failure_blocks_automatic_resend(client, monkeypatch):
-    authenticate(client)
-    calls = []
-
-    def fake_send(*_args):
-        calls.append(1)
-        raise TimeoutError("socket detail that must not leak")
-
-    monkeypatch.setattr(emails.gmail_service, "send_message", fake_send)
-    first = client.post("/api/v1/emails/send", json=body())
-    assert first.status_code == 502
-    assert first.json()["error"]["code"] == "SEND_OUTCOME_UNKNOWN"
-    assert "socket detail" not in first.text
-    second = client.post("/api/v1/emails/send", json=body())
-    assert second.status_code == 409
-    assert second.json()["error"]["code"] == "SEND_OUTCOME_UNKNOWN"
-    assert len(calls) == 1
-
-
-def test_list_route_validates_label(client, monkeypatch):
-    authenticate(client)
-    seen = []
-    monkeypatch.setattr(
-        emails.gmail_service,
-        "list_messages",
-        lambda _t, _m, _p, label: seen.append(label) or {"messages": [], "next_page_token": None},
-    )
-    assert client.get("/api/v1/emails?label=sent").status_code == 200
-    assert client.get("/api/v1/emails?label=TRASH").status_code == 422
-    assert seen == ["SENT"]

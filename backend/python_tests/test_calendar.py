@@ -4,8 +4,13 @@ import pytest
 
 from backend.app.routers import calendar as calendar_router
 from backend.app.services import ai, calendar
-from backend.python_tests.test_api import authenticate, client  # noqa: F401  (fixture reuse)
+from backend.python_tests.test_api import authenticate as login, client  # noqa: F401  (fixture reuse)
 from backend.python_tests.test_send_email import count_audit, http_error
+
+
+def authenticate(client):
+    login(client)
+    client.headers["X-CSRF-Token"] = client.get("/api/v1/auth/session").json()["csrfToken"]
 
 
 # --- event body ---------------------------------------------------------------------
@@ -89,6 +94,7 @@ def run_extract(monkeypatch, payload, email_date="Mon, 28 Sep 2026 09:00:00 +100
     seen = {}
 
     def fake_chat(system, user, **_kw):
+        seen["system"] = system
         seen["user"] = user
         return payload if isinstance(payload, str) else json.dumps(payload)
 
@@ -101,6 +107,8 @@ def test_extract_keeps_valid_start_and_end_and_sends_email_date(monkeypatch):
     assert result["events"][0]["start"] == "2026-10-05T10:00" and result["events"][0]["end"] == "2026-10-05T11:00"
     assert result["events"][0]["all_day"] is False
     assert "Email sent: Mon, 28 Sep 2026 09:00:00 +1000" in seen["user"]
+    assert "A deadline alone does not turn a task into an event" in seen["system"]
+    assert "Do not duplicate the same item in both lists" in seen["system"]
 
 
 def test_extract_all_day_event_has_no_end_time(monkeypatch):
@@ -142,6 +150,44 @@ def body(**overrides):
 
 def test_calendar_requires_authentication(client):
     assert client.post("/api/v1/calendar/events", json=body()).status_code == 401
+
+
+def test_calendar_requires_csrf_before_provider_call(client, monkeypatch):
+    login(client)
+    monkeypatch.setattr(calendar_router.calendar_service, "create_event", lambda *args: pytest.fail("no provider call"))
+    assert client.post("/api/v1/calendar/events", json=body()).status_code == 403
+
+
+def test_calendar_keys_are_isolated_by_user_and_from_existing_send_records(client):
+    authenticate(client)
+    repository = client.app.state.idempotency
+    second, _ = client.app.state.auth_repository.save_authorized_account(
+        {"id": "second-test-user", "email": "second@example.com", "displayName": "Second fixture"}, "google", [], {},
+    )
+    first = client.get("/api/v1/auth/session").json()["user"]["id"]
+    assert repository.begin("same-key", first, "calendar.create", "hash").state == "new"
+    repository.complete("same-key", first, "calendar.create", {"id": "first-event"})
+    assert repository.begin("same-key", second, "calendar.create", "hash").state == "new"
+    claim = client.app.state.mailbox_repository.claim_idempotency(first, "same-key", "send:gmail", {"bodyText": "fixture"}, 10)
+    assert claim.state == "NEW"
+    assert repository.begin("same-key", first, "calendar.create", "hash").response == {"id": "first-event"}
+
+
+@pytest.mark.parametrize("start", ["2026-10-04T02:30", "2026-04-05T02:30"])
+def test_calendar_rejects_nonexistent_or_ambiguous_local_time(start):
+    with pytest.raises(calendar.EventValidationError):
+        calendar.build_event_body("DST review", start, None, "Australia/Sydney")
+
+
+def test_calendar_rate_limit_can_be_retried_with_same_key(client, monkeypatch):
+    authenticate(client)
+    def fail(*args):
+        raise http_error(429)
+    monkeypatch.setattr(calendar_router.calendar_service, "create_event", fail)
+    response = client.post("/api/v1/calendar/events", json=body())
+    assert response.status_code == 429 and response.json()["error"]["retryable"]
+    monkeypatch.setattr(calendar_router.calendar_service, "create_event", lambda *args: {"id": "event", "html_link": "https://calendar.google.com/"})
+    assert client.post("/api/v1/calendar/events", json=body()).status_code == 200
 
 
 def test_calendar_requires_explicit_confirmation(client, monkeypatch):

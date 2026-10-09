@@ -27,6 +27,7 @@ anthropic==0.37.0
 
 # HTML sanitisation (for email bodies)
 bleach==6.1.0
+tinycss2==1.4.0
 
 # Dev / testing
 pytest==8.3.3
