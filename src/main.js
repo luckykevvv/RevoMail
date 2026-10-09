@@ -162,6 +162,13 @@ function escapeHtml(value = "") {
   return String(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[character]));
 }
 
+function initialsOf(value = "") {
+  const raw = String(value);
+  const name = raw.replace(/<[^>]*>/g, " ").replace(/["']/g, "").trim();
+  const source = name || raw.replace(/[<>"']/g, "");
+  return source.split(/[\s@.]+/).filter(Boolean).slice(0, 2).map(part => part[0]).join("").toUpperCase();
+}
+
 async function api(path, options = {}) {
   const headers = { accept: "application/json", ...(options.body ? { "content-type": "application/json" } : {}), ...(state.csrfToken ? { "x-csrf-token": state.csrfToken } : {}), ...options.headers };
   const response = await fetch(path, { credentials: "same-origin", ...options, headers });
@@ -394,19 +401,21 @@ function renderExtraction(extraction, { events: showEvents = true, tasks: showTa
 }
 
 function replyView() {
+  const email = state.selectedEmail;
+  const recipients = (Array.isArray(email?.reply_to) && email.reply_to.length ? email.reply_to : [email?.sender || ""]).filter(Boolean);
   const draft = state.aiDraft;
   return `<header class="compact-header">
-    <button class="back-button" data-view="reading">${icon("arrow-left")}</button>
+    <button class="back-button" data-view="reading" aria-label="Back to email">${icon("arrow-left")}</button>
     <div><span class="eyebrow">AI generated · review before sending</span><h1>Reply draft</h1></div>
-    <button class="secondary-button" data-regenerate>${icon("refresh-cw")} Regenerate</button>
+    <button class="secondary-button" data-regenerate ${state.aiDraftLoading ? "disabled" : ""}>${icon("refresh-cw")} Regenerate</button>
   </header>
   <section class="composer-card">
-    <div class="field-row"><label>To</label><div class="input-shell">${escapeHtml((state.selectedEmail?.reply_to || [state.selectedEmail?.sender || ""]).join(", "))}</div></div>
-    <div class="field-row"><label>Subject</label><div class="input-shell">${escapeHtml(replySubject(state.selectedEmail?.subject))}</div></div>
-    ${draftInstructions("reply")}<div class="ai-draft-label"><span>${icon("sparkles")} AI generated reply</span><small>Edit as needed</small></div>
-    ${state.aiDraftLoading ? '<div class="reply-editor">Generating draft…</div>' : `<textarea aria-label="Reply draft" id="reply-text" class="reply-editor">${escapeHtml(draft)}</textarea>`}
-    <div class="tone-row"><span>Quick tone</span>${["professional", "concise", "friendly"].map((tone) => `<button class="tone-chip ${state.aiDraftTone === tone ? "active" : ""}" data-tone="${tone}">${tone[0].toUpperCase() + tone.slice(1)}</button>`).join("")}</div>
-    <div class="composer-footer"><div class="compose-tools"><button class="icon-button">${icon("paperclip")}</button><button class="icon-button">${icon("smile")}</button><button class="icon-button">${icon("image")}</button><button class="icon-button" data-voice>${icon("mic")}</button></div><div><button class="secondary-button" data-discard>Discard</button><button class="primary-button" data-send>${icon("send")} Send reply</button></div></div>
+    <div class="field-row"><label>To</label><div class="input-shell">${recipients.length ? `<span class="avatar avatar-xs">${escapeHtml(initialsOf(recipients[0]))}</span> ${escapeHtml(recipients.join(", "))}` : "No reply address found for this message"}</div></div>
+    <div class="field-row"><label>Subject</label><div class="input-shell">${escapeHtml(replySubject(email?.subject))}</div></div>
+    ${aiPromptPanel("reply")}
+    <div class="ai-draft-label"><span>${icon("sparkles")} Reply draft</span><small>Edit as needed</small></div>
+    ${state.aiDraftLoading ? '<div class="reply-editor" role="status">Generating draft…</div>' : `<textarea aria-label="Reply draft" id="reply-text" class="reply-editor" placeholder="Write your reply…">${escapeHtml(draft)}</textarea>`}
+    <div class="composer-footer"><div class="compose-tools"><button class="icon-button" aria-label="Attach a file">${icon("paperclip")}</button><button class="icon-button" aria-label="Insert emoji">${icon("smile")}</button><button class="icon-button" aria-label="Insert image">${icon("image")}</button><button class="icon-button" data-voice aria-label="Voice commands">${icon("mic")}</button></div><div><button class="secondary-button" data-discard>Discard</button><button class="primary-button" data-send ${state.aiDraftLoading || !recipients.length ? "disabled" : ""}>${icon("send")} Review &amp; send</button></div></div>
   </section>`;
 }
 
@@ -470,8 +479,8 @@ function selectSetting(label, settingIcon, values) {
 }
 
 function composeView() {
-  return `<header class="compact-header"><button class="back-button" data-nav="inbox">${icon("arrow-left")}</button><div><span class="eyebrow">New message</span><h1>Compose</h1></div></header>
-  <section class="composer-card compose-new">${draftInstructions("compose")}<div class="field-row"><label for="compose-to">To</label><input value="${escapeHtml(state.compose.to)}" id="compose-to" class="input-shell" placeholder="Recipient" /></div><div class="field-row"><label for="compose-subject">Subject</label><input value="${escapeHtml(state.compose.subject)}" id="compose-subject" class="input-shell" placeholder="Email subject" /></div><textarea aria-label="Message" id="compose-body" class="reply-editor" placeholder="Write a message, or ask Revo AI for a first draft…">${escapeHtml(state.compose.body)}</textarea><div class="composer-footer"><div class="compose-tools"><button class="icon-button">${icon("paperclip")}</button><button class="icon-button">${icon("smile")}</button><button class="icon-button" data-voice>${icon("mic")}</button></div><button class="primary-button" data-send>${icon("send")} Send</button></div></section>`;
+  return `<header class="compact-header"><button class="back-button" data-nav="inbox" aria-label="Back to inbox">${icon("arrow-left")}</button><div><span class="eyebrow">New message</span><h1>Compose</h1></div></header>
+  <section class="composer-card compose-new"><div class="field-row"><label for="compose-to">To</label><input value="${escapeHtml(state.compose.to)}" id="compose-to" class="input-shell" placeholder="Recipient" /></div><div class="field-row"><label for="compose-subject">Subject</label><input value="${escapeHtml(state.compose.subject)}" id="compose-subject" class="input-shell" placeholder="Email subject" /></div>${aiPromptPanel("compose")}<textarea aria-label="Message" id="compose-body" class="reply-editor" ${state.composeLoading ? "disabled" : ""} placeholder="${state.composeLoading ? "Revo AI is writing…" : "Write a message, or describe it above and let Revo AI draft it…"}">${escapeHtml(state.compose.body)}</textarea><div class="composer-footer"><div class="compose-tools"><button class="icon-button" aria-label="Attach a file">${icon("paperclip")}</button><button class="icon-button" aria-label="Insert emoji">${icon("smile")}</button><button class="icon-button" data-voice aria-label="Voice commands">${icon("mic")}</button></div><button class="primary-button" data-send ${state.composeLoading ? "disabled" : ""}>${icon("send")} Review &amp; send</button></div></section>`;
 }
 
 function sendConfirmationModal() {
@@ -688,7 +697,7 @@ function bindEvents() {
   query("[data-compose]")?.addEventListener("click", () => navigate("compose"));
   query("[data-reply]")?.addEventListener("click", () => void replyAction());
   query("[data-regenerate]")?.addEventListener("click", () => void aiDraftReply(state.aiDraftTone));
-  queryAll("[data-tone]").forEach((button) => button.addEventListener("click", () => void aiDraftReply(button.dataset.tone)));
+  queryAll("[data-tone]").forEach((button) => button.addEventListener("click", () => { state.aiDraftTone = button.dataset.tone; render(); }));
   query("[data-discard]")?.addEventListener("click", () => navigate("reading"));
   queryAll("[data-send]").forEach((button) => button.addEventListener("click", () => prepareSendConfirmation()));
   queryAll("[data-cancel-send]").forEach((button) => button.addEventListener("click", closeSendConfirmation));
@@ -750,6 +759,9 @@ function bindEvents() {
   query("[data-replay-speech]")?.addEventListener("click", () => void voicePlayback.replay());
   query("[data-mute-speech]")?.addEventListener("click", () => voicePlayback.toggleMute());
   queryAll("[data-ai-instructions]").forEach(input => input.addEventListener("input", () => { state.aiInstructions[input.dataset.aiInstructions] = input.value; }));
+  queryAll("[data-ai-instructions]").forEach(input => input.addEventListener("keydown", event => {
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) query(`[data-custom-draft="${input.dataset.aiInstructions}"]`)?.click();
+  }));
   queryAll("[data-custom-draft]").forEach(button => button.addEventListener("click", () => button.dataset.customDraft === "reply" ? void aiDraftReply(state.aiDraftTone) : void aiCompose()));
   queryAll("[data-add-calendar]").forEach(button => button.addEventListener("click", () => openCalendarDialog(Number(button.dataset.addCalendar))));
   queryAll("[data-remove-extraction]").forEach(button => button.addEventListener("click", () => {
@@ -1450,9 +1462,23 @@ async function submitCalendar() {
   } catch (error) { state.calendarError = error.message; }
   finally { state.calendarSaving = false; render(); }
 }
-function draftInstructions(kind) {
-  const busy = kind === "reply" ? state.aiDraftLoading : state.composeLoading;
-  return `<div class="field-row"><label for="instructions-${kind}">${t("Draft instructions")}</label><textarea id="instructions-${kind}" data-ai-instructions="${kind}" maxlength="1000" ${busy ? "disabled" : ""}>${escapeHtml(state.aiInstructions[kind])}</textarea><button class="secondary-button" data-custom-draft="${kind}" ${busy ? "disabled" : ""}>${t(busy ? "Generating…" : "Generate or revise draft")}</button></div>`;
+function aiPromptPanel(mode) {
+  const reply = mode === "reply";
+  const loading = reply ? state.aiDraftLoading : state.composeLoading;
+  const hasDraft = Boolean((reply ? state.aiDraft : state.compose.body).trim());
+  const hasInstructions = Boolean(state.aiInstructions[mode].trim());
+  const label = loading ? "Writing…" : !hasDraft ? "Generate draft" : reply && !hasInstructions ? "Regenerate" : "Update draft";
+  const placeholder = reply ? "e.g. Say yes, but ask if we can move it to 11am" : "e.g. Ask Sam to send the Q3 report by Friday";
+  const hint = hasDraft ? "Your instructions are applied to the draft below. Choose a tone, then update." : "Describe what you want to say, choose a tone, then generate a draft you can edit.";
+  return `<section class="ai-prompt" aria-label="Revo AI writing assistant">
+    <label for="ai-instructions-${mode}"><span>${icon("sparkles")} Tell Revo AI what to write</span></label>
+    <textarea id="ai-instructions-${mode}" data-ai-instructions="${mode}" rows="2" maxlength="1000" placeholder="${placeholder}" ${loading ? "disabled" : ""}>${escapeHtml(state.aiInstructions[mode])}</textarea>
+    <div class="ai-prompt-row">
+      <div class="tone-row" role="group" aria-label="Tone"><span>Tone</span>${["professional", "concise", "friendly"].map((tone) => `<button class="tone-chip ${state.aiDraftTone === tone ? "active" : ""}" data-tone="${tone}" aria-pressed="${state.aiDraftTone === tone}" ${loading ? "disabled" : ""}>${tone[0].toUpperCase() + tone.slice(1)}</button>`).join("")}</div>
+      <button class="primary-button" data-custom-draft="${mode}" ${loading ? "disabled" : ""}>${icon("sparkles")} ${label}</button>
+    </div>
+    <small>${hint} Nothing is sent until you confirm. Press Ctrl+Enter to generate.</small>
+  </section>`;
 }
 async function aiCompose() {
   if (state.composeLoading) return;

@@ -101,13 +101,58 @@ for (const width of [1280, 320]) {
 test("custom compose and Sent retain the reviewed sending contract", async ({ page }) => {
   const calls = await fixture(page);
   await page.locator("[data-compose]").click();
+  const recipientTop = await page.locator("#compose-to").evaluate(element => element.getBoundingClientRect().top);
+  const assistantTop = await page.getByRole("region", { name: "Revo AI writing assistant" }).evaluate(element => element.getBoundingClientRect().top);
+  expect(recipientTop).toBeLessThan(assistantTop);
+  await expect(page.getByRole("button", { name: "Generate draft" })).toBeVisible();
+  await page.getByRole("button", { name: "Friendly" }).click();
+  await expect(page.getByRole("button", { name: "Friendly" })).toHaveAttribute("aria-pressed", "true");
   await page.locator('[data-ai-instructions="compose"]').fill("Write a short update");
   await page.locator('[data-custom-draft="compose"]').click();
   await expect(page.locator("#compose-body")).toHaveValue("User-reviewed generated draft.");
+  await expect(page.getByRole("button", { name: "Update draft" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Review & send" })).toBeVisible();
   expect(calls.sendCalls()).toBe(0);
   await page.locator('[data-nav="sent"]').click();
   await expect(page.getByRole("heading", { name: "Sent", exact: true })).toBeVisible();
   await expect(page.locator("[data-email]")).toHaveCount(1);
+});
+
+test("reply uses the reviewed writing panel without bypassing send confirmation", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  const calls = await fixture(page);
+  await page.locator("[data-email]").click();
+  await page.locator("[data-reply]").click();
+  expect(errors).toEqual([]);
+  await expect(page.getByRole("heading", { name: "Reply draft" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Revo AI writing assistant" })).toBeVisible();
+  await expect(page.locator("#reply-text")).toHaveValue("Thank you. I will review it.");
+  await page.getByRole("button", { name: "Concise" }).click();
+  await expect(page.getByRole("button", { name: "Concise" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#reply-text")).toHaveValue("Thank you. I will review it.");
+  await expect(page.locator('[data-custom-draft="reply"]')).toHaveText(/Regenerate/);
+  await expect(page.getByRole("button", { name: "Review & send" })).toBeVisible();
+  expect(calls.sendCalls()).toBe(0);
+  expect(errors).toEqual([]);
+});
+
+test("Compose and Reply writing panels remain usable at 320px", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 900 });
+  await fixture(page);
+  await page.locator("[data-compose]").click();
+  await expect(page.getByRole("region", { name: "Revo AI writing assistant" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  let accessibility = await new AxeBuilder({ page }).include(".composer-card").withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
+  expect(accessibility.violations.map(violation => ({ id: violation.id, nodes: violation.nodes.map(node => node.target) }))).toEqual([]);
+
+  await page.locator('[data-nav="inbox"].back-button').click();
+  await page.locator("[data-email]").click();
+  await page.locator("[data-reply]").click();
+  await expect(page.getByRole("heading", { name: "Reply draft" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  accessibility = await new AxeBuilder({ page }).include(".composer-card").withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
+  expect(accessibility.violations.map(violation => ({ id: violation.id, nodes: violation.nodes.map(node => node.target) }))).toEqual([]);
 });
 
 for (const width of [1280, 320]) {
