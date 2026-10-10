@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
 import { installAudioPermissions } from "./media-permissions.js";
+import { installAttachmentDownloads } from "./attachment-downloads.js";
 import { ZodError } from "zod";
 import { DesktopSettingsStore } from "./settings-store.js";
 import { ServiceController } from "./service-controller.js";
@@ -104,6 +105,13 @@ async function openMailWindow() {
       });
       return result.response === 1;
     }
+  });
+  installAttachmentDownloads({
+    session: mailWindow.webContents.session,
+    origin: () => serviceController.snapshot().url,
+    downloadsPath: () => app.getPath("downloads"),
+    openPath: (filePath) => shell.openPath(filePath),
+    showItemInFolder: (filePath) => shell.showItemInFolder(filePath),
   });
   mailWindow.once("ready-to-show", () => mailWindow.show());
   mailWindow.on("closed", () => { mailWindow = null; });

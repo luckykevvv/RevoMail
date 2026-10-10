@@ -4,7 +4,7 @@ import AxeBuilder from "@axe-core/playwright";
 async function fixture(page, initial = {}) {
   const { message: messageOverrides = {}, messages: messageFixtures, transcriptionText = "Show my tasks", summaryText = "Review the proposal.", summaryBullets = [], extraction = { events: [{ title: "Review meeting", date: "tomorrow", start: null, end: null, location: "Room 1" }], tasks: [{ title: "Submit review", due_date: "2026-10-12" }] }, ...preferenceOverrides } = initial;
   let preferences = { language: "en", theme: "light", reducedMotion: false, defaultAiModel: "fixture-model", replyLength: "medium", speechLanguage: "auto", voiceEnabled: false, voiceAutoPlay: true, ...preferenceOverrides };
-  let summaryCalls = 0; let sendCalls = 0; let syncCalls = 0; const classifiedIds = []; const patches = []; const calendarCalls = []; const intentContexts = []; const speechRequests = [];
+  let summaryCalls = 0; let sendCalls = 0; let syncCalls = 0; const classifiedIds = []; const patches = []; const sendBodies = []; const calendarCalls = []; const intentContexts = []; const speechRequests = [];
   const message = { id: "fixture-1", sender: "tester@example.com", recipients: ["reader@example.com"], subject: "Fixture planning", preview: "Review the proposal.", body_plain: "Please review the proposal.", unread: false, starred: false, category: "Primary", attachments: [], ...messageOverrides };
   const messages = messageFixtures || [message];
   await page.route("**/api/v1/**", async route => {
@@ -56,12 +56,13 @@ async function fixture(page, initial = {}) {
     else if (url.pathname === "/api/v1/ai/compose") body = { subject: "AI subject", draft: "User-reviewed generated draft." };
     else if (url.pathname === "/api/v1/ai/extract") body = extraction;
     else if (url.pathname === "/api/v1/calendar/events") { calendarCalls.push(route.request().postDataJSON()); await new Promise(resolve => setTimeout(resolve, 250)); body = { id: "event-1", created: true, htmlLink: "https://calendar.google.com/event?eid=fixture" }; }
-    else if (url.pathname === "/api/v1/emails/send") { sendCalls++; body = { status: "sent" }; }
+    else if (url.pathname === "/api/v1/emails/send") { sendCalls++; sendBodies.push(route.request().postDataJSON()); body = { status: "sent" }; }
+    else if (/^\/api\/v1\/emails\/[^/]+\/attachments\/\d+$/.test(url.pathname)) { await route.fulfill({ body: "file-bytes", headers: { "content-type": "application/octet-stream", "content-disposition": 'attachment; filename="report.pdf"' } }); return; }
     else body = {};
     await route.fulfill({ json: body });
   });
   await page.goto("/"); await expect(page.locator("[data-email]").first()).toBeVisible();
-  return { summaryCalls: () => summaryCalls, sendCalls: () => sendCalls, syncCalls: () => syncCalls, classifiedIds, patches, preferences: () => preferences, calendarCalls, intentContexts, speechRequests };
+  return { summaryCalls: () => summaryCalls, sendCalls: () => sendCalls, syncCalls: () => syncCalls, classifiedIds, patches, sendBodies, preferences: () => preferences, calendarCalls, intentContexts, speechRequests };
 }
 
 test("inbox refreshes from Gmail on demand and automatically every 5 minutes", async ({ page }) => {
@@ -92,6 +93,37 @@ test("search keeps the caret while typing and shows Gmail matches beyond the vis
   await expect.poll(() => searches.at(-1)).toBe("budget");
   // The fixture's only email matches "budget" in Gmail but not in its sender, subject or preview.
   await expect(page.locator('[data-workspace] [data-email="fixture-1"]')).toBeVisible();
+});
+
+test("attachments can be opened from an email and attached to a reply", async ({ page }) => {
+  const calls = await fixture(page, { message: { attachments: [{ id: "att", filename: "report.pdf", mimeType: "application/pdf", size: 52_000 }] } });
+  await page.locator("[data-email]").first().click();
+  const link = page.locator("[data-attachment-name='report.pdf']");
+  await expect(link).toContainText("report.pdf");
+  await expect(link.locator("xpath=..")).toContainText("51 KB");
+  const downloadPromise = page.waitForEvent("download");
+  await link.click();
+  const download = await downloadPromise;
+  expect(new URL(download.url()).pathname).toBe("/api/v1/emails/fixture-1/attachments/0");
+  expect(download.suggestedFilename()).toBe("report.pdf");
+
+  await page.locator("[data-reply]").click();
+  await page.locator("[data-attach-input]").setInputFiles([
+    { name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("remember the milk") },
+    { name: "drop-me.csv", mimeType: "text/csv", buffer: Buffer.from("a,b") },
+    { name: "empty.txt", mimeType: "text/plain", buffer: Buffer.alloc(0) },
+  ]);
+  await expect(page.locator(".outgoing-attachments li")).toHaveCount(2);
+  await expect(page.locator(".toast")).toContainText("empty.txt is empty");
+  await page.getByRole("button", { name: "Remove drop-me.csv" }).click();
+  await expect(page.locator(".outgoing-attachments li")).toHaveCount(1);
+  await page.locator("#reply-text").fill("Notes attached.");
+  await page.locator("[data-send]").click();
+  await expect(page.locator(".send-review")).toContainText("notes.txt (17 B)");
+  await page.locator("[data-confirm-send]").click();
+  await expect.poll(() => calls.sendBodies.length).toBe(1);
+  expect(calls.sendBodies[0].attachments).toEqual([{ filename: "notes.txt", mimeType: "text/plain", dataBase64: Buffer.from("remember the milk").toString("base64") }]);
+  expect(calls.sendBodies[0].kind).toBeUndefined();
 });
 
 test("starred tab lists Gmail starred mail and starring syncs to Gmail", async ({ page }) => {

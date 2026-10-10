@@ -194,6 +194,16 @@ body[data-theme="dark"] {
 .attachment-list { display: grid; gap: 8px; margin: 0 0 24px; padding: 14px 18px; border: 1px solid var(--line); border-radius: 10px; list-style: none; }
 .attachment-list li { display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }
 .attachment-list small { color: var(--muted); }
+.attachment-link { display: inline-flex; align-items: center; gap: 8px; color: var(--blue); text-decoration: none; overflow-wrap: anywhere; }
+.attachment-link:hover span, .attachment-link:focus-visible span { text-decoration: underline; }
+.attachment-link svg { width: 16px; flex: none; }
+.outgoing-attachments { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 0; padding: 0; list-style: none; }
+.outgoing-attachments li { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 4px 4px 4px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-soft); font-size: 12px; }
+.outgoing-attachments svg { width: 14px; height: 14px; }
+.outgoing-attachments .outgoing-name { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.outgoing-attachments small { color: var(--muted); }
+.outgoing-attachments button { display: inline-grid; place-items: center; width: 22px; height: 22px; border: 0; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; }
+.outgoing-attachments button:hover { background: var(--line); color: var(--ink); }
 .message-actions { margin-top: auto; display: flex; gap: 10px; }
 .ai-rail { display: grid; gap: 15px; }
 .insight-card { padding: 20px; }

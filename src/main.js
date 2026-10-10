@@ -147,6 +147,7 @@ const state = {
   sync: null,
   refreshing: false,
   searchApplied: "",
+  outgoing: { compose: [], reply: [] },
   nextPageToken: null,
   bodyMode: "formatted",
   sendConfirmation: null,
@@ -386,7 +387,7 @@ function readingView() {
       <div class="message-from" data-user-content><span class="avatar">${escapeHtml(String(email.sender || "?")[0].toUpperCase())}</span><div><strong>${escapeHtml(email.sender)}</strong><small>${escapeHtml((email.recipients || []).join(", ") || email.to || "")}</small></div><time datetime="${escapeHtml(email.receivedAt || email.date || "")}">${escapeHtml(formatFullMailTime(email.receivedAt || email.date || "", { locale: state.preferences.language }))}</time><button class="star-button ${email.starred ? "starred" : ""}" data-star="${escapeHtml(String(email.id))}" aria-pressed="${Boolean(email.starred)}" aria-label="${email.starred ? "Unstar email" : "Star email"}">${icon("star")}</button></div>
       ${safeHtml ? `<div class="body-mode"><button class="text-button ${state.bodyMode === "formatted" ? "active" : ""}" data-body-mode="formatted">Formatted</button><button class="text-button ${state.bodyMode === "plain" ? "active" : ""}" data-body-mode="plain">Plain text</button></div>` : ""}
       <div class="message-body" data-user-content>${messageBody}</div>
-      ${(email.attachments || []).length ? `<ul class="attachment-list" aria-label="Attachments">${email.attachments.map((attachment) => `<li>${icon("paperclip")} ${escapeHtml(attachment.filename)} <small>${escapeHtml(attachment.mimeType)} · ${Number(attachment.size || 0)} bytes</small></li>`).join("")}</ul>` : ""}
+      ${(email.attachments || []).length ? `<ul class="attachment-list" aria-label="Attachments">${email.attachments.map((attachment, index) => `<li><a class="attachment-link" href="/api/v1/emails/${encodeURIComponent(String(email.id))}/attachments/${index}" download="${escapeHtml(attachment.filename)}" data-attachment-name="${escapeHtml(attachment.filename)}" title="Open ${escapeHtml(attachment.filename)}">${icon("paperclip")} <span>${escapeHtml(attachment.filename)}</span></a> <small>${escapeHtml(formatFileSize(attachment.size))}</small></li>`).join("")}</ul>` : ""}
       <div class="message-actions"><button class="secondary-button" data-reply>${icon("reply")} Reply</button><button class="secondary-button">${icon("reply-all")} Reply all</button><button class="secondary-button">${icon("forward")} Forward</button></div>
     </article>
     <aside class="ai-rail">
@@ -423,7 +424,7 @@ function replyView() {
     ${aiPromptPanel("reply")}
     <div class="ai-draft-label"><span>${icon("sparkles")} Reply draft</span><small>Edit as needed</small></div>
     ${state.aiDraftLoading ? '<div class="reply-editor" role="status">Generating draft…</div>' : `<textarea aria-label="Reply draft" id="reply-text" class="reply-editor" placeholder="Write your reply…">${escapeHtml(draft)}</textarea>`}
-    <div class="composer-footer"><div class="compose-tools"><button class="icon-button" aria-label="Attach a file">${icon("paperclip")}</button><button class="icon-button" aria-label="Insert emoji">${icon("smile")}</button><button class="icon-button" aria-label="Insert image">${icon("image")}</button><button class="icon-button" data-voice aria-label="Voice commands">${icon("mic")}</button></div><div><button class="secondary-button" data-discard>Discard</button><button class="primary-button" data-send ${state.aiDraftLoading || !recipients.length ? "disabled" : ""}>${icon("send")} Review &amp; send</button></div></div>
+    ${outgoingAttachmentList()}<div class="composer-footer"><div class="compose-tools"><button class="icon-button" data-attach aria-label="Attach files">${icon("paperclip")}</button><input type="file" multiple hidden data-attach-input><button class="icon-button" aria-label="Insert emoji">${icon("smile")}</button><button class="icon-button" aria-label="Insert image">${icon("image")}</button><button class="icon-button" data-voice aria-label="Voice commands">${icon("mic")}</button></div><div><button class="secondary-button" data-discard>Discard</button><button class="primary-button" data-send ${state.aiDraftLoading || !recipients.length ? "disabled" : ""}>${icon("send")} Review &amp; send</button></div></div>
   </section>`;
 }
 
@@ -488,7 +489,54 @@ function selectSetting(label, settingIcon, values) {
 
 function composeView() {
   return `<header class="compact-header"><button class="back-button" data-nav="inbox" aria-label="Back to inbox">${icon("arrow-left")}</button><div><span class="eyebrow">New message</span><h1>Compose</h1></div></header>
-  <section class="composer-card compose-new"><div class="field-row"><label for="compose-to">To</label><input value="${escapeHtml(state.compose.to)}" id="compose-to" class="input-shell" placeholder="Recipient" /></div><div class="field-row"><label for="compose-subject">Subject</label><input value="${escapeHtml(state.compose.subject)}" id="compose-subject" class="input-shell" placeholder="Email subject" /></div>${aiPromptPanel("compose")}<textarea aria-label="Message" id="compose-body" class="reply-editor" ${state.composeLoading ? "disabled" : ""} placeholder="${state.composeLoading ? "Revo AI is writing…" : "Write a message, or describe it above and let Revo AI draft it…"}">${escapeHtml(state.compose.body)}</textarea><div class="composer-footer"><div class="compose-tools"><button class="icon-button" aria-label="Attach a file">${icon("paperclip")}</button><button class="icon-button" aria-label="Insert emoji">${icon("smile")}</button><button class="icon-button" data-voice aria-label="Voice commands">${icon("mic")}</button></div><button class="primary-button" data-send ${state.composeLoading ? "disabled" : ""}>${icon("send")} Review &amp; send</button></div></section>`;
+  <section class="composer-card compose-new"><div class="field-row"><label for="compose-to">To</label><input value="${escapeHtml(state.compose.to)}" id="compose-to" class="input-shell" placeholder="Recipient" /></div><div class="field-row"><label for="compose-subject">Subject</label><input value="${escapeHtml(state.compose.subject)}" id="compose-subject" class="input-shell" placeholder="Email subject" /></div>${aiPromptPanel("compose")}<textarea aria-label="Message" id="compose-body" class="reply-editor" ${state.composeLoading ? "disabled" : ""} placeholder="${state.composeLoading ? "Revo AI is writing…" : "Write a message, or describe it above and let Revo AI draft it…"}">${escapeHtml(state.compose.body)}</textarea>${outgoingAttachmentList()}<div class="composer-footer"><div class="compose-tools"><button class="icon-button" data-attach aria-label="Attach files">${icon("paperclip")}</button><input type="file" multiple hidden data-attach-input><button class="icon-button" aria-label="Insert emoji">${icon("smile")}</button><button class="icon-button" data-voice aria-label="Voice commands">${icon("mic")}</button></div><button class="primary-button" data-send ${state.composeLoading ? "disabled" : ""}>${icon("send")} Review &amp; send</button></div></section>`;
+}
+
+const MAX_ATTACHMENT_TOTAL = 25 * 1024 * 1024;
+const MAX_ATTACHMENTS = 20;
+
+function draftKind() {
+  return state.view === "reply" ? "reply" : "compose";
+}
+
+function formatFileSize(bytes) {
+  const size = Number(bytes) || 0;
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(size < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+
+function outgoingAttachmentList() {
+  const files = state.outgoing[draftKind()];
+  if (!files.length) return "";
+  return `<ul class="outgoing-attachments" aria-label="Attached files">${files.map(file => `<li><span aria-hidden="true">${icon("paperclip")}</span><span class="outgoing-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span><small>${formatFileSize(file.size)}</small><button type="button" data-remove-attachment="${file.id}" aria-label="Remove ${escapeHtml(file.name)}">${icon("x")}</button></li>`).join("")}</ul>`;
+}
+
+function addOutgoingAttachments(fileList) {
+  const kind = draftKind();
+  const current = state.outgoing[kind];
+  const added = [];
+  const problems = [];
+  let total = current.reduce((sum, file) => sum + file.size, 0);
+  for (const file of fileList) {
+    if (!file.size) { problems.push(`${file.name} is empty`); continue; }
+    if (current.length + added.length >= MAX_ATTACHMENTS) { problems.push(`only ${MAX_ATTACHMENTS} files can be attached`); break; }
+    if (total + file.size > MAX_ATTACHMENT_TOTAL) { problems.push(`${file.name} would take the attachments over Gmail's 25 MB limit`); continue; }
+    total += file.size;
+    added.push({ id: crypto.randomUUID(), name: file.name, size: file.size, type: file.type || "application/octet-stream", file });
+  }
+  state.outgoing[kind] = [...current, ...added];
+  render();
+  if (problems.length) showToast(`Not attached: ${problems.join("; ")}.`);
+}
+
+function readFileBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+    reader.onerror = () => reject(new Error(`${file.name} could not be read. Remove it and attach it again.`));
+    reader.readAsDataURL(file);
+  });
 }
 
 function sendConfirmationModal() {
@@ -496,7 +544,7 @@ function sendConfirmationModal() {
   if (!draft) return "";
   return `<div class="modal-backdrop"><section class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="send-title">
     <div class="modal-header"><div><span class="eyebrow">FINAL REVIEW</span><h2 id="send-title">Confirm email send</h2></div><button class="icon-button" data-cancel-send aria-label="Cancel send">${icon("x")}</button></div>
-    <dl class="send-review"><div><dt>To</dt><dd>${escapeHtml(draft.to.join(", "))}</dd></div>${draft.cc.length ? `<div><dt>Cc</dt><dd>${escapeHtml(draft.cc.join(", "))}</dd></div>` : ""}<div><dt>Subject</dt><dd>${escapeHtml(draft.subject)}</dd></div></dl>
+    <dl class="send-review"><div><dt>To</dt><dd>${escapeHtml(draft.to.join(", "))}</dd></div>${draft.cc.length ? `<div><dt>Cc</dt><dd>${escapeHtml(draft.cc.join(", "))}</dd></div>` : ""}<div><dt>Subject</dt><dd>${escapeHtml(draft.subject)}</dd></div>${(state.outgoing[draft.kind] || []).length ? `<div><dt>Files</dt><dd>${state.outgoing[draft.kind].map(file => `${escapeHtml(file.name)} (${formatFileSize(file.size)})`).join(", ")}</dd></div>` : ""}</dl>
     <label>Message<textarea id="confirmed-body" class="reply-editor">${escapeHtml(draft.bodyText)}</textarea></label>
     <p>RevoMail will contact Gmail only after you choose “Confirm and send”.</p>
     <div class="modal-footer"><button class="secondary-button" data-cancel-send ${state.sendBusy ? "disabled" : ""}>Keep editing</button><button class="primary-button" data-confirm-send ${state.sendBusy ? "disabled" : ""}>${state.sendBusy ? "Sending…" : "Confirm and send"}</button></div>
@@ -685,6 +733,7 @@ function bindEvents() {
     for (const key of ["ai-compose", "ai-draft", "ai-summary", "ai-extraction", "message-detail", "mailbox-list", "mailbox-refresh", "sent-list", "starred-list"]) cancelRequest(key);
     clearTimeout(syncTimer);
     stopAutoRefresh(); state.refreshing = false;
+    state.outgoing = { compose: [], reply: [] };
     state.sent = []; state.sentCursor = null; state.starred = []; state.starredCursor = null; state.returnView = "inbox"; state.calendarDraft = null; state.addedEvents = {}; state.calendarAttempts = {}; state.aiInstructions = { reply: "", compose: "" };
     state.authenticated = false; state.user = null; state.csrfToken = ""; state.accounts = []; state.view = "inbox"; resetMailbox(); render();
   }));
@@ -710,7 +759,18 @@ function bindEvents() {
   query("[data-reply]")?.addEventListener("click", () => void replyAction());
   query("[data-regenerate]")?.addEventListener("click", () => void aiDraftReply(state.aiDraftTone));
   queryAll("[data-tone]").forEach((button) => button.addEventListener("click", () => { state.aiDraftTone = button.dataset.tone; render(); }));
-  query("[data-discard]")?.addEventListener("click", () => navigate("reading"));
+  query("[data-discard]")?.addEventListener("click", () => { state.outgoing.reply = []; navigate("reading"); });
+  query("[data-attach]")?.addEventListener("click", () => app.querySelector("[data-attach-input]")?.click());
+  query("[data-attach-input]")?.addEventListener("change", event => { const files = [...event.target.files]; event.target.value = ""; addOutgoingAttachments(files); });
+  queryAll("[data-remove-attachment]").forEach(button => button.addEventListener("click", () => {
+    const kind = draftKind();
+    state.outgoing[kind] = state.outgoing[kind].filter(file => file.id !== button.dataset.removeAttachment);
+    render();
+  }));
+  queryAll("[data-attachment-name]").forEach(link => link.addEventListener("click", () => {
+    const inDesktopApp = /Electron/i.test(navigator.userAgent);
+    showToast(`${inDesktopApp ? "Opening" : "Downloading"} ${link.dataset.attachmentName}…`, false);
+  }));
   queryAll("[data-send]").forEach((button) => button.addEventListener("click", () => prepareSendConfirmation()));
   queryAll("[data-cancel-send]").forEach((button) => button.addEventListener("click", closeSendConfirmation));
   query("[data-confirm-send]")?.addEventListener("click", () => void confirmSend());
@@ -837,13 +897,13 @@ function prepareSendConfirmation() {
     const bodyText = document.querySelector("#reply-text")?.value.trim() || "";
     state.sendConfirmation = {
       to: state.selectedEmail?.reply_to || [state.selectedEmail?.sender || ""], cc: [], bcc: [], subject: replySubject(state.selectedEmail?.subject),
-      bodyText, inReplyToMessageId: String(state.selectedEmail?.id || ""), idempotencyKey: crypto.randomUUID(),
+      bodyText, inReplyToMessageId: String(state.selectedEmail?.id || ""), idempotencyKey: crypto.randomUUID(), kind: "reply",
     };
   } else {
     const to = (document.querySelector("#compose-to")?.value || "").split(",").map((value) => value.trim()).filter(Boolean);
     state.sendConfirmation = {
       to, cc: [], bcc: [], subject: (document.querySelector("#compose-subject")?.value || "").trim(),
-      bodyText: (document.querySelector("#compose-body")?.value || "").trim(), idempotencyKey: crypto.randomUUID(),
+      bodyText: (document.querySelector("#compose-body")?.value || "").trim(), idempotencyKey: crypto.randomUUID(), kind: "compose",
     };
   }
   if (!state.sendConfirmation.to.length || !state.sendConfirmation.subject || !state.sendConfirmation.bodyText) {
@@ -869,11 +929,15 @@ async function confirmSend() {
   state.sendBusy = true;
   render();
   try {
+    const { kind, ...draft } = state.sendConfirmation;
+    const files = state.outgoing[kind] || [];
+    const attachments = await Promise.all(files.map(async file => ({ filename: file.name, mimeType: file.type, dataBase64: await readFileBase64(file.file) })));
     const result = await api("/api/v1/emails/send", {
-      method: "POST", body: JSON.stringify({ ...state.sendConfirmation, confirmed: true })
+      method: "POST", body: JSON.stringify({ ...draft, attachments, confirmed: true })
     });
     state.sendConfirmation = null;
     if (result.status === "sent") {
+      state.outgoing[kind] = [];
       state.view = "sent";
       showToast("Message sent after final confirmation.", false);
     } else if (result.status === "unknown") {
@@ -1105,7 +1169,7 @@ async function aiDraftReply(tone) {
   render();
   try {
     const payload = await api("/api/v1/ai/draft-reply", { method: "POST", body: JSON.stringify({ message_id: String(state.selectedEmail.id), tone, instructions: state.aiInstructions.reply, current_draft: state.aiDraft }), signal: controller.signal });
-    state.aiDraft = payload.draft;
+    state.aiDraft = typeof payload?.draft === "string" ? payload.draft : "";
     return state.aiDraft;
   } catch (error) {
     if (isAbortError(error)) return;

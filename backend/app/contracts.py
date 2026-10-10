@@ -1,3 +1,6 @@
+import base64
+import binascii
+import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -142,6 +145,30 @@ class MessageStateMutation(BaseModel):
         return self
 
 
+MAX_ATTACHMENT_TOTAL_BYTES = 25 * 1024 * 1024  # Gmail's limit for files on one message
+MAX_ATTACHMENTS = 20
+_UNSAFE_FILENAME = re.compile(r"[\x00-\x1f/\\]")
+
+
+class OutgoingAttachment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    filename: str = Field(min_length=1, max_length=255)
+    mimeType: str = Field(default="application/octet-stream", max_length=255, pattern=r"^[\w.+-]+/[\w.+-]+$")
+    dataBase64: str = Field(min_length=1, max_length=(MAX_ATTACHMENT_TOTAL_BYTES * 4) // 3 + 8)
+
+    @model_validator(mode="after")
+    def validate_file(self):
+        if _UNSAFE_FILENAME.search(self.filename):
+            raise ValueError("An attachment file name was invalid.")
+        return self
+
+    def size(self) -> int:
+        try:
+            return len(base64.b64decode(self.dataBase64, validate=True))
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("An attachment could not be read.") from exc
+
+
 class SendEmailRequest(BaseModel):
     to: list[str] = Field(min_length=1, max_length=50)
     cc: list[str] = Field(default_factory=list, max_length=50)
@@ -149,6 +176,7 @@ class SendEmailRequest(BaseModel):
     subject: str = Field(min_length=1, max_length=998)
     bodyText: str = Field(min_length=1, max_length=500_000)
     inReplyToMessageId: str | None = Field(default=None, max_length=512)
+    attachments: list[OutgoingAttachment] = Field(default_factory=list, max_length=MAX_ATTACHMENTS)
     confirmed: Literal[True]
     idempotencyKey: str = Field(min_length=16, max_length=200)
 
@@ -159,4 +187,6 @@ class SendEmailRequest(BaseModel):
         for address in [*self.to, *self.cc, *self.bcc]:
             if not address or "\r" in address or "\n" in address or "@" not in address:
                 raise ValueError("An email address was invalid.")
+        if sum(attachment.size() for attachment in self.attachments) > MAX_ATTACHMENT_TOTAL_BYTES:
+            raise ValueError("Attachments can total up to 25 MB.")
         return self

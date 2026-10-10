@@ -1,6 +1,7 @@
 from typing import Literal
+from urllib.parse import quote
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 
 from backend.app.contracts import MessageStateMutation, SendEmailRequest
@@ -193,6 +194,29 @@ async def get_email(message_id: str, request: Request):
         if message:
             return _legacy_detail(message)
         raise _provider_error(exc) from exc
+
+
+@router.get("/{message_id}/attachments/{index}")
+async def download_attachment(message_id: str, index: int, request: Request):
+    _session, _account, tokens = require_mailbox(request)
+    if index < 0 or index > 500:
+        raise AppError("ATTACHMENT_NOT_FOUND", "The attachment was not found.", 404)
+    try:
+        attachment = await run_in_threadpool(GmailAdapter(tokens).get_attachment, message_id, index)
+    except MailProviderError as exc:
+        raise _provider_error(exc) from exc
+    filename = attachment["filename"].replace("\r", " ").replace("\n", " ").replace('"', "'")
+    fallback = filename.encode("ascii", "replace").decode("ascii").replace("?", "_")
+    return Response(
+        content=attachment["content"],
+        # Always a download, never rendered by the app, whatever the sender claimed the type was.
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{fallback}"; filename*=UTF-8\'\'{quote(filename)}',
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.get("/{message_id}/reply-metadata")

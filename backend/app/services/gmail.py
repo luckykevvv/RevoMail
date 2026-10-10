@@ -1,6 +1,7 @@
 """Provider-neutral Gmail adapter and compatibility helpers."""
 
 import base64
+import io
 import re
 import socket
 from email.header import decode_header, make_header
@@ -13,6 +14,7 @@ from bleach.css_sanitizer import CSSSanitizer
 import google.oauth2.credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from googleapiclient.http import MediaIoBaseUpload
 
 
 class MailProviderError(RuntimeError):
@@ -103,6 +105,23 @@ def _addresses(headers: list[dict], *names: str) -> list[str]:
         if raw:
             values.extend(item.strip() for item in raw.split(",") if item.strip())
     return values
+
+
+def _attachment_parts(payload: dict) -> list[dict]:
+    """Attachment parts in the same order _extract_parts lists them, so an index refers to the same file."""
+    if _decode_header(str(payload.get("filename") or "")):
+        return [payload]
+    mime = str(payload.get("mimeType", ""))
+    if mime in ("text/plain", "text/html") and (payload.get("body") or {}).get("data"):
+        return []
+    found: list[dict] = []
+    for part in payload.get("parts") or []:
+        found.extend(_attachment_parts(part))
+    return found
+
+
+def _base64url_bytes(data: str) -> bytes:
+    return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
 
 
 def _extract_parts(payload: dict) -> tuple[str, str, list[dict]]:
@@ -348,6 +367,28 @@ class GmailAdapter:
         result = self._execute(self.gmail.users().messages().modify(userId="me", id=message_id, body={"addLabelIds": add, "removeLabelIds": remove}))
         return {"id": result.get("id", message_id), "unread": unread, "starred": starred}
 
+    def get_attachment(self, message_id: str, index: int) -> dict:
+        """Download one attachment, located by its position in the message (Gmail attachment ids are not stable)."""
+        detail = self._execute(
+            self.gmail.users().messages().get(userId="me", id=message_id, format="full"), message_lookup=True,
+        )
+        parts = _attachment_parts(detail.get("payload") or {})
+        if index < 0 or index >= len(parts):
+            raise MessageNotFound()
+        part = parts[index]
+        body = part.get("body") or {}
+        data = body.get("data")
+        if not data and body.get("attachmentId"):
+            data = self._execute(
+                self.gmail.users().messages().attachments().get(userId="me", messageId=message_id, id=str(body["attachmentId"])),
+                message_lookup=True,
+            ).get("data")
+        return {
+            "filename": _decode_header(str(part.get("filename") or "")) or "attachment",
+            "mimeType": str(part.get("mimeType") or "application/octet-stream"),
+            "content": _base64url_bytes(str(data or "")),
+        }
+
     def send_message(self, payload: dict) -> dict:
         message = EmailMessage()
         message["To"] = ", ".join(payload["to"])
@@ -365,9 +406,22 @@ class GmailAdapter:
             if source.get("threadId"):
                 body["threadId"] = source["threadId"]
         message.set_content(payload["bodyText"])
-        body["raw"] = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii").rstrip("=")
+        attachments = payload.get("attachments") or []
+        for attachment in attachments:
+            maintype, _, subtype = str(attachment.get("mimeType") or "application/octet-stream").partition("/")
+            message.add_attachment(
+                base64.b64decode(attachment["dataBase64"]),
+                maintype=maintype or "application", subtype=subtype or "octet-stream", filename=attachment["filename"],
+            )
+        if attachments:
+            # Messages with files can exceed the size of a plain JSON request, so upload them as a media body.
+            media = MediaIoBaseUpload(io.BytesIO(message.as_bytes()), mimetype="message/rfc822", resumable=True)
+            request = self.gmail.users().messages().send(userId="me", body=body, media_body=media)
+        else:
+            body["raw"] = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii").rstrip("=")
+            request = self.gmail.users().messages().send(userId="me", body=body)
         try:
-            result = self._execute(self.gmail.users().messages().send(userId="me", body=body))
+            result = self._execute(request)
         except (InvalidAuthorization, ProviderRateLimited):
             raise
         except MailProviderError as exc:
