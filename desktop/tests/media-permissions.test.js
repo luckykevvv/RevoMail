@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isTrustedAudioRequest } from "../media-permissions.js";
+import { isTrustedAudioRequest, MICROPHONE_PERMISSION_DIALOG } from "../media-permissions.js";
 
 describe("microphone permission boundary", () => {
   const contents = { isDestroyed: () => false, getURL: () => "http://localhost:4173/" };
@@ -14,5 +14,13 @@ describe("microphone permission boundary", () => {
   it("rejects another window and non-media permissions", () => {
     expect(isTrustedAudioRequest({ ...request, contents: { ...contents } })).toBe(false);
     expect(isTrustedAudioRequest({ ...request, permission: "notifications" })).toBe(false);
+  });
+  it("uses English-only native permission copy", () => {
+    expect(MICROPHONE_PERMISSION_DIALOG).toMatchObject({
+      title: "RevoMail microphone permission",
+      message: "Allow microphone access for voice commands?",
+      buttons: ["Deny", "Allow"],
+    });
+    expect(JSON.stringify(MICROPHONE_PERMISSION_DIALOG)).not.toMatch(/[\u3400-\u9fff]|\s\/\s/);
   });
 });

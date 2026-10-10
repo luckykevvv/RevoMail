@@ -48,6 +48,18 @@ export function formatLocalDateTime(value, locale, timeZone) {
   }).format(date);
 }
 
+export function formatRefreshAge(value, { now = new Date(), locale = "en" } = {}) {
+  const refreshedAt = parseMailDate(value);
+  const current = now instanceof Date ? now : new Date(now);
+  if (!refreshedAt || Number.isNaN(current.getTime())) return "";
+  const elapsedSeconds = Math.max(0, Math.floor((current.getTime() - refreshedAt.getTime()) / 1000));
+  if (elapsedSeconds < 60) return String(locale).toLowerCase().startsWith("zh") ? "刚刚" : "just now";
+  const formatter = new Intl.RelativeTimeFormat(locale, { numeric: "always" });
+  if (elapsedSeconds < 3600) return formatter.format(-Math.floor(elapsedSeconds / 60), "minute");
+  if (elapsedSeconds < 86400) return formatter.format(-Math.floor(elapsedSeconds / 3600), "hour");
+  return formatter.format(-Math.floor(elapsedSeconds / 86400), "day");
+}
+
 export function applyMailboxPage(currentMessages, payload, { append = false } = {}) {
   const providerMessages = Array.isArray(payload?.messages) ? payload.messages : [];
   const combined = append ? [...currentMessages, ...providerMessages] : providerMessages;

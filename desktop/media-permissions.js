@@ -1,4 +1,14 @@
 // Keep media permissions scoped to the trusted top-level mail window, never email frames.
+export const MICROPHONE_PERMISSION_DIALOG = Object.freeze({
+  type: "question",
+  title: "RevoMail microphone permission",
+  message: "Allow microphone access for voice commands?",
+  detail: "Audio is uploaded to OpenAI for transcription only after you finish recording.",
+  buttons: ["Deny", "Allow"],
+  defaultId: 0,
+  cancelId: 0,
+});
+
 export function isTrustedAudioRequest({ contents, expectedContents, permission, details, origin }) {
   if (!contents || contents !== expectedContents || contents.isDestroyed() || permission !== "media") return false;
   try {

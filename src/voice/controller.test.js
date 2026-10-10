@@ -26,6 +26,12 @@ it("does not capture until started and does not transcribe until finished", asyn
   x.controller.finish(); await Promise.resolve(); expect(x.track.stop).toHaveBeenCalled();
   expect(x.changed).toHaveBeenLastCalledWith({ status: "review", text: "Show my tasks" });
 });
+it("does not announce an idle state while starting", async () => {
+  const x = setup();
+  await x.controller.start(limits, "en-AU");
+  expect(x.changed.mock.calls.map(([update]) => update.status)).toEqual(["requesting", "recording"]);
+  x.controller.cancel();
+});
 it("releases late microphone grants after cancellation", async () => {
   const x = setup(); let resolve; x.mediaDevices.getUserMedia.mockImplementation(() => new Promise(r => { resolve = r; }));
   const pending = x.controller.start(limits, "en-AU"); x.controller.cancel(); resolve(x.stream); await pending;

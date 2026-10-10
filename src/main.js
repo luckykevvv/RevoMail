@@ -8,7 +8,7 @@ import { captureFocus, restoreFocus, syncDialog } from "./accessibility.js";
 import { translate, translateUI } from "./i18n.js";
 import { messageFrameDocument } from "./email-html.js";
 import { calendarCells, eventDateKey, monthKeyForEvents, shiftMonth } from "./calendar-view.js";
-import { calendarPayload, eventDraftFromExtraction, formatMailTime, formatFullMailTime, replySubject, applyClassifications, applyMailboxPage, formatLocalDateTime, LatestRequestCoordinator, mailboxContentState, matchesMailboxCategory, selectAfterMailboxRefresh } from "./mailbox-state.js";
+import { calendarPayload, eventDraftFromExtraction, formatMailTime, formatFullMailTime, formatRefreshAge, replySubject, applyClassifications, applyMailboxPage, formatLocalDateTime, LatestRequestCoordinator, mailboxContentState, matchesMailboxCategory, selectAfterMailboxRefresh } from "./mailbox-state.js";
 import {
   AlignLeft,
   Archive,
@@ -144,6 +144,7 @@ const state = {
   emailsLoading: false,
   emailsError: "",
   sync: null,
+  manualRefreshPending: false,
   nextPageToken: null,
   bodyMode: "formatted",
   sendConfirmation: null,
@@ -297,6 +298,12 @@ function inboxView() {
     "filtered-empty": `<div class="empty-state">${icon("search-x")}<h3>No emails found</h3><p>Try a different search or category.</p></div>`,
     empty: `<div class="empty-state">${icon("inbox")}<h3>Your inbox is empty</h3><p>No messages were returned by your connected account.</p></div>`
   };
+  const refreshing = state.sync?.status === "syncing";
+  const refreshAge = formatRefreshAge(state.sync?.lastSyncedAt, { locale: state.preferences.language });
+  const refreshStatus = refreshAge ? `${t("Last refreshed")} ${refreshAge}` : t("Not refreshed yet");
+  const refreshTitle = state.sync?.lastSyncedAt
+    ? `${t("Last refreshed")}: ${formatLocalDateTime(state.sync.lastSyncedAt, state.preferences.language)}`
+    : t("Not refreshed yet");
   return `<header class="page-header">
     <div><span class="eyebrow">Good morning, ${firstName}</span><h1>Inbox</h1><p>AI has highlighted what needs your attention.</p></div>
     <button class="primary-button compose-button" data-compose>${icon("square-pen")} Compose</button>
@@ -310,7 +317,10 @@ function inboxView() {
   </div>
   ${priorityFilter()}
   <section class="mail-panel">
-    <div class="mail-panel-heading"><span>${state.emailsLoading && !emails.length ? "Loading conversations" : `${visible.length} conversations`}${state.sync?.status === "syncing" ? " · Synchronising…" : ""}${priorityStatus()}</span></div>
+    <div class="mail-panel-heading inbox-panel-heading">
+      <span class="mail-panel-summary"><span>${state.emailsLoading && !emails.length ? "Loading conversations" : `${visible.length} conversations`}${refreshing ? " · Synchronising…" : ""}${priorityStatus()}</span><span class="mail-refresh-status" data-mail-refresh-status title="${escapeHtml(refreshTitle)}">${escapeHtml(refreshStatus)}</span></span>
+      <button class="mail-refresh-button" data-refresh-inbox ${refreshing ? "disabled" : ""} aria-label="${t(refreshing ? "Refreshing inbox" : "Refresh inbox")}" title="${t(refreshing ? "Refreshing inbox" : "Refresh inbox")}">${icon("refresh-cw")}<span>${t(refreshing ? "Refreshing…" : "Refresh")}</span></button>
+    </div>
     <div class="email-list">
       ${contentState === "messages" ? visible.map(emailRow).join("") : content[contentState]}
     </div>
@@ -500,7 +510,12 @@ function placeholderView(title, navIcon) {
 }
 
 function voiceModal() {
-  return state.voiceOpen ? voiceView({ voice: state.voice, enabled: state.preferences.voiceEnabled, capabilities: state.capabilities, currentEmail: ["reading", "reply"].includes(state.view) && Boolean(state.selectedEmail), escape: escapeHtml, t }) : "";
+  const calendarEvents = (state.aiExtraction?.events || []).map((event, index) => ({
+    event,
+    index,
+    addedUrl: state.addedEvents[eventKey(event)] || ""
+  }));
+  return state.voiceOpen ? voiceView({ voice: state.voice, enabled: state.preferences.voiceEnabled, capabilities: state.capabilities, currentEmail: ["reading", "reply"].includes(state.view) && Boolean(state.selectedEmail), calendarEvents, escape: escapeHtml, t }) : "";
 }
 
 function toast() {
@@ -580,6 +595,8 @@ function hydrateSafeMessageFrame() {
 let toastTimer;
 let searchTimer;
 let syncTimer;
+let refreshAgeTimer;
+let voiceStartGeneration = 0;
 
 function navigate(view, { render: shouldRender = true, preserveVoice = false } = {}) {
   if (view !== "compose") { cancelRequest("ai-compose"); state.composeLoading = false; }
@@ -705,6 +722,7 @@ function bindEvents() {
   queryAll("[data-body-mode]").forEach((button) => button.addEventListener("click", () => { state.bodyMode = button.dataset.bodyMode; render(); }));
   query("[data-load-more]")?.addEventListener("click", () => void fetchEmails(state.nextPageToken));
   query("[data-retry-mailbox]")?.addEventListener("click", () => void startMailboxSync());
+  query("[data-refresh-inbox]")?.addEventListener("click", () => void startMailboxSync({ manual: true }));
   query("[data-ai-summarise]")?.addEventListener("click", () => void aiSummarise());
   query("[data-ai-extract]")?.addEventListener("click", () => void aiExtract());
   queryAll("[data-disconnect]").forEach((button) => button.addEventListener("click", async () => {
@@ -721,7 +739,11 @@ function bindEvents() {
   }));
   queryAll("[data-voice]").forEach((button) => button.addEventListener("click", openVoice));
   query("[data-close-voice]")?.addEventListener("click", () => closeVoice());
-  query(".modal-backdrop")?.addEventListener("click", event => { if (event.target.classList.contains("modal-backdrop")) closeActiveDialog(); });
+  query(".modal-backdrop")?.addEventListener("click", event => {
+    // Voice has rapidly changing controls. Requiring its explicit close button
+    // or Escape prevents a text-selection mouseup on the backdrop from closing it.
+    if (event.target.classList.contains("modal-backdrop") && !state.voiceOpen) closeActiveDialog();
+  });
   queryAll("[data-preference]").forEach(input => input.addEventListener("change", () => {
     const patch = { [input.dataset.preference]: input.type === "checkbox" ? input.checked : input.value };
     Object.assign(state.preferences, patch);
@@ -733,6 +755,7 @@ function bindEvents() {
   query("[data-record]")?.addEventListener("click", () => void startRecording());
   query("[data-restart-recording]")?.addEventListener("click", () => void startRecording({ restart: true }));
   query("[data-cancel-recording]")?.addEventListener("click", () => {
+    voiceStartGeneration++;
     cancelRequest("voice-intent"); cancelRequest("voice-targets");
     state.voice = { ...state.voice, text: "", error: "", intent: null, candidates: [], selectedTargetId: null, resultText: "" };
     voiceController.cancel();
@@ -932,18 +955,29 @@ async function fetchEmails(pageToken = null, { background = false } = {}) {
   }
 }
 
-async function startMailboxSync() {
+async function startMailboxSync({ manual = false } = {}) {
   const account = activeAccount();
   if (!account) return;
+  if (state.sync?.status === "syncing") {
+    if (state.sync.jobId) pollMailboxSync(state.sync.jobId);
+    return;
+  }
+  const previousSync = state.sync;
+  state.manualRefreshPending ||= manual;
   state.emailsError = "";
+  state.sync = { ...(state.sync || {}), status: "syncing", jobId: null };
+  render();
   try {
     const started = await api("/api/v1/emails/sync", { method: "POST" });
     state.sync = { ...(state.sync || {}), status: started.status, jobId: started.jobId };
     render();
     pollMailboxSync(started.jobId);
   } catch (error) {
-    state.emailsError = error.message;
-    render();
+    const manualFailure = state.manualRefreshPending;
+    state.sync = previousSync;
+    state.manualRefreshPending = false;
+    if (manualFailure) showToast(error.message);
+    else { state.emailsError = error.message; render(); }
   }
 }
 
@@ -956,11 +990,17 @@ function pollMailboxSync(jobId) {
       if (result.sync.status === "syncing" && result.sync.jobId) {
         pollMailboxSync(result.sync.jobId);
       } else {
+        const announceCompletion = state.manualRefreshPending;
+        state.manualRefreshPending = false;
         await fetchEmails(null, { background: true });
+        if (announceCompletion) showToast("Inbox refreshed", false);
       }
     } catch (error) {
-      state.emailsError = error.message;
-      render();
+      const manualFailure = state.manualRefreshPending;
+      state.manualRefreshPending = false;
+      state.sync = { ...(state.sync || {}), status: "failed", jobId: null };
+      if (manualFailure) showToast(error.message);
+      else { state.emailsError = error.message; render(); }
     }
   }, 700);
 }
@@ -971,6 +1011,7 @@ function resetMailbox() {
   state.selectedEmail = null;
   state.nextPageToken = null;
   state.sync = null;
+  state.manualRefreshPending = false;
   state.aiSummary = null;
   state.aiExtraction = null;
   state.calendarMonth = "";
@@ -1077,6 +1118,16 @@ async function bootstrap() {
 
 function t(text) { return translate(text, state.preferences.language); }
 
+function updateMailboxRefreshAge() {
+  const label = app.querySelector("[data-mail-refresh-status]");
+  if (!label || state.sync?.status === "syncing") return;
+  const age = formatRefreshAge(state.sync?.lastSyncedAt, { locale: state.preferences.language });
+  label.textContent = age ? `${t("Last refreshed")} ${age}` : t("Not refreshed yet");
+  label.title = state.sync?.lastSyncedAt
+    ? `${t("Last refreshed")}: ${formatLocalDateTime(state.sync.lastSyncedAt, state.preferences.language)}`
+    : t("Not refreshed yet");
+}
+
 function applyPreferences() {
   const p = state.preferences;
   document.body.dataset.theme = p.theme === "system" ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : p.theme;
@@ -1106,6 +1157,7 @@ const voiceController = new VoiceController({
   }),
   changed: update => {
     if (!state.voiceOpen) return;
+    const previousStatus = state.voice.status;
     if (update.status === "review" && state.voice.awaitingOrdinal) {
       const index = parseOrdinal(update.text);
       const candidate = state.voice.candidates[index];
@@ -1119,9 +1171,26 @@ const voiceController = new VoiceController({
     }
     state.voice = { ...state.voice, error: "", ...update };
     if (update.status === "review") state.voice.source = "voice";
+    if (update.status === "recording" && previousStatus === "recording" && update.text === undefined) {
+      updateVoiceRecordingIndicators();
+      return;
+    }
     render();
   }
 });
+
+function updateVoiceRecordingIndicators() {
+  const dialog = app.querySelector(".voice-modal");
+  if (!dialog) return;
+  const elapsed = Math.max(0, Number(state.voice.elapsed) || 0);
+  const time = dialog.querySelector(".microphone-status time");
+  if (time) {
+    time.dateTime = `PT${elapsed}S`;
+    time.textContent = `${String(Math.floor(elapsed / 60)).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}`;
+  }
+  const level = dialog.querySelector(".voice-level");
+  if (level) level.style.setProperty("--voice-level", String(Math.max(.08, Number(state.voice.level) || 0)));
+}
 
 async function speechApi(text, language, signal) {
   const response = await fetch("/api/v1/voice/speech", {
@@ -1149,6 +1218,8 @@ const voicePlayback = new VoicePlayback({
 });
 
 async function startRecording({ restart = false } = {}) {
+  if (!restart && ["requesting", "recording", "paused", "transcribing"].includes(state.voice.status)) return;
+  const generation = ++voiceStartGeneration;
   const available = state.capabilities?.transcriptionAvailable ?? state.capabilities?.available;
   if (!available) { state.voice.error = "Cloud transcription is unavailable. You can type below."; render(); return; }
   if (writer.saving || state.settingsStatus === "error") { state.voice.error = "Wait for Settings to finish saving, then try again."; render(); return; }
@@ -1158,10 +1229,13 @@ async function startRecording({ restart = false } = {}) {
     try {
       const payload = await api("/api/v1/settings", { method: "PATCH", body: JSON.stringify({ voiceEnabled: true }) });
       state.preferences = payload.settings; state.settingsStatus = "saved";
+      if (generation !== voiceStartGeneration || !state.voiceOpen) return;
     } catch (error) {
+      if (generation !== voiceStartGeneration || !state.voiceOpen) return;
       state.voice.status = "error"; state.voice.error = error.message; render(); return;
     }
   }
+  if (generation !== voiceStartGeneration || !state.voiceOpen) return;
   const choosing = !restart && state.voice.intent && state.voice.candidates.length > 1 && !state.voice.selectedTargetId;
   state.voice = {
     ...state.voice, status: "requesting", error: "", source: "voice", awaitingOrdinal: choosing,
@@ -1171,6 +1245,7 @@ async function startRecording({ restart = false } = {}) {
 }
 
 function closeVoice(shouldRender = true) {
+  voiceStartGeneration++;
   state.voiceOpen = false;
   cancelRequest("voice-intent"); cancelRequest("voice-targets");
   voiceController.cancel();
@@ -1376,9 +1451,11 @@ function renderOverlays() {
   const host = overlays.querySelector("[data-dialog-host]");
   const content = voiceModal() + sendConfirmationModal() + calendarModal();
   if (host._content !== content) {
+    const updatingVoiceDialog = Boolean(host.querySelector(".voice-modal")) && state.voiceOpen;
     const focus = captureFocus(host);
     const scroll = [...host.querySelectorAll("[data-preserve-scroll]")].map(element => [element.dataset.preserveScroll, element.scrollTop, element.scrollLeft]);
     host.innerHTML = content; host._content = content;
+    if (updatingVoiceDialog) host.querySelector(".voice-modal")?.classList.add("is-updating");
     restoreFocus(host, focus);
     for (const [key, top, left] of scroll) {
       const element = [...host.querySelectorAll("[data-preserve-scroll]")].find(candidate => candidate.dataset.preserveScroll === key);
@@ -1409,7 +1486,8 @@ for (const [id, role] of [["status-announcement", "status"], ["error-announcemen
 }
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyPreferences);
 matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change", applyPreferences);
-window.addEventListener("pagehide", () => voiceController.cancel());
+refreshAgeTimer = setInterval(updateMailboxRefreshAge, 30_000);
+window.addEventListener("pagehide", () => { clearInterval(refreshAgeTimer); voiceStartGeneration++; voiceController.cancel(); });
 render();
 bootstrap();
 

@@ -145,6 +145,13 @@ body[data-theme="dark"] {
 .mail-panel { max-width: 1180px; margin: 16px auto 0; overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow-sm); }
 .mail-panel-heading { height: 45px; display: flex; align-items: center; justify-content: space-between; padding: 0 18px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; }
 .mail-panel-heading .text-button { font-size: 12px; }
+.mail-panel-summary { min-width: 0; display: flex; align-items: center; gap: 18px; }
+.mail-refresh-status { flex: none; padding-left: 18px; border-left: 1px solid var(--line); white-space: nowrap; }
+.mail-refresh-button { min-height: 30px; flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--muted-strong); cursor: pointer; font-size: 12px; font-weight: 600; }
+.mail-refresh-button svg { width: 15px; height: 15px; }
+.mail-refresh-button:hover { border-color: var(--blue); color: var(--blue); }
+.mail-refresh-button:disabled { cursor: wait; opacity: .65; }
+.mail-refresh-button:disabled svg { animation: refresh-spin .8s linear infinite; }
 .email-row { min-height: 72px; display: grid; grid-template-columns: 28px 30px 40px minmax(120px, 170px) minmax(190px, 1fr) max-content 8px; align-items: center; gap: 10px; padding: 0 18px; border-bottom: 1px solid var(--line); cursor: pointer; transition: background .16s ease, transform .16s ease; }
 .email-row:last-child { border-bottom: 0; }
 .email-row:hover { background: var(--surface-soft); }
@@ -374,6 +381,7 @@ input.input-shell { padding: 0; }
 @keyframes fade-in { from { opacity: 0; } }
 @keyframes modal-in { from { opacity: 0; transform: translateY(14px) scale(.97); } }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 12px); } }
+@keyframes refresh-spin { to { transform: rotate(360deg); } }
 @keyframes pulse { to { inset: -30px; opacity: 0; } }
 @keyframes wave { to { height: calc(16px + (var(--i) % 5) * 6px); opacity: .45; } }
 
@@ -416,6 +424,11 @@ input.input-shell { padding: 0; }
   .email-content { display: grid; gap: 3px; }
   .email-content strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .email-content span { max-width: 100%; }
+  .inbox-panel-heading { height: auto; min-height: 45px; gap: 8px; padding-block: 7px; }
+  .mail-panel-summary { flex-wrap: wrap; gap: 3px 10px; }
+  .mail-refresh-status { padding-left: 10px; }
+  .mail-refresh-button { width: 32px; padding: 0; }
+  .mail-refresh-button span { display: none; }
   .compact-header { grid-template-columns: auto 1fr; }
   .compact-header > .header-actions, .compact-header > .secondary-button, .compact-header > .text-button { grid-column: 2; justify-self: start; }
   .message-card { min-height: 520px; padding: 18px; }
@@ -481,6 +494,7 @@ fieldset.setting-group legend { margin-left: 20px; padding: 0 6px; font-weight: 
 .voice-capture-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .voice-capture-controls button { width: 100%; min-height: 50px; justify-content: center; }
 .voice-capture-controls [data-record] { grid-column: 1 / -1; }
+.voice-capture-controls .permission-wait { grid-column: 1 / -1; }
 .voice-modal .privacy-note { font-size: 12px; line-height: 1.6; }
 .voice-modal a { color: var(--blue); text-decoration: underline; }
 .microphone-status { display: flex; align-items: center; gap: 9px; margin: 14px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); font-size: 13px; }
@@ -498,6 +512,16 @@ fieldset.setting-group legend { margin-left: 20px; padding: 0 6px; font-weight: 
 .voice-review h3, .voice-review h4, .voice-result h3, .voice-result h4 { margin: 0 0 8px; font-size: 15px; }
 .voice-review p, .voice-result p { margin: 6px 0; }
 .voice-result-copy { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
+.voice-calendar-actions { margin-top: 12px; padding: 12px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface); }
+.voice-calendar-actions h5 { margin: 0 0 5px; font-size: 14px; }
+.voice-calendar-actions > p { margin: 0 0 10px; color: var(--muted-strong); font-size: 12px; }
+.voice-calendar-actions ul { display: grid; gap: 9px; margin: 0; padding: 0; list-style: none; }
+.voice-calendar-actions li { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding-top: 9px; border-top: 1px solid var(--line); }
+.voice-calendar-actions li:first-child { padding-top: 0; border-top: 0; }
+.voice-calendar-actions li > span { min-width: 0; }
+.voice-calendar-actions strong, .voice-calendar-actions small { display: block; overflow-wrap: anywhere; }
+.voice-calendar-actions small { margin-top: 2px; color: var(--muted); font-size: 11px; }
+.voice-calendar-actions .secondary-button { min-height: 38px; padding: 8px 12px; white-space: nowrap; }
 .voice-candidates { display: grid; gap: 7px; margin: 12px 0; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
 .voice-candidates legend { padding: 0 5px; font-weight: 700; }
 .voice-candidates > p { margin: 0 0 4px; color: var(--muted); font-size: 12px; }
@@ -519,8 +543,11 @@ fieldset.setting-group legend { margin-left: 20px; padding: 0 6px; font-weight: 
 @media (max-width: 480px) {
   .voice-capture-controls { grid-template-columns: 1fr; }
   .voice-capture-controls [data-record] { grid-column: auto; }
+  .voice-calendar-actions li { grid-template-columns: 1fr; }
+  .voice-calendar-actions .secondary-button, .voice-calendar-actions a { justify-self: start; }
 }
 @keyframes mic-pulse { 70% { box-shadow: 0 0 0 9px rgba(216,59,59,0); } 100% { box-shadow: 0 0 0 0 rgba(216,59,59,0); } }
+.voice-modal.is-updating { animation: none; }
 .toast.error { border: 2px solid #ed9696; }
 .email-content, .message-from > div, .task-copy, .setting-name { min-width: 0; }
 .account-provider small, .message-from, .send-review dd { overflow-wrap: anywhere; }

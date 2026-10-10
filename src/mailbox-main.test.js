@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyClassifications, applyMailboxPage, calendarPayload, eventDraftFromExtraction, formatFullMailTime, formatMailTime, outgoingProblem, parseMailDate, replySubject, setMessageUnread } from "./mailbox-state.js";
+import { applyClassifications, applyMailboxPage, calendarPayload, eventDraftFromExtraction, formatFullMailTime, formatMailTime, formatRefreshAge, outgoingProblem, parseMailDate, replySubject, setMessageUnread } from "./mailbox-state.js";
 
 
 describe("mailbox state", () => {
@@ -181,5 +181,15 @@ describe("mail dates", () => {
   it("returns an empty string when the date cannot be read", () => {
     expect(formatMailTime("garbage", melbourne)).toBe("");
     expect(formatFullMailTime(null, melbourne)).toBe("");
+  });
+
+  it("describes mailbox freshness relative to the viewer's current time", () => {
+    const now = new Date("2026-10-10T03:00:00Z");
+    expect(formatRefreshAge("2026-10-10T02:59:40Z", { now, locale: "en-AU" })).toBe("just now");
+    expect(formatRefreshAge("2026-10-10T02:55:00Z", { now, locale: "en-AU" })).toBe("5 minutes ago");
+    expect(formatRefreshAge("2026-10-10T01:00:00Z", { now, locale: "en-AU" })).toBe("2 hours ago");
+    expect(formatRefreshAge("2026-10-08T03:00:00Z", { now, locale: "en-AU" })).toBe("2 days ago");
+    expect(formatRefreshAge("2026-10-10T02:59:40Z", { now, locale: "zh-CN" })).toBe("刚刚");
+    expect(formatRefreshAge("invalid", { now, locale: "en-AU" })).toBe("");
   });
 });

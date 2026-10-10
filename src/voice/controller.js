@@ -16,7 +16,7 @@ export class VoiceController {
     clearInterval(this.ticker);
     this.stream?.getTracks().forEach(track => track.stop()); this.stream = null;
   }
-  cancel() {
+  cancel({ announce = true } = {}) {
     this.generation++;
     this.abort?.abort(); this.abort = null;
     if (this.recorder) {
@@ -24,10 +24,13 @@ export class VoiceController {
       if (this.recorder.state !== "inactive") this.recorder.stop();
       this.recorder = null;
     }
-    this.release(); this.chunks = []; this.emit("idle");
+    this.release(); this.chunks = [];
+    if (announce) this.emit("idle"); else this.status = "idle";
   }
   async start(limits, language) {
-    this.cancel();
+    // Starting is a state transition, not a user-visible cancellation. Avoid
+    // flashing idle between the permission and recording states.
+    this.cancel({ announce: false });
     const generation = this.generation;
     if (!this.available()) { this.emit("error", { error: "Microphone recording is unavailable. Type a command instead." }); return; }
     this.emit("requesting");
@@ -42,12 +45,12 @@ export class VoiceController {
         if (generation !== this.generation || !event.data.size) return;
         this.bytes += event.data.size;
         if (this.bytes > limits.maxBytes) {
-          this.cancel(); this.emit("error", { error: "Recording is too large. Record a shorter command." }); return;
+          this.cancel({ announce: false }); this.emit("error", { error: "Recording is too large. Record a shorter command." }); return;
         }
         this.chunks.push(event.data);
         if (this.status === "recording") this.emit("recording", { elapsed: this.elapsedSeconds(), level: Math.min(1, event.data.size / 16000) });
       };
-      recorder.onerror = () => { if (generation === this.generation) { this.cancel(); this.emit("error", { error: "Recording failed. Try again or type a command." }); } };
+      recorder.onerror = () => { if (generation === this.generation) { this.cancel({ announce: false }); this.emit("error", { error: "Recording failed. Try again or type a command." }); } };
       recorder.onstop = async () => {
         if (generation !== this.generation) return;
         this.release(); this.recorder = null;
@@ -73,7 +76,7 @@ export class VoiceController {
       this.timer = setTimeout(() => this.finish(), limits.maxSeconds * 1000);
     } catch (error) {
       if (generation !== this.generation) return;
-      this.release();
+      this.release(); this.recorder = null;
       this.emit("error", { error: error.name === "NotAllowedError" ? "Microphone permission was denied. Type a command or change browser permissions." : "Microphone unavailable. Check the device or type a command." });
     }
   }

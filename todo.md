@@ -62,6 +62,7 @@ Acceptance criteria:
 ### FR-02 Inbox and Email Reading
 
 - [ ] Synchronize the email list and message bodies from the email provider.
+- [x] Show the last successful inbox synchronization age and provide a guarded manual refresh alongside automatic startup synchronization.
 - [ ] Support pagination or incremental loading instead of loading the entire mailbox at once.
 - [ ] Support keyword search, category filters, unread state, and starred messages.
 - [ ] Display sender, recipients, timestamp, body, and attachment metadata.
@@ -110,7 +111,7 @@ Acceptance criteria:
 - [ ] Distinguish explicit values, inferred values, and missing values.
 - [ ] Resolve relative dates into a specific date and timezone for user review.
 - [ ] Let users correct extracted values.
-- [ ] Create a task or calendar event only after user confirmation.
+- [ ] Create a task or calendar event only after user confirmation; voice extraction results must open the same editable calendar review rather than writing directly.
 - [ ] Prevent repeated actions from creating duplicate events.
 
 Acceptance criteria:

@@ -2,9 +2,9 @@ import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
 async function fixture(page, initial = {}) {
-  const { message: messageOverrides = {}, messages: messageFixtures, transcriptionText = "Show my tasks", summaryText = "Review the proposal.", summaryBullets = [], extraction = { events: [{ title: "Review meeting", date: "tomorrow", start: null, end: null, location: "Room 1" }], tasks: [{ title: "Submit review", due_date: "2026-10-12" }] }, ...preferenceOverrides } = initial;
+  const { message: messageOverrides = {}, messages: messageFixtures, transcriptionText = "Show my tasks", summaryText = "Review the proposal.", summaryBullets = [], settingsPatchDelayMs = 0, syncPollDelayMs = 0, syncStartFailure = false, extraction = { events: [{ title: "Review meeting", date: "tomorrow", start: null, end: null, location: "Room 1" }], tasks: [{ title: "Submit review", due_date: "2026-10-12" }] }, ...preferenceOverrides } = initial;
   let preferences = { language: "en", theme: "light", reducedMotion: false, defaultAiModel: "fixture-model", replyLength: "medium", speechLanguage: "auto", voiceEnabled: false, voiceAutoPlay: true, ...preferenceOverrides };
-  let summaryCalls = 0; let sendCalls = 0; const calendarCalls = []; const intentContexts = []; const speechRequests = [];
+  let summaryCalls = 0; let sendCalls = 0; let syncStarts = 0; let syncPolls = 0; let lastSyncedAt = new Date().toISOString(); const calendarCalls = []; const intentContexts = []; const speechRequests = [];
   const message = { id: "fixture-1", sender: "tester@example.com", recipients: ["reader@example.com"], subject: "Fixture planning", preview: "Review the proposal.", body_plain: "Please review the proposal.", unread: false, starred: false, category: "Primary", attachments: [], ...messageOverrides };
   const messages = messageFixtures || [message];
   await page.route("**/api/v1/**", async route => {
@@ -13,7 +13,10 @@ async function fixture(page, initial = {}) {
     if (url.pathname === "/api/v1/auth/session") body = { authenticated: true, csrfToken: "fixture", providers: { google: true }, user: { id: "fixture", displayName: "Test Reader", email: "reader@example.com" } };
     else if (url.pathname === "/api/v1/accounts") body = { accounts: [{ id: "fixture", email: "reader@example.com", status: "CONNECTED", scopes: ["gmail.modify"] }] };
     else if (url.pathname === "/api/v1/settings") {
-      if (route.request().method() === "PATCH") Object.assign(preferences, route.request().postDataJSON());
+      if (route.request().method() === "PATCH") {
+        if (settingsPatchDelayMs) await new Promise(resolve => setTimeout(resolve, settingsPatchDelayMs));
+        Object.assign(preferences, route.request().postDataJSON());
+      }
       body = { settings: preferences, allowedAiModels: ["fixture-model"] };
     } else if (url.pathname === "/api/v1/voice/capabilities") body = { available: true, transcriptionAvailable: true, synthesisAvailable: true, intentAvailable: true, maxBytes: 10485760, maxSeconds: 60, maxSpeechChars: 4096, languages: ["auto", "en-AU", "en-US", "zh-CN"] };
     else if (url.pathname === "/api/v1/voice/transcriptions") body = { text: transcriptionText };
@@ -34,14 +37,26 @@ async function fixture(page, initial = {}) {
       else if (transcript.includes("missing sender")) body = { detectedLanguage: "en", action: "summarize_message", target: { mode: "search", terms: "", sender: "missing@example.com", subject: "", unread: null, starred: null, priority: null, newest: true }, destination: null, displayText: "Summarise an email from a missing sender", confidence: "high" };
       else if (transcript.includes("unclear request")) body = { detectedLanguage: "en", action: "summarize_message", target: { mode: "search", terms: "", sender: "", subject: "", unread: null, starred: null, priority: null, newest: true }, destination: null, displayText: "Unclear mailbox request", confidence: "low" };
       else if (transcript.includes("highest priority") || transcript.includes("important")) body = { detectedLanguage: "en", action: "summarize_message", target: { mode: "search", terms: "", sender: "", subject: "", unread: null, starred: null, priority: null, newest: true }, destination: null, displayText: "Summarise an important recent email", confidence: "high" };
+      else if (transcript.includes("extract")) body = { detectedLanguage: "en", action: "extract_details", target: { mode: "current", terms: "", sender: "", subject: "", unread: null, starred: null, priority: null, newest: true }, destination: null, displayText: "Extract tasks and events from the current email", confidence: "high" };
       else if (transcript.includes("task")) body = { detectedLanguage: "en", action: "show_tasks", target: { mode: "none", terms: "", sender: "", subject: "", unread: null, starred: null, priority: null, newest: true }, destination: null, displayText: "Show tasks", confidence: "high" };
       else body = { detectedLanguage: transcript.includes("总结") ? "zh-CN" : "en", action: "summarize_message", target: { mode: "current", terms: "", sender: "", subject: "", unread: null, starred: null, priority: null, newest: true }, destination: null, displayText: "Summarise the current email", confidence: "high" };
     }
-    else if (url.pathname === "/api/v1/emails") body = { messages, sync: { status: "completed" } };
+    else if (url.pathname === "/api/v1/emails") body = { messages, sync: { status: "idle", lastSyncedAt } };
     else if (messages.some(item => url.pathname === `/api/v1/emails/${item.id}`)) body = messages.find(item => url.pathname === `/api/v1/emails/${item.id}`) || message;
     else if (url.pathname === "/api/v1/emails/fixture-1/reply-metadata") body = { reply_to: ["support@example.com"], subject: message.subject };
-    else if (url.pathname === "/api/v1/emails/sync") body = { jobId: "fixture-job", status: "syncing" };
-    else if (url.pathname.startsWith("/api/v1/emails/sync/")) body = { sync: { status: "completed" } };
+    else if (url.pathname === "/api/v1/emails/sync") {
+      syncStarts++;
+      if (syncStartFailure && syncStarts > 1) {
+        await route.fulfill({ status: 503, json: { error: { code: "SYNC_UNAVAILABLE", message: "Inbox refresh is temporarily unavailable.", retryable: true, correlationId: "fixture" } } }); return;
+      }
+      body = { jobId: `fixture-job-${syncStarts}`, status: "syncing" };
+    }
+    else if (url.pathname.startsWith("/api/v1/emails/sync/")) {
+      syncPolls++;
+      if (syncPollDelayMs) await new Promise(resolve => setTimeout(resolve, syncPollDelayMs));
+      lastSyncedAt = new Date().toISOString();
+      body = { sync: { status: "idle", lastSyncedAt, jobId: null } };
+    }
     else if (url.pathname === "/api/v1/ai/classify") body = { classifications: Object.fromEntries((route.request().postDataJSON()?.messages || []).flatMap(item => {
       const found = messages.find(candidate => String(candidate.id) === String(item.id));
       return found?.priority ? [[String(item.id), { priority: found.priority, reason: "Fixture priority" }]] : [];
@@ -56,7 +71,50 @@ async function fixture(page, initial = {}) {
     await route.fulfill({ json: body });
   });
   await page.goto("/"); await expect(page.locator("[data-email]").first()).toBeVisible();
-  return { summaryCalls: () => summaryCalls, sendCalls: () => sendCalls, preferences: () => preferences, calendarCalls, intentContexts, speechRequests };
+  return { summaryCalls: () => summaryCalls, sendCalls: () => sendCalls, syncStarts: () => syncStarts, syncPolls: () => syncPolls, preferences: () => preferences, calendarCalls, intentContexts, speechRequests };
+}
+
+test("a failed manual refresh keeps cached inbox content available", async ({ page }) => {
+  const calls = await fixture(page, { syncStartFailure: true });
+  const refresh = page.locator("[data-refresh-inbox]");
+  await expect(refresh).toBeEnabled();
+  const startsBeforeClick = calls.syncStarts();
+  await refresh.click();
+  await expect.poll(calls.syncStarts).toBe(startsBeforeClick + 1);
+  await expect(page.locator(".toast.error")).toContainText("Inbox refresh is temporarily unavailable.");
+  await expect(refresh).toBeEnabled();
+  await expect(page.locator("[data-email]")).toHaveCount(1);
+  await expect(page.getByText("Mailbox unavailable")).toHaveCount(0);
+  await expect(page.locator("[data-mail-refresh-status]")).toContainText("Last refreshed");
+});
+
+for (const width of [1280, 320]) {
+  test(`inbox shows freshness and supports a manual refresh without moving the page toolbar at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const calls = await fixture(page, { syncPollDelayMs: 200 });
+    const heading = page.locator(".inbox-panel-heading");
+    const refresh = page.locator("[data-refresh-inbox]");
+    await expect(refresh).toBeEnabled();
+    await expect(heading).toContainText("1 conversation");
+    await expect(heading).toContainText("1 email could not be classified");
+    await expect(page.locator("[data-mail-refresh-status]")).toContainText("Last refreshed just now");
+    const headingText = await heading.textContent();
+    expect(headingText.indexOf("could not be classified")).toBeLessThan(headingText.indexOf("Last refreshed"));
+    const toolbarBefore = await page.locator(".inbox-toolbar").boundingBox();
+    if (width > 720) expect((await heading.boundingBox()).height).toBe(45);
+    const startsBeforeClick = calls.syncStarts();
+    await refresh.click();
+    await expect.poll(calls.syncStarts).toBe(startsBeforeClick + 1);
+    await expect(refresh).toBeDisabled();
+    await expect(refresh).toHaveAttribute("aria-label", "Refreshing inbox");
+    await expect(heading).toContainText("Synchronising…");
+    expect(await page.locator(".inbox-toolbar").boundingBox()).toEqual(toolbarBefore);
+    await expect(refresh).toBeEnabled();
+    await expect(page.locator("[data-mail-refresh-status]")).toContainText("Last refreshed just now");
+    await expect(page.locator(".toast")).toContainText("Inbox refreshed");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: `build/module7-browser-results/inbox-refresh-${width}.png`, fullPage: true });
+  });
 }
 
 for (const width of [1280, 320]) {
@@ -395,7 +453,7 @@ test("global voice review resolves ranked candidates and requires target confirm
   await page.locator("[data-voice-candidate]").first().check();
   await page.locator("[data-run-command]").click();
   await expect.poll(calls.summaryCalls).toBe(1);
-  await expect(page.getByRole("heading", { name: "Result ready" })).toBeVisible();
+  await expect(page.getByRole("dialog").getByRole("heading", { name: "Summary", exact: true })).toBeVisible();
 });
 
 test("a reviewed search target remains available to a recorded follow-up command", async ({ browser }) => {
@@ -476,6 +534,40 @@ test("voice playback updates preserve the output scroll position", async ({ page
   expect(await pane.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
 });
 
+for (const width of [1280, 320]) {
+  test(`voice extraction offers calendar review without writing before confirmation at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const calls = await fixture(page, {
+      voiceEnabled: true,
+      voiceAutoPlay: false,
+      extraction: { events: [{ title: "Planning review", date: "2026-10-12", time: "2 pm to 4 pm", location: "Zoom" }], tasks: [] }
+    });
+    await page.locator("[data-email]").click();
+    await page.locator("[data-voice]").click();
+    await page.locator("#voice-transcript").fill("Extract tasks and events from this email");
+    await page.locator("[data-run-command]").click();
+    await page.locator("[data-run-command]").click();
+
+    const result = page.locator(".voice-result");
+    const actions = result.locator(".voice-calendar-actions");
+    await expect(actions.getByRole("heading", { name: "Calendar actions" })).toBeVisible();
+    await expect(result.locator(':scope > [role="status"] + .voice-calendar-actions')).toBeVisible();
+    await expect(actions).toContainText("Planning review");
+    await expect(actions).toContainText("Nothing is added until you confirm.");
+    expect(calls.calendarCalls).toHaveLength(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const accessibility = await new AxeBuilder({ page }).include(".voice-calendar-actions").withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
+    expect(accessibility.violations.map(violation => ({ id: violation.id, nodes: violation.nodes.map(node => node.target) }))).toEqual([]);
+    await actions.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `build/module7-browser-results/voice-calendar-actions-${width}.png`, fullPage: true });
+
+    await actions.getByRole("button", { name: "Review and add" }).click();
+    await expect(page.getByRole("heading", { name: "Add this event?" })).toBeVisible();
+    await expect(page.locator('[data-cal-field="title"]')).toHaveValue("Planning review");
+    expect(calls.calendarCalls).toHaveLength(0);
+  });
+}
+
 test("real browser media capture enables consent, pauses, releases and requires two-step review", async ({ browser }) => {
   const context = await browser.newContext({ permissions: ["microphone"] });
   const page = await context.newPage();
@@ -515,7 +607,60 @@ test("real browser media capture enables consent, pauses, releases and requires 
   await page.locator("[data-run-command]").click();
   await expect(page.getByRole("heading", { name: "Command preview" })).toBeVisible();
   await page.locator("[data-run-command]").click();
-  await expect(page.getByRole("heading", { name: "Tasks", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Tasks", exact: true })).toBeVisible();
   await expect(page.getByText("Project Meeting", { exact: true })).toHaveCount(0);
+  await context.close();
+});
+
+test("permission wait is English and cancellation prevents a delayed microphone start", async ({ browser }) => {
+  const context = await browser.newContext({ permissions: ["microphone"] });
+  const page = await context.newPage();
+  await page.addInitScript(() => {
+    const original = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    window.__voiceGetUserMediaCalls = 0;
+    navigator.mediaDevices.getUserMedia = (...args) => {
+      window.__voiceGetUserMediaCalls += 1;
+      return original(...args);
+    };
+  });
+  await fixture(page, { language: "zh-CN", voiceEnabled: false, voiceAutoPlay: false, settingsPatchDelayMs: 500 });
+  await page.locator("[data-voice]").click();
+  await page.locator("[data-record]").click();
+  await expect(page.locator("[data-voice-status]")).toHaveText("Waiting for microphone permission — microphone not recording");
+  await expect(page.getByRole("button", { name: "Waiting for permission…" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Cancel", exact: true })).toBeVisible();
+  await expect(page.locator("[data-restart-recording]")).toHaveCount(0);
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await page.waitForTimeout(650);
+  expect(await page.evaluate(() => window.__voiceGetUserMediaCalls)).toBe(0);
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await context.close();
+});
+
+test("recording updates preserve the dialog and backdrop selection cannot close it", async ({ browser }) => {
+  const context = await browser.newContext({ permissions: ["microphone"] });
+  const page = await context.newPage();
+  await fixture(page, { voiceEnabled: true, voiceAutoPlay: false });
+  await page.locator("[data-voice]").click();
+  await page.locator("[data-record]").click();
+  await expect(page.locator("[data-voice-status]")).toHaveText("Microphone on — recording");
+  await page.locator(".voice-modal").evaluate(dialog => {
+    dialog.dataset.stabilityMarker = "preserved";
+    const text = dialog.querySelector(".privacy-note")?.firstChild;
+    if (!text) return;
+    const range = document.createRange();
+    range.selectNodeContents(text);
+    const selection = getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  });
+  await page.waitForTimeout(1200);
+  await expect(page.locator('.voice-modal[data-stability-marker="preserved"]')).toBeVisible();
+  expect(await page.evaluate(() => getSelection()?.toString().includes("Starting records only after permission"))).toBe(true);
+  await page.locator(".modal-backdrop").click({ position: { x: 4, y: 4 } });
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.locator("[data-cancel-recording]").click();
+  await page.locator("[data-close-voice]").click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await context.close();
 });
