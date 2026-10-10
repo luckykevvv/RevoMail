@@ -1,10 +1,10 @@
 const PRIORITY = { high: 3, medium: 2, low: 1 };
 
 export function parseCommand(text) {
-  const command = String(text).trim().toLowerCase().replace(/[.!?。！？]$/, "").replace(/\s+/g, " ");
-  if (/^summari[sz]e (the )?current email$/.test(command) || /^(总结|概括)(当前|这封)邮件$/.test(command)) return "summary";
-  if (/^(draft|generate) a reply$/.test(command) || /^(生成|起草)(一封)?回复(草稿)?$/.test(command)) return "reply";
-  if (/^show (my )?tasks$/.test(command) || /^(显示|查看)(我的)?任务$/.test(command)) return "tasks";
+  const command = String(text).trim().toLowerCase().replace(/[.!?]$/, "").replace(/\s+/g, " ");
+  if (/^summari[sz]e (the )?current email$/.test(command)) return "summary";
+  if (/^(draft|generate) a reply$/.test(command)) return "reply";
+  if (/^show (my )?tasks$/.test(command)) return "tasks";
   return null;
 }
 
@@ -18,9 +18,7 @@ export function validateCommand(text, targetId, currentId) {
 }
 
 export function parseOrdinal(text) {
-  const command = String(text).trim().toLowerCase().replace(/[.!?。！？]/g, "");
-  const chinese = command.match(/(?:第)?([一二三四五12345])(?:封|个)?/);
-  if (chinese) return ({ 一: 1, 二: 2, 三: 3, 四: 4, 五: 5 }[chinese[1]] || Number(chinese[1])) - 1;
+  const command = String(text).trim().toLowerCase().replace(/[.!?]/g, "");
   const english = command.match(/\b(?:number\s+)?(first|second|third|fourth|fifth|[1-5])(?:\s+(?:one|email|message))?\b/);
   if (!english) return -1;
   return ({ first: 1, second: 2, third: 3, fourth: 4, fifth: 5 }[english[1]] || Number(english[1])) - 1;
@@ -59,7 +57,7 @@ export function chunkSpeech(text, maximum = 4000) {
   let remaining = value;
   while (remaining.length > maximum) {
     const window = remaining.slice(0, maximum + 1);
-    const boundaries = [...window.matchAll(/[.!?。！？]\s*|\n+/g)];
+    const boundaries = [...window.matchAll(/[.!?]\s*|\n+/g)];
     const boundary = boundaries.filter(match => match.index + match[0].length <= maximum).at(-1);
     const whitespace = window.slice(0, maximum + 1).lastIndexOf(" ");
     const split = boundary ? boundary.index + boundary[0].length : whitespace > maximum / 2 ? whitespace : maximum;

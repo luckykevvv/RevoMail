@@ -97,10 +97,10 @@ async function openMailWindow() {
     origin: () => serviceController.snapshot().url,
     confirm: async () => {
       const result = await dialog.showMessageBox(mailWindow, {
-        type: "question", title: "RevoMail microphone / 麦克风权限",
-        message: "Allow microphone access for voice commands? / 允许使用麦克风输入语音命令？",
-        detail: "Audio is uploaded to OpenAI only when you finish recording. / 结束录音后，音频将上传至 OpenAI 转写。",
-        buttons: ["Deny / 拒绝", "Allow / 允许"], defaultId: 0, cancelId: 0,
+        type: "question", title: "RevoMail microphone",
+        message: "Allow microphone access for voice commands?",
+        detail: "Audio is uploaded to OpenAI only when you finish recording.",
+        buttons: ["Deny", "Allow"], defaultId: 0, cancelId: 0,
       });
       return result.response === 1;
     }

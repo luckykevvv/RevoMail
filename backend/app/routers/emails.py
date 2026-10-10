@@ -57,13 +57,14 @@ async def list_emails(
     category: str | None = Query(default=None, max_length=50),
     unread: bool | None = None,
     starred: bool | None = None,
-    label: Literal["INBOX", "SENT"] = "INBOX",
+    label: Literal["INBOX", "SENT", "STARRED"] = "INBOX",
 ):
     _session, account, tokens = require_mailbox(request)
     repository = request.app.state.mailbox_repository
-    if label == "SENT":
+    if label in ("SENT", "STARRED"):
+        # Sent and starred mail is read straight from Gmail (starred mail may be archived), never cached as inbox mail.
         try:
-            page = await run_in_threadpool(GmailAdapter(tokens).list_messages, min(max_results, 50), page_token, query.strip(), ["SENT"])
+            page = await run_in_threadpool(GmailAdapter(tokens).list_messages, min(max_results, 50), page_token, query.strip(), [label])
         except MailProviderError as exc:
             raise _provider_error(exc) from exc
         return {"messages": [_legacy_summary(item) for item in page["items"]], "next_page_token": page.get("nextCursor"), "sync": None}

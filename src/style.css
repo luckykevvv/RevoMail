@@ -135,6 +135,10 @@ body[data-theme="dark"] {
 .search-box { height: 50px; flex: 1; display: flex; align-items: center; gap: 11px; padding: 0 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-sm); color: var(--muted); }
 .search-box:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(18,104,243,.09); }
 .search-box input { min-width: 0; flex: 1; border: 0; outline: 0; color: var(--ink); background: transparent; }
+.refresh-button { height: 50px; flex: none; border-radius: 12px; }
+.refresh-button.is-refreshing svg { animation: refresh-spin 1s linear infinite; }
+@keyframes refresh-spin { to { transform: rotate(360deg); } }
+@media (max-width: 640px) { .inbox-toolbar .search-box { min-width: 0; } .refresh-button { width: 50px; padding: 0; } .refresh-button span { display: none; } }
 .search-box kbd { padding: 3px 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-soft); color: var(--muted); font-size: 10px; }
 .filter-button { flex: none; width: 50px; height: 50px; border: 1px solid var(--line); background: var(--surface); }
 .category-tabs, .task-tabs { max-width: 1180px; margin: 19px auto 0; display: flex; gap: 22px; border-bottom: 1px solid var(--line); }
@@ -155,6 +159,7 @@ body[data-theme="dark"] {
 .star-button { width: 28px; height: 28px; color: var(--muted); }
 .star-button svg { width: 18px; }
 .star-button.starred { color: #ef9f27; fill: #ef9f27; }
+.star-button.starred svg { fill: currentColor; }
 .email-sender { overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .email-content { min-width: 0; display: flex; gap: 8px; align-items: baseline; }
 .email-content strong { flex: none; font-size: 13px; }
@@ -371,6 +376,7 @@ input.input-shell { padding: 0; }
 .toast { position: fixed; left: 50%; bottom: 26px; z-index: 200; display: flex; align-items: center; gap: 9px; padding: 13px 17px; border: 1px solid rgba(255,255,255,.1); border-radius: 12px; background: #182133; color: #fff; box-shadow: 0 16px 40px rgba(0,0,0,.25); font-size: 13px; transform: translateX(-50%); animation: toast-in .25s ease both; }
 .toast svg { color: #6ee7b7; }
 
+.modal-backdrop.no-enter-animation, .modal-backdrop.no-enter-animation > [role="dialog"] { animation: none; }
 @keyframes fade-in { from { opacity: 0; } }
 @keyframes modal-in { from { opacity: 0; transform: translateY(14px) scale(.97); } }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 12px); } }

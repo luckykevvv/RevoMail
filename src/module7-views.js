@@ -5,7 +5,6 @@ export function preferencesView({ preferences: p, models, status, error, account
     ${error ? `<p role="alert">${t("Settings could not be loaded. Retry before changing preferences.")} <button data-retry-settings>${t("Retry")}</button></p>` : ""}
     ${status === "error" ? `<button class="secondary-button" data-retry-save>${t("Retry saving")}</button>` : ""}
     <div class="settings-stack">${accounts}<fieldset class="setting-group" ${error || status === "loading" ? "disabled" : ""}><legend>${t("General")}</legend>
-    ${select("language", "Language", [["en", "English"], ["zh-CN", "简体中文"]])}
     ${select("theme", "Theme", [["system", "System"], ["light", "Light"], ["dark", "Dark"]])}
     ${toggle("reducedMotion", "Reduce motion")}</fieldset>
     <fieldset class="setting-group" ${error || status === "loading" ? "disabled" : ""}><legend>${t("AI preferences")}</legend>
@@ -15,8 +14,8 @@ export function preferencesView({ preferences: p, models, status, error, account
     <fieldset class="setting-group" ${error || status === "loading" ? "disabled" : ""}><legend>${t("Voice")}</legend>
     ${toggle("voiceEnabled", "Voice input")}
     ${toggle("voiceAutoPlay", "Automatically read voice-command results")}
-    ${select("speechLanguage", "Speech-to-text language", [["auto", "Detect English or Chinese automatically"], ["en-AU", "English (AU)"], ["en-US", "English (US)"], ["zh-CN", "简体中文"]])}
-    <p class="setting-row">${t("English and Chinese commands are supported. Keyboard commands remain available when voice is off.")}</p></fieldset></div>`;
+    ${select("speechLanguage", "Speech-to-text language", [["auto", "Automatic (English)"], ["en-AU", "English (AU)"], ["en-US", "English (US)"]])}
+    <p class="setting-row">${t("English commands are supported. Keyboard commands remain available when voice is off.")}</p></fieldset></div>`;
 }
 
 export function voiceView({ voice: v, enabled, capabilities, currentEmail, escape: e, t }) {

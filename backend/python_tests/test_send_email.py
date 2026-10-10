@@ -60,6 +60,18 @@ def test_sent_page_is_not_inserted_into_inbox_cache(client, monkeypatch):
     assert client.get("/api/v1/emails?label=TRASH").status_code == 422
 
 
+def test_starred_page_reads_gmail_starred_label_without_caching(client, monkeypatch):
+    login_csrf(client)
+    calls = []
+    monkeypatch.setattr(gmail.GmailAdapter, "__init__", lambda self, tokens: None)
+    monkeypatch.setattr(gmail.GmailAdapter, "list_messages", lambda self, *args: calls.append(args) or {"items": [{"id": "starred-archived", "starred": True}], "nextCursor": None})
+    monkeypatch.setattr(client.app.state.mailbox_repository, "upsert_messages", lambda *args: pytest.fail("STARRED must not enter INBOX cache"))
+    response = client.get("/api/v1/emails?label=STARRED")
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()["messages"]] == ["starred-archived"]
+    assert calls == [(20, None, "", ["STARRED"])]
+
+
 def test_reply_adapter_preserves_reviewed_recipients_and_references():
     fake = FakeGmail(ORIGINAL)
     adapter = object.__new__(gmail.GmailAdapter)

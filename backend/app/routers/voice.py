@@ -8,7 +8,7 @@ from backend.app.errors import AppError
 from backend.app.services.voice_intent import parse_intent
 
 router = APIRouter()
-LANGUAGES = ["auto", "en-AU", "en-US", "zh-CN"]
+LANGUAGES = ["auto", "en-AU", "en-US"]
 MIME_TYPES = ["audio/webm", "audio/mp4", "audio/ogg"]
 
 

@@ -7,24 +7,24 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 class Preferences(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
-    language: Literal["en", "zh-CN"] = "en"
+    language: Literal["en"] = "en"
     theme: Literal["system", "light", "dark"] = "system"
     reducedMotion: bool = False
     defaultAiModel: str | None = None
     replyLength: Literal["concise", "medium", "detailed"] = "medium"
-    speechLanguage: Literal["auto", "en-AU", "en-US", "zh-CN"] = "auto"
+    speechLanguage: Literal["auto", "en-AU", "en-US"] = "auto"
     voiceEnabled: bool = False
     voiceAutoPlay: bool = True
 
 
 class PreferencesPatch(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
-    language: Literal["en", "zh-CN"] | None = None
+    language: Literal["en"] | None = None
     theme: Literal["system", "light", "dark"] | None = None
     reducedMotion: bool | None = None
     defaultAiModel: str | None = None
     replyLength: Literal["concise", "medium", "detailed"] | None = None
-    speechLanguage: Literal["auto", "en-AU", "en-US", "zh-CN"] | None = None
+    speechLanguage: Literal["auto", "en-AU", "en-US"] | None = None
     voiceEnabled: bool | None = None
     voiceAutoPlay: bool | None = None
 

@@ -60,6 +60,36 @@ export function applyMailboxPage(currentMessages, payload, { append = false } = 
   };
 }
 
+// Merge a refreshed first page into the list already on screen. Priority labels already worked out are
+// kept (so refreshes do not re-classify everything), and older emails the user paged in with "Load more"
+// stay in the list instead of disappearing.
+export function mergeRefreshedPage(currentMessages, payload, currentPageToken = null) {
+  const fresh = Array.isArray(payload?.messages) ? payload.messages : [];
+  const known = new Map(currentMessages.map((message) => [String(message.id), message]));
+  const firstPage = fresh.map((message) => {
+    const previous = known.get(String(message.id));
+    return previous?.priority && !message.priority
+      ? { ...message, priority: previous.priority, priorityReason: previous.priorityReason || "" }
+      : message;
+  });
+  const freshPageToken = payload?.next_page_token || null;
+  const sync = payload?.sync || null;
+  if (!freshPageToken) return { messages: firstPage, nextPageToken: null, sync };
+  const freshIds = new Set(firstPage.map((message) => String(message.id)));
+  const freshDates = firstPage.map((message) => parseMailDate(message.receivedAt || message.date)?.getTime()).filter(Number.isFinite);
+  const oldestFresh = freshDates.length ? Math.min(...freshDates) : null;
+  const olderPages = currentMessages.filter((message) => {
+    if (freshIds.has(String(message.id))) return false;
+    const time = parseMailDate(message.receivedAt || message.date)?.getTime();
+    return oldestFresh === null || !Number.isFinite(time) || time < oldestFresh;
+  });
+  return {
+    messages: [...firstPage, ...olderPages],
+    nextPageToken: olderPages.length ? currentPageToken || freshPageToken : freshPageToken,
+    sync
+  };
+}
+
 export const PRIORITY_LEVELS = ["high", "medium", "low"];
 
 export function applyClassifications(messages, classifications) {

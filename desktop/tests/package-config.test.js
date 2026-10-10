@@ -40,7 +40,7 @@ describe("desktop package configuration", () => {
     expect(packageJson.build.asarUnpack).toContain("dist/**/*");
     expect(packageJson.build.files).not.toContain("backend/**/*");
     expect(packageJson.build.files).not.toContain("server.js");
-    expect(packageJson.build.electronLanguages).toEqual(["en-US", "zh-CN"]);
+    expect(packageJson.build.electronLanguages).toEqual(["en-US"]);
     expect(packageJson.dependencies).toEqual({
       dotenv: "^16.4.7",
       zod: "^4.4.3",

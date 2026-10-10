@@ -24,16 +24,16 @@ def test_settings_auth_validation_persistence_and_isolation(client):
     assert initial["settings"]["voiceAutoPlay"] is True
     assert initial["settings"]["speechLanguage"] == "auto"
     assert client.patch("/api/v1/settings", json={"theme": "dark"}).status_code == 403
-    for patch in ({"language": "es"}, {"voiceEnabled": "true"}, {"theme": None}, {"unknown": 1}, {"defaultAiModel": "fake"}, {}):
+    for patch in ({"language": "es"}, {"language": "zh-CN"}, {"speechLanguage": "zh-CN"}, {"voiceEnabled": "true"}, {"theme": None}, {"unknown": 1}, {"defaultAiModel": "fake"}, {}):
         assert client.patch("/api/v1/settings", headers=headers(client), json=patch).status_code == 422
-    updated = {"language": "zh-CN", "theme": "dark", "voiceEnabled": True, "replyLength": "detailed"}
+    updated = {"language": "en", "theme": "dark", "voiceEnabled": True, "replyLength": "detailed"}
     assert client.patch("/api/v1/settings", headers=headers(client), json=updated).status_code == 200
     repository = PreferencesRepository(client.app.state.database, client.app.state.settings)
     assert repository.get("user-1") | updated == repository.get("user-1")
     assert repository.get("other-user")["theme"] == "system"
     assert client.post("/api/v1/auth/logout", headers=headers(client)).status_code in (200, 204)
     authenticate(client)
-    assert client.get("/api/v1/settings").json()["settings"]["language"] == "zh-CN"
+    assert client.get("/api/v1/settings").json()["settings"]["language"] == "en"
 
 
 def test_corrupt_preferences_fall_back_per_field(client):
@@ -41,11 +41,12 @@ def test_corrupt_preferences_fall_back_per_field(client):
     repository = client.app.state.preferences
     repository.update("user-1", {"theme": "dark", "voiceEnabled": True})
     with client.app.state.database.connect() as connection:
-        connection.execute('UPDATE "UserSettings" SET "language"=?, "reducedMotion"=?, "defaultAiModel"=? WHERE "userId"=?', ("invalid", 9, "unknown", "user-1"))
+        connection.execute('UPDATE "UserSettings" SET "language"=?, "speechLanguage"=?, "reducedMotion"=?, "defaultAiModel"=? WHERE "userId"=?', ("zh-CN", "zh-CN", 9, "unknown", "user-1"))
     values = repository.get("user-1")
     assert values["theme"] == "dark"
     assert values["voiceEnabled"] is True
     assert values["language"] == "en"
+    assert values["speechLanguage"] == "auto"
     assert values["reducedMotion"] is False
     assert values["defaultAiModel"] == repository.models[0]
 
@@ -82,13 +83,13 @@ def test_voice_intent_review_and_tts_boundaries(client, monkeypatch, caplog):
     authenticate(client)
     h = headers(client)
     intent = client.post("/api/v1/voice/intents", headers=h, json={
-        "transcript": "总结这封邮件", "language": "auto",
+        "transcript": "Summarise this email", "language": "auto",
         "context": {"view": "reading", "currentMessageId": "message-1"},
     })
     assert intent.status_code == 200
     assert intent.json()["action"] == "summarize_message"
     assert intent.json()["target"]["mode"] == "current"
-    assert intent.json()["detectedLanguage"] == "zh-CN"
+    assert intent.json()["detectedLanguage"] == "en"
     assert intent.json()["displayText"] == "Summarise the selected email"
     polite_intent = client.post("/api/v1/voice/intents", headers=h, json={
         "transcript": "Help me summarize this email.", "language": "auto",
@@ -120,9 +121,6 @@ def test_voice_intent_review_and_tts_boundaries(client, monkeypatch, caplog):
 @pytest.mark.parametrize("transcript,action", [
     ("Could you please summarise this email for me?", "summarize_message"),
     ("Please generate a reply to the current email.", "draft_reply"),
-    ("请帮我总结一下这封邮件。", "summarize_message"),
-    ("可以帮我打开当前邮件吗？", "open_message"),
-    ("麻烦你帮我查看我的任务。", "show_tasks"),
 ])
 def test_polite_voice_commands_remain_deterministic(transcript, action):
     parsed = voice_intent.deterministic_intent(transcript, "auto")
@@ -132,7 +130,6 @@ def test_polite_voice_commands_remain_deterministic(transcript, action):
 @pytest.mark.parametrize("transcript,action,sender", [
     ("Help me find the email from Hassan", "search_messages", "hassan"),
     ("Search the email from Hassan and summarize it.", "summarize_message", "hassan"),
-    ("查找 Hassan 的邮件并总结它", "summarize_message", "hassan"),
 ])
 def test_mailbox_search_and_safe_terminal_action_remain_one_reviewed_intent(transcript, action, sender):
     parsed = voice_intent.deterministic_intent(transcript, "auto")
@@ -145,7 +142,6 @@ def test_mailbox_search_and_safe_terminal_action_remain_one_reviewed_intent(tran
     ("Summarise it", "summarize_message"),
     ("Generate a reply to it", "draft_reply"),
     ("Extract details from the selected email", "extract_details"),
-    ("总结它", "summarize_message"),
 ])
 def test_follow_up_references_use_the_reviewed_current_target(transcript, action):
     parsed = voice_intent.deterministic_intent(transcript, "auto")
@@ -162,7 +158,6 @@ def test_polite_unsafe_voice_command_is_still_rejected():
 @pytest.mark.parametrize("transcript", [
     "Help me summarize the highest priority email.",
     "Please summarise the most important recent email.",
-    "请帮我总结一下优先级最高的邮件。",
 ])
 def test_highest_priority_summary_uses_ranked_mailbox_candidates(transcript):
     parsed = voice_intent.deterministic_intent(transcript, "auto")
@@ -225,17 +220,17 @@ def test_speech_provider_mapping(monkeypatch, status, payload, expected):
         assert asyncio.run(service.transcribe(b"fixture", "audio/webm", "en-AU")) == "Show my tasks"
 
 
-def test_auto_transcription_omits_provider_language_hint(monkeypatch):
+def test_transcription_always_requests_english(monkeypatch):
     class Client:
         def __init__(self, **kwargs): pass
         async def __aenter__(self): return self
         async def __aexit__(self, *args): pass
         async def post(self, *args, **kwargs):
-            assert "language" not in kwargs["data"]
-            return httpx.Response(200, json={"text": "总结这封邮件"})
+            assert kwargs["data"]["language"] == "en"
+            return httpx.Response(200, json={"text": "Summarise this email"})
     monkeypatch.setattr(httpx, "AsyncClient", Client)
     service = SpeechService(SimpleNamespace(speech_timeout_seconds=30, speech_api_url="https://example.test/transcribe", openai_api_key="fixture", speech_model="fixture"))
-    assert asyncio.run(service.transcribe(b"fixture", "audio/webm", "auto")) == "总结这封邮件"
+    assert asyncio.run(service.transcribe(b"fixture", "audio/webm", "auto")) == "Summarise this email"
 
 
 @pytest.mark.parametrize("status,expected", [(200, None), (400, "VOICE_INVALID_SPEECH"), (429, "VOICE_RATE_LIMITED"), (500, "VOICE_PROVIDER_FAILED")])

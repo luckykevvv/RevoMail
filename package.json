@@ -83,8 +83,7 @@
       "!desktop/tests/**/*"
     ],
     "electronLanguages": [
-      "en-US",
-      "zh-CN"
+      "en-US"
     ],
     "win": {
       "target": "nsis"

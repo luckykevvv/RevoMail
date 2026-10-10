@@ -8,7 +8,7 @@ it("requires a stable explicit email target", () => {
   expect(() => validateCommand("summarize current email", null, null)).toThrow();
   expect(validateCommand("show my tasks", null, null)).toBe("tasks");
 });
-it.each([["the second one", 1], ["number 5", 4], ["第三封", 2], ["第一封", 0]])("parses ordinal %s", (text, index) => expect(parseOrdinal(text)).toBe(index));
+it.each([["the second one", 1], ["number 5", 4], ["third", 2], ["the first email", 0]])("parses ordinal %s", (text, index) => expect(parseOrdinal(text)).toBe(index));
 it("ranks candidates by priority then newest and applies safe fields", () => {
   const messages = [
     { id: "1", sender: "Alex", subject: "Old", preview: "project", priority: "high", receivedAt: "2026-01-01T00:00:00Z", unread: true },

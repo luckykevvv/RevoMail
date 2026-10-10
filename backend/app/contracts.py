@@ -73,13 +73,13 @@ class VoiceTarget(BaseModel):
 class VoiceIntentRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     transcript: str = Field(min_length=1, max_length=2000)
-    language: Literal["auto", "en-AU", "en-US", "zh-CN"] = "auto"
+    language: Literal["auto", "en-AU", "en-US"] = "auto"
     context: VoiceContext
 
 
 class VoiceIntentResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    detectedLanguage: Literal["en", "zh-CN"]
+    detectedLanguage: Literal["en"]
     action: Literal["search_messages", "open_message", "summarize_message", "draft_reply", "extract_details", "show_tasks", "show_calendar", "navigate"]
     target: VoiceTarget = Field(default_factory=VoiceTarget)
     destination: Literal["inbox", "tasks", "calendar", "settings", "starred", "drafts", "sent"] | None = None
@@ -103,7 +103,7 @@ class VoiceIntentResponse(BaseModel):
 class VoiceSpeechRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     text: str = Field(min_length=1, max_length=4096)
-    language: Literal["en", "zh-CN"] = "en"
+    language: Literal["en"] = "en"
 
 
 class TaskMutationRequest(BaseModel):

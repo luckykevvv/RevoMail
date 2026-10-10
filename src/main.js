@@ -8,7 +8,7 @@ import { captureFocus, restoreFocus, syncDialog } from "./accessibility.js";
 import { translate, translateUI } from "./i18n.js";
 import { messageFrameDocument } from "./email-html.js";
 import { calendarCells, eventDateKey, monthKeyForEvents, shiftMonth } from "./calendar-view.js";
-import { calendarPayload, eventDraftFromExtraction, formatMailTime, formatFullMailTime, replySubject, applyClassifications, applyMailboxPage, formatLocalDateTime, LatestRequestCoordinator, mailboxContentState, matchesMailboxCategory, selectAfterMailboxRefresh } from "./mailbox-state.js";
+import { calendarPayload, eventDraftFromExtraction, formatMailTime, formatFullMailTime, replySubject, applyClassifications, applyMailboxPage, mergeRefreshedPage, formatLocalDateTime, LatestRequestCoordinator, mailboxContentState, matchesMailboxCategory, selectAfterMailboxRefresh } from "./mailbox-state.js";
 import {
   AlignLeft,
   Archive,
@@ -137,6 +137,7 @@ const state = {
   replyVersion: 0,
   calendarDraft: null, calendarError: "", calendarSaving: false, addedEvents: {}, calendarAttempts: {},
   sent: [], sentLoading: false, sentError: "", sentCursor: null,
+  starred: [], starredLoading: false, starredError: "", starredCursor: null, returnView: "inbox",
   aiInstructions: { reply: "", compose: "" }, composeLoading: false,
   eventAdded: false,
   assignmentAdded: false,
@@ -144,6 +145,7 @@ const state = {
   emailsLoading: false,
   emailsError: "",
   sync: null,
+  refreshing: false,
   nextPageToken: null,
   bodyMode: "formatted",
   sendConfirmation: null,
@@ -303,6 +305,7 @@ function inboxView() {
   </header>
   <section class="inbox-toolbar">
     <label class="search-box">${icon("search")}<input id="search" type="search" placeholder="Search emails…" value="${escapeHtml(state.search)}" aria-label="Search emails" /><kbd>⌘ K</kbd></label>
+    ${refreshButton()}
 
   </section>
   <div class="category-tabs" role="group" aria-label="Email categories">
@@ -310,7 +313,7 @@ function inboxView() {
   </div>
   ${priorityFilter()}
   <section class="mail-panel">
-    <div class="mail-panel-heading"><span>${state.emailsLoading && !emails.length ? "Loading conversations" : `${visible.length} conversations`}${state.sync?.status === "syncing" ? " · Synchronising…" : ""}${priorityStatus()}</span></div>
+    <div class="mail-panel-heading"><span>${state.emailsLoading && !emails.length ? "Loading conversations" : `${visible.length} conversations`}${syncStatusText()}${priorityStatus()}</span></div>
     <div class="email-list">
       ${contentState === "messages" ? visible.map(emailRow).join("") : content[contentState]}
     </div>
@@ -351,7 +354,7 @@ function emailRow(email) {
   const receivedAt = email.receivedAt || email.time || email.date || "";
   return `<article class="email-row ${email.unread ? "unread" : "read"}" data-email="${email.id}" tabindex="0">
     <span aria-hidden="true"></span>
-    <button class="star-button ${email.starred ? "starred" : ""}" data-star="${email.id}" aria-label="Star email">${icon("star")}</button>
+    <button class="star-button ${email.starred ? "starred" : ""}" data-star="${email.id}" aria-pressed="${Boolean(email.starred)}" aria-label="${email.starred ? "Unstar email" : "Star email"}">${icon("star")}</button>
     <span class="avatar avatar-sm avatar-soft">${escapeHtml(String(email.sender || "?").split(/\s|@/).slice(0, 2).map((part) => part[0]).join("").toUpperCase())}</span>
     <div class="email-sender" data-user-content><span class="sr-only">${email.unread ? "Unread. " : "Read. "}</span>${escapeHtml(email.sender)}</div>
     <div class="email-content" data-user-content>${priorityBadge(email)}<strong>${escapeHtml(email.subject)}</strong><span>${escapeHtml(email.preview)}</span></div>
@@ -369,13 +372,13 @@ function readingView() {
   const summary = state.aiSummary;
   const extraction = state.aiExtraction;
   return `<header class="compact-header">
-    <button class="back-button" data-nav="inbox">${icon("arrow-left")}</button>
-    <div><span class="eyebrow">Inbox / Primary</span><h1 data-user-content>${escapeHtml(email.subject)}</h1></div>
+    <button class="back-button" data-nav="${state.returnView || "inbox"}">${icon("arrow-left")}</button>
+    <div><span class="eyebrow">${state.returnView === "starred" ? "Starred" : state.returnView === "sent" ? "Sent" : "Inbox / Primary"}</span><h1 data-user-content>${escapeHtml(email.subject)}</h1></div>
     <div class="header-actions"><button class="icon-button" title="Archive">${icon("archive")}</button><button class="icon-button" title="Delete">${icon("trash-2")}</button><button class="icon-button" title="More">${icon("ellipsis")}</button></div>
   </header>
   <div class="reading-grid">
     <article class="message-card">
-      <div class="message-from" data-user-content><span class="avatar">${escapeHtml(String(email.sender || "?")[0].toUpperCase())}</span><div><strong>${escapeHtml(email.sender)}</strong><small>${escapeHtml((email.recipients || []).join(", ") || email.to || "")}</small></div><time datetime="${escapeHtml(email.receivedAt || email.date || "")}">${escapeHtml(formatFullMailTime(email.receivedAt || email.date || "", { locale: state.preferences.language }))}</time><button class="star-button">${icon("star")}</button></div>
+      <div class="message-from" data-user-content><span class="avatar">${escapeHtml(String(email.sender || "?")[0].toUpperCase())}</span><div><strong>${escapeHtml(email.sender)}</strong><small>${escapeHtml((email.recipients || []).join(", ") || email.to || "")}</small></div><time datetime="${escapeHtml(email.receivedAt || email.date || "")}">${escapeHtml(formatFullMailTime(email.receivedAt || email.date || "", { locale: state.preferences.language }))}</time><button class="star-button ${email.starred ? "starred" : ""}" data-star="${escapeHtml(String(email.id))}" aria-pressed="${Boolean(email.starred)}" aria-label="${email.starred ? "Unstar email" : "Star email"}">${icon("star")}</button></div>
       ${safeHtml ? `<div class="body-mode"><button class="text-button ${state.bodyMode === "formatted" ? "active" : ""}" data-body-mode="formatted">Formatted</button><button class="text-button ${state.bodyMode === "plain" ? "active" : ""}" data-body-mode="plain">Plain text</button></div>` : ""}
       <div class="message-body" data-user-content>${messageBody}</div>
       ${(email.attachments || []).length ? `<ul class="attachment-list" aria-label="Attachments">${email.attachments.map((attachment) => `<li>${icon("paperclip")} ${escapeHtml(attachment.filename)} <small>${escapeHtml(attachment.mimeType)} · ${Number(attachment.size || 0)} bytes</small></li>`).join("")}</ul>` : ""}
@@ -431,7 +434,7 @@ function calendarView() {
   const events = state.aiExtraction?.events || [];
   const monthKey = monthKeyForEvents(events, state.calendarMonth);
   const [year, month] = monthKey.split("-").map(Number);
-  const locale = state.preferences.language === "zh-CN" ? "zh-CN" : "en-AU";
+  const locale = "en-AU";
   const monthLabel = new Intl.DateTimeFormat(locale, { month: "long", year: "numeric" }).format(new Date(year, month - 1, 1));
   const weekdays = Array.from({ length: 7 }, (_value, index) => new Intl.DateTimeFormat(locale, { weekday: "short", timeZone: "UTC" }).format(new Date(Date.UTC(2024, 0, 7 + index))));
   const indexedEvents = events.map((event, index) => ({ event, index, date: eventDateKey(event) }));
@@ -515,7 +518,7 @@ function currentViewContent() {
   if (state.view === "calendar") return calendarView();
   if (state.view === "settings") return settingsView();
   if (state.view === "compose") return composeView();
-  if (state.view === "starred") return placeholderView("Starred", "star");
+  if (state.view === "starred") return starredView();
   if (state.view === "drafts") return placeholderView("Drafts", "file");
   return sentView();
 }
@@ -587,6 +590,7 @@ function navigate(view, { render: shouldRender = true, preserveVoice = false } =
   if (view !== "inbox") {
     clearTimeout(searchTimer);
     cancelRequest("mailbox-list");
+    cancelRequest("mailbox-refresh");
     state.emailsLoading = false;
   }
   if (!["reading", "reply"].includes(view)) {
@@ -601,6 +605,8 @@ function navigate(view, { render: shouldRender = true, preserveVoice = false } =
   if (state.voiceOpen && !preserveVoice) closeVoice(false);
   state.view = view;
   if (view === "sent") void fetchSent();
+  if (view === "starred") void fetchStarred();
+  if (["inbox", "starred", "sent"].includes(view)) state.returnView = view;
   if (shouldRender) { render(); app.querySelector("[data-workspace] h1")?.focus(); }
 }
 
@@ -671,9 +677,10 @@ function bindEvents() {
   queryAll("[data-logout]").forEach((button) => button.addEventListener("click", async () => {
     try { await api("/api/v1/auth/logout", { method: "POST" }); } catch (error) { showToast(error.message); return; }
     closeVoice(false); writer.reset(); state.preferences = { ...DEFAULT_PREFERENCES }; state.compose = { to: "", subject: "", body: "" };
-    for (const key of ["ai-compose", "ai-draft", "ai-summary", "ai-extraction", "message-detail", "mailbox-list", "sent-list"]) cancelRequest(key);
+    for (const key of ["ai-compose", "ai-draft", "ai-summary", "ai-extraction", "message-detail", "mailbox-list", "mailbox-refresh", "sent-list", "starred-list"]) cancelRequest(key);
     clearTimeout(syncTimer);
-    state.sent = []; state.sentCursor = null; state.calendarDraft = null; state.addedEvents = {}; state.calendarAttempts = {}; state.aiInstructions = { reply: "", compose: "" };
+    stopAutoRefresh(); state.refreshing = false;
+    state.sent = []; state.sentCursor = null; state.starred = []; state.starredCursor = null; state.returnView = "inbox"; state.calendarDraft = null; state.addedEvents = {}; state.calendarAttempts = {}; state.aiInstructions = { reply: "", compose: "" };
     state.authenticated = false; state.user = null; state.csrfToken = ""; state.accounts = []; state.view = "inbox"; resetMailbox(); render();
   }));
   queryAll("[data-nav]").forEach((button) => button.addEventListener("click", () => navigate(button.dataset.nav)));
@@ -682,11 +689,11 @@ function bindEvents() {
     row.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); row.click(); } });
     row.addEventListener("click", (event) => {
     if (event.target.closest("button")) return;
-    const selected = [...emails, ...state.sent].find((email) => String(email.id) === row.dataset.email);
+    const selected = [...emails, ...state.starred, ...state.sent].find((email) => String(email.id) === row.dataset.email);
     if (selected) void openMessage(selected);
     });
   });
-  queryAll("[data-star]").forEach((button) => button.addEventListener("click", (event) => { event.stopPropagation(); const email = [...emails, ...state.sent].find((item) => String(item.id) === button.dataset.star); if (email) void updateMessageState(email, { starred: !email.starred }); }));
+  queryAll("[data-star]").forEach((button) => button.addEventListener("click", (event) => { event.stopPropagation(); const email = [...emails, ...state.starred, ...state.sent, state.selectedEmail].find((item) => item && String(item.id) === button.dataset.star); if (email) void updateMessageState(email, { starred: !email.starred }); }));
   queryAll("[data-category]").forEach((button) => button.addEventListener("click", () => { state.category = button.dataset.category; void fetchEmails(); }));
   queryAll("[data-priority]").forEach((button) => button.addEventListener("click", () => { state.priority = button.dataset.priority; render(); }));
   query("#search")?.addEventListener("input", (event) => {
@@ -705,6 +712,7 @@ function bindEvents() {
   queryAll("[data-body-mode]").forEach((button) => button.addEventListener("click", () => { state.bodyMode = button.dataset.bodyMode; render(); }));
   query("[data-load-more]")?.addEventListener("click", () => void fetchEmails(state.nextPageToken));
   query("[data-retry-mailbox]")?.addEventListener("click", () => void startMailboxSync());
+  query("[data-refresh-mail]")?.addEventListener("click", () => void startMailboxSync({ manual: true }));
   query("[data-ai-summarise]")?.addEventListener("click", () => void aiSummarise());
   query("[data-ai-extract]")?.addEventListener("click", () => void aiExtract());
   queryAll("[data-disconnect]").forEach((button) => button.addEventListener("click", async () => {
@@ -786,6 +794,8 @@ function bindEvents() {
   }));
   query("[data-sent-more]")?.addEventListener("click", () => void fetchSent(state.sentCursor));
   query("[data-sent-retry]")?.addEventListener("click", () => void fetchSent());
+  query("[data-starred-retry]")?.addEventListener("click", () => void fetchStarred());
+  query("[data-starred-more]")?.addEventListener("click", () => void fetchStarred(state.starredCursor));
   query("#reply-text")?.addEventListener("input", event => { state.aiDraft = event.target.value; });
   for (const [id, key] of [["compose-to", "to"], ["compose-subject", "subject"], ["compose-body", "body"]]) {
     query("#" + id)?.addEventListener("input", event => { state.compose[key] = event.target.value; });
@@ -801,14 +811,14 @@ async function updateMessageState(email, change) {
   const account = activeAccount();
   if (!account) return;
   const previous = { unread: email.unread, starred: email.starred };
-  Object.assign(email, change);
-  if (state.selectedEmail && String(state.selectedEmail.id) === String(email.id)) Object.assign(state.selectedEmail, change);
+  const copies = [email, ...emails, ...state.starred, ...state.sent, state.selectedEmail].filter((item) => item && String(item.id) === String(email.id));
+  copies.forEach((item) => Object.assign(item, change));
   render();
   try {
     await api(`/api/v1/emails/${encodeURIComponent(email.id)}`, { method: "PATCH", body: JSON.stringify(change) });
   } catch (error) {
-    Object.assign(email, previous);
-    if (state.selectedEmail && String(state.selectedEmail.id) === String(email.id)) Object.assign(state.selectedEmail, previous);
+    copies.forEach((item) => Object.assign(item, previous));
+    render();
     showToast(error.status === 401 ? "Mailbox authorization expired. Reconnect in Settings." : error.message);
   }
 }
@@ -876,22 +886,43 @@ async function confirmSend() {
 
 // Ask the AI to label a page of inbox messages. Runs after the list has rendered so a slow or
 // failed classification never blocks reading mail; unlabelled messages simply show no badge.
-async function classifyEmails(messages) {
-  const pending = messages.filter((message) => !message.priority);
-  if (!pending.length) return;
+const CLASSIFY_BATCH = 25;
+const CLASSIFY_MAX_ATTEMPTS = 2;
+const classifyAttempts = new Map();
+let classifyQueue = Promise.resolve();
+
+// Classification runs one batch at a time, so a refresh and "Load more" cannot overwrite each
+// other's results or status. Each run labels whatever in the current list still has no priority.
+function classifyEmails() {
+  classifyQueue = classifyQueue.then(runClassification, runClassification);
+  return classifyQueue;
+}
+
+function unclassifiedEmails() {
+  return emails.filter((message) => !message.priority && (classifyAttempts.get(String(message.id)) || 0) < CLASSIFY_MAX_ATTEMPTS);
+}
+
+async function runClassification() {
+  if (!unclassifiedEmails().length) return;
   state.classifying = true;
   state.classifyNote = "";
   render();
+  let warning = "";
   try {
-    const payload = await api("/api/v1/ai/classify", {
-      method: "POST",
-      body: JSON.stringify({ messages: pending.map((message) => ({ id: String(message.id), sender: message.sender || "", subject: message.subject || "", preview: message.preview || "" })) })
-    });
-    emails = applyClassifications(emails, payload?.classifications);
-    const labelled = Object.keys(payload?.classifications || {}).length;
-    if (payload?.warning === "unreadable_reply") state.classifyNote = "Priority labels unavailable (the AI reply could not be read)";
-    else if (payload?.warning === "no_valid_labels") state.classifyNote = "Priority labels unavailable (the AI returned no usable labels)";
-    else if (labelled < pending.length) state.classifyNote = `${pending.length - labelled} email${pending.length - labelled === 1 ? "" : "s"} could not be classified`;
+    for (let batch = unclassifiedEmails().slice(0, CLASSIFY_BATCH); batch.length; batch = unclassifiedEmails().slice(0, CLASSIFY_BATCH)) {
+      batch.forEach((message) => classifyAttempts.set(String(message.id), (classifyAttempts.get(String(message.id)) || 0) + 1));
+      const payload = await api("/api/v1/ai/classify", {
+        method: "POST",
+        body: JSON.stringify({ messages: batch.map((message) => ({ id: String(message.id), sender: message.sender || "", subject: message.subject || "", preview: message.preview || "" })) })
+      });
+      emails = applyClassifications(emails, payload?.classifications);
+      if (payload?.warning) warning = payload.warning;
+      render();
+    }
+    const missing = emails.filter((message) => !message.priority).length;
+    if (missing && warning === "unreadable_reply") state.classifyNote = "Priority labels unavailable (the AI reply could not be read)";
+    else if (missing && warning === "no_valid_labels") state.classifyNote = "Priority labels unavailable (the AI returned no usable labels)";
+    else if (missing) state.classifyNote = `${missing} email${missing === 1 ? "" : "s"} could not be classified`;
   } catch (error) {
     state.classifyNote = "Priority labels unavailable";
   } finally {
@@ -903,7 +934,10 @@ async function classifyEmails(messages) {
 async function fetchEmails(pageToken = null, { background = false } = {}) {
   const account = activeAccount();
   if (!account) return;
-  const controller = beginRequest("mailbox-list");
+  // Background refreshes use their own request slot so they never cancel a "Load more" (or vice versa).
+  const requestKey = background ? "mailbox-refresh" : "mailbox-list";
+  if (!background && !pageToken) cancelRequest("mailbox-refresh");
+  const controller = beginRequest(requestKey);
   if (!pageToken && !background) resetMailbox();
   if (!background) state.emailsLoading = true;
   state.emailsError = "";
@@ -914,48 +948,89 @@ async function fetchEmails(pageToken = null, { background = false } = {}) {
     if (state.search.trim()) query.set("query", state.search.trim());
     if (state.category !== "All") query.set("category", state.category);
     const payload = await api(`/api/v1/emails?${query}`, { signal: controller.signal });
-    const mailbox = applyMailboxPage(emails, payload, { append: Boolean(pageToken) });
+    const mailbox = background
+      ? mergeRefreshedPage(emails, payload, state.nextPageToken)
+      : applyMailboxPage(emails, payload, { append: Boolean(pageToken) });
     emails = mailbox.messages;
     state.nextPageToken = mailbox.nextPageToken;
     state.sync = mailbox.sync;
     if (!pageToken) {
       state.selectedEmail = selectAfterMailboxRefresh(state.selectedEmail, emails, { background });
     }
-    void classifyEmails(payload?.messages || []);
+    void classifyEmails();
   } catch (error) {
     if (isAbortError(error)) return;
     state.emailsError = error.status === 401 ? "Your mailbox session expired. Reconnect the account in Settings." : error.message;
   } finally {
-    if (!finishRequest("mailbox-list", controller)) return;
+    if (!finishRequest(requestKey, controller)) return;
     if (!background) state.emailsLoading = false;
     render();
   }
 }
 
-async function startMailboxSync() {
+const AUTO_REFRESH_MS = 5 * 60 * 1000;
+let autoRefreshTimer;
+
+function mailboxRefreshing() {
+  return Boolean(state.refreshing || state.sync?.status === "syncing");
+}
+
+function refreshButton() {
+  const busy = mailboxRefreshing();
+  return `<button class="secondary-button refresh-button ${busy ? "is-refreshing" : ""}" data-refresh-mail ${busy || !activeAccount() ? "disabled" : ""} aria-label="${busy ? "Refreshing emails from Gmail" : "Refresh emails from Gmail"}">${icon("refresh-cw")}<span>${busy ? "Refreshing…" : "Refresh"}</span></button>`;
+}
+
+function syncStatusText() {
+  if (mailboxRefreshing()) return " · Synchronising…";
+  if (state.sync?.status === "failed") return " · Last refresh failed";
+  const last = state.sync?.lastSyncedAt ? new Date(state.sync.lastSyncedAt) : null;
+  if (!last || Number.isNaN(last.getTime())) return "";
+  return ` · Updated ${new Intl.DateTimeFormat("en-AU", { hour: "numeric", minute: "2-digit" }).format(last)}`;
+}
+
+// Pull new mail from Gmail every 5 minutes while signed in with a connected account.
+function startAutoRefresh() {
+  clearInterval(autoRefreshTimer);
+  autoRefreshTimer = setInterval(() => {
+    if (state.authenticated && activeAccount() && !state.refreshing) void startMailboxSync();
+    if (state.authenticated && state.view === "starred" && !state.starredLoading) void fetchStarred();
+  }, AUTO_REFRESH_MS);
+}
+
+function stopAutoRefresh() {
+  clearInterval(autoRefreshTimer);
+  autoRefreshTimer = null;
+}
+
+async function startMailboxSync({ manual = false } = {}) {
   const account = activeAccount();
-  if (!account) return;
+  if (!account || state.refreshing) return;
+  state.refreshing = true;
   state.emailsError = "";
+  if (manual) render();
   try {
     const started = await api("/api/v1/emails/sync", { method: "POST" });
     state.sync = { ...(state.sync || {}), status: started.status, jobId: started.jobId };
+    state.refreshing = false;
     render();
-    pollMailboxSync(started.jobId);
+    pollMailboxSync(started.jobId, { manual });
   } catch (error) {
+    state.refreshing = false;
     state.emailsError = error.message;
     render();
   }
 }
 
-function pollMailboxSync(jobId) {
+function pollMailboxSync(jobId, { manual = false } = {}) {
   clearTimeout(syncTimer);
   syncTimer = setTimeout(async () => {
     try {
       const result = await api(`/api/v1/emails/sync/${encodeURIComponent(jobId)}`);
       state.sync = result.sync;
       if (result.sync.status === "syncing" && result.sync.jobId) {
-        pollMailboxSync(result.sync.jobId);
+        pollMailboxSync(result.sync.jobId, { manual });
       } else {
+        if (manual && result.sync.status === "failed") showToast("Gmail could not be refreshed. Try again shortly.");
         await fetchEmails(null, { background: true });
       }
     } catch (error) {
@@ -966,6 +1041,7 @@ function pollMailboxSync(jobId) {
 }
 function resetMailbox() {
   emails = [];
+  classifyAttempts.clear();
   state.priority = "All";
   state.classifyNote = "";
   state.selectedEmail = null;
@@ -1065,7 +1141,7 @@ async function bootstrap() {
       if (requestedView === "settings") state.view = "settings";
       const accounts = await api("/api/v1/accounts");
       state.accounts = accounts.accounts;
-      if (state.accounts.length) { await fetchEmails(); void startMailboxSync(); }
+      if (state.accounts.length) { await fetchEmails(); void startMailboxSync(); startAutoRefresh(); }
       else resetMailbox();
     }
   } catch (error) {
@@ -1117,11 +1193,33 @@ const voiceController = new VoiceController({
       render();
       return;
     }
+    // Timer and level ticks during an active recording are patched in place; rebuilding the dialog
+    // several times a second made it flash and swallowed clicks on Pause / Finish and transcribe.
+    if (update.status === "recording" && state.voice.status === "recording" && patchRecordingIndicator(update)) return;
     state.voice = { ...state.voice, error: "", ...update };
     if (update.status === "review") state.voice.source = "voice";
     render();
   }
 });
+
+function patchRecordingIndicator(update) {
+  const status = app.querySelector('[data-microphone-state="is-recording"]');
+  if (!status) return false;
+  if (Number.isFinite(update.elapsed)) {
+    const elapsed = Math.max(0, Number(update.elapsed) || 0);
+    state.voice.elapsed = elapsed;
+    const time = status.querySelector("time");
+    if (time) {
+      time.dateTime = `PT${elapsed}S`;
+      time.textContent = `${String(Math.floor(elapsed / 60)).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}`;
+    }
+  }
+  if (update.level !== undefined) {
+    state.voice.level = update.level;
+    status.querySelector(".voice-level")?.style.setProperty("--voice-level", String(Math.max(.08, Number(update.level) || 0)));
+  }
+  return true;
+}
 
 async function speechApi(text, language, signal) {
   const response = await fetch("/api/v1/voice/speech", {
@@ -1378,7 +1476,10 @@ function renderOverlays() {
   if (host._content !== content) {
     const focus = captureFocus(host);
     const scroll = [...host.querySelectorAll("[data-preserve-scroll]")].map(element => [element.dataset.preserveScroll, element.scrollTop, element.scrollLeft]);
+    const hadDialog = Boolean(host.querySelector('[role="dialog"]'));
     host.innerHTML = content; host._content = content;
+    // Only animate a dialog when it first opens, not when an open dialog is refreshed.
+    if (hadDialog) host.querySelectorAll(".modal-backdrop").forEach(element => element.classList.add("no-enter-animation"));
     restoreFocus(host, focus);
     for (const [key, top, left] of scroll) {
       const element = [...host.querySelectorAll("[data-preserve-scroll]")].find(candidate => candidate.dataset.preserveScroll === key);
@@ -1496,6 +1597,29 @@ async function aiCompose() {
 function sentView() {
   return `<header class="page-header"><h1>Sent</h1><button class="secondary-button" data-sent-retry ${state.sentLoading ? "disabled" : ""}>${t("Refresh")}</button></header><section class="mail-panel">${state.sentError ? `<p role="alert">${escapeHtml(state.sentError)}</p>` : ""}<div class="email-list">${state.sent.map(emailRow).join("") || `<p>${t(state.sentLoading ? "Loading…" : "No sent messages.")}</p>`}</div>${state.sentCursor ? `<button class="text-button" data-sent-more ${state.sentLoading ? "disabled" : ""}>${t("Load more")}</button>` : ""}</section>`;
 }
+function starredView() {
+  const empty = state.starredLoading ? "Loading starred emails…" : "No starred emails. Star an email here or in Gmail and it will appear here.";
+  return `<header class="page-header"><div><h1>Starred</h1><p>Every email you have starred in RevoMail or Gmail.</p></div><button class="secondary-button" data-starred-retry ${state.starredLoading ? "disabled" : ""}>${icon("refresh-cw")} ${state.starredLoading ? "Refreshing…" : "Refresh"}</button></header><section class="mail-panel">${state.starredError ? `<p role="alert">${escapeHtml(state.starredError)}</p>` : ""}<div class="email-list">${state.starred.map(emailRow).join("") || `<p class="collection-empty">${empty}</p>`}</div>${state.starredCursor ? `<button class="text-button" data-starred-more ${state.starredLoading ? "disabled" : ""}>${state.starredLoading ? "Loading…" : "Load more"}</button>` : ""}</section><button class="floating-mic" data-voice aria-label="Voice commands">${icon("mic")}</button>`;
+}
+
+async function fetchStarred(cursor = null) {
+  if (!activeAccount()) return;
+  const controller = beginRequest("starred-list");
+  state.starredLoading = true; state.starredError = ""; render();
+  try {
+    const query = new URLSearchParams({ label: "STARRED", max_results: "20" });
+    if (cursor) query.set("page_token", cursor);
+    const result = await api(`/api/v1/emails?${query}`, { signal: controller.signal });
+    if (controller.signal.aborted) return;
+    const page = applyMailboxPage(state.starred, result, { append: Boolean(cursor) });
+    // Gmail's STARRED label is the source of truth; mark them starred in case the response omits the flag.
+    state.starred = page.messages.map((message) => ({ ...message, starred: true }));
+    state.starredCursor = page.nextPageToken;
+  } catch (error) {
+    if (!isAbortError(error)) state.starredError = error.status === 401 ? "Your mailbox session expired. Reconnect the account in Settings." : error.message;
+  } finally { if (finishRequest("starred-list", controller)) { state.starredLoading = false; render(); } }
+}
+
 async function fetchSent(cursor = null) {
   const controller = beginRequest("sent-list");
   state.sentLoading = true; state.sentError = ""; render();

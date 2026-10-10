@@ -9,7 +9,8 @@ export const desktopSettingsSchema = z.object({
   launchOnReady: z.boolean(),
   stopOnExit: z.boolean(),
   theme: z.enum(["system", "light", "dark"]),
-  language: z.enum(["en", "zh-CN", "es"]),
+  // "zh-CN" was removed; a previously saved value falls back to English instead of resetting every setting.
+  language: z.preprocess(value => value === "zh-CN" ? "en" : value, z.enum(["en", "es"])),
   reducedMotion: z.boolean()
 }).strict();
 

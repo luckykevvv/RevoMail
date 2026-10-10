@@ -36,7 +36,8 @@ class SpeechService:
                     files={"file": (f"command.{extension}", audio, mime)},
                     data={
                         "model": self.settings.speech_model,
-                        **({"language": language.split("-")[0]} if language != "auto" else {}),
+                        # RevoMail is English-only, so always ask the provider for English.
+                        "language": "en",
                         "response_format": "json",
                     },
                 )
@@ -58,11 +59,7 @@ class SpeechService:
             raise AppError("VOICE_PROVIDER_FAILED", "The speech service is unavailable. Type a command or try again.", 502, True) from None
 
     async def synthesise(self, text, language):
-        instructions = (
-            "Speak clearly in Simplified Chinese at a calm, accessible pace."
-            if language == "zh-CN"
-            else "Speak clearly in English at a calm, accessible pace."
-        )
+        instructions = "Speak clearly in English at a calm, accessible pace."
         try:
             async with httpx.AsyncClient(timeout=self.settings.tts_timeout_seconds) as client:
                 response = await client.post(
