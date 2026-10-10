@@ -54,5 +54,8 @@ export function restoreFocus(root, saved) {
   const element = root.querySelector(saved.selector);
   if (!element || element.disabled) return;
   element.focus({ preventScroll: true });
-  if (typeof saved.start === "number" && element.type !== "search") element.setSelectionRange?.(saved.start, saved.end);
+  // Put the caret back where it was (including the search box) so typing is not interrupted by a re-render.
+  if (typeof saved.start === "number") {
+    try { element.setSelectionRange?.(saved.start, saved.end); } catch { /* input type without selection support */ }
+  }
 }

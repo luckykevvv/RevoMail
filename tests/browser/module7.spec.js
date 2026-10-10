@@ -80,6 +80,20 @@ test("inbox refreshes from Gmail on demand and automatically every 5 minutes", a
   await expect.poll(calls.syncCalls).toBe(3);
 });
 
+test("search keeps the caret while typing and shows Gmail matches beyond the visible text", async ({ page }) => {
+  const searches = [];
+  page.on("request", request => { const url = new URL(request.url()); if (url.pathname === "/api/v1/emails" && url.searchParams.get("query")) searches.push(url.searchParams.get("query")); });
+  await fixture(page);
+  const search = page.locator("#search");
+  await search.click();
+  await search.pressSequentially("budget", { delay: 450 });
+  await expect(search).toHaveValue("budget");
+  expect(await search.evaluate(element => element.selectionStart)).toBe(6);
+  await expect.poll(() => searches.at(-1)).toBe("budget");
+  // The fixture's only email matches "budget" in Gmail but not in its sender, subject or preview.
+  await expect(page.locator('[data-workspace] [data-email="fixture-1"]')).toBeVisible();
+});
+
 test("starred tab lists Gmail starred mail and starring syncs to Gmail", async ({ page }) => {
   const base = { recipients: ["reader@example.com"], preview: "Fixture", unread: false, category: "Primary", attachments: [], body_plain: "Body" };
   const messages = [

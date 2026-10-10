@@ -146,6 +146,7 @@ const state = {
   emailsError: "",
   sync: null,
   refreshing: false,
+  searchApplied: "",
   nextPageToken: null,
   bodyMode: "formatted",
   sendConfirmation: null,
@@ -282,8 +283,12 @@ function inboxView() {
   const visible = emails.filter((email) => {
     const matchesCategory = matchesMailboxCategory(email, state.category);
     const matchesPriority = state.priority === "All" || email.priority === state.priority;
+    // Gmail already searched the whole inbox (including message bodies) for the applied search, so only
+    // filter locally while a newly typed search is still waiting for Gmail's results.
+    const typed = state.search.trim().toLowerCase();
+    const pending = typed && typed !== (state.searchApplied || "").toLowerCase();
     const haystack = `${email.sender} ${email.subject} ${email.preview}`.toLowerCase();
-    return matchesCategory && matchesPriority && haystack.includes(state.search.toLowerCase());
+    return matchesCategory && matchesPriority && (!pending || haystack.includes(typed));
   });
   const contentState = mailboxContentState({
     error: state.emailsError,
@@ -945,13 +950,15 @@ async function fetchEmails(pageToken = null, { background = false } = {}) {
   try {
     const query = new URLSearchParams({ max_results: "20" });
     if (pageToken) query.set("page_token", pageToken);
-    if (state.search.trim()) query.set("query", state.search.trim());
+    const searchUsed = state.search.trim();
+    if (searchUsed) query.set("query", searchUsed);
     if (state.category !== "All") query.set("category", state.category);
     const payload = await api(`/api/v1/emails?${query}`, { signal: controller.signal });
     const mailbox = background
       ? mergeRefreshedPage(emails, payload, state.nextPageToken)
       : applyMailboxPage(emails, payload, { append: Boolean(pageToken) });
     emails = mailbox.messages;
+    state.searchApplied = searchUsed;
     state.nextPageToken = mailbox.nextPageToken;
     state.sync = mailbox.sync;
     if (!pageToken) {
