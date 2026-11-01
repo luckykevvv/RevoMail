@@ -16,6 +16,7 @@ def main():
     fixture_settings = Settings(
         _env_file=None, environment="test", host="127.0.0.1", port=4279,
         app_base_url="http://127.0.0.1:4279", database_url="file:./build/r9-browser.db",
+        google_redirect_uri="http://127.0.0.1:4279/api/v1/auth/google/callback",
         secret_key="r9-fixture-session-key-not-for-production-0001",
         token_encryption_key="cjktZml4dHVyZS1lbmNyeXB0aW9uLWtleS0wMDAwMDE=",
         openai_api_key="r9-fake-provider-no-network", manual_ai_limit_per_minute=120,

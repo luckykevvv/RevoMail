@@ -37,6 +37,23 @@ def test_connect_and_calendar_separate_preserve_session_and_disconnect(client):
     assert client.get("/api/v1/auth/session").json() == session
 
 
+def test_signin_connect_reconnect_and_calendar_keep_one_callback_and_session_origin(client):
+    sign_in(client)
+    original_session = client.get("/api/v1/auth/session").json()
+    assert client.cookies.get("revomail_session")
+
+    assert client.post("/api/v1/accounts/google/connect", headers=csrf(client)).status_code == 200
+    assert "connected=gmail" in callback(client).headers["location"]
+    account = client.get("/api/v1/accounts").json()["accounts"][0]
+
+    assert client.post(f'/api/v1/accounts/{account["id"]}/reauthorize', headers=csrf(client)).status_code == 200
+    assert "connected=gmail" in callback(client).headers["location"]
+    assert client.post(f'/api/v1/accounts/{account["id"]}/authorize-calendar', headers=csrf(client)).status_code == 200
+    assert "connected=calendar" in callback(client).headers["location"]
+    assert client.get("/api/v1/auth/session").json() == original_session
+    assert not client.get("/api/v1/accounts").json()["accounts"][0]["calendarRequiresReauthorization"]
+
+
 def test_connect_requires_csrf_and_calendar_requires_owned_account(client):
     assert client.post("/api/v1/accounts/google/connect").status_code == 401
     sign_in(client)

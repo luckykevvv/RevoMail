@@ -27,11 +27,11 @@ Returns `200` with provider availability and authentication state. An authentica
 
 ### `GET /api/v1/auth/google/start?returnTo=/`
 
-Requests only `openid`, `email`, and `profile`. The endpoint records hashed single-use state, encrypted PKCE/context, and a safe local `returnTo` path for ten minutes. Identity sign-in preserves server-side validation when a loopback callback changes between `127.0.0.1` and `localhost`; optional connection callbacks require the originating session cookie on the callback host.
+Requests only `openid`, `email`, and `profile`. The endpoint records hashed single-use state, encrypted PKCE/context, and a safe local `returnTo` path for ten minutes. OAuth must start and return on the exact configured `APP_BASE_URL` origin; `localhost` and `127.0.0.1` are intentionally not interchangeable because browser session cookies are host-only. Optional connection callbacks require the originating session cookie on that callback host.
 
 ### `GET /api/v1/auth/google/callback`
 
-Atomically consumes and validates state, restores the PKCE verifier and requested scopes, exchanges the code, and loads the Google profile. Sign-in upserts identity and rotates the application session without creating a mailbox or touching existing credentials. Gmail/Calendar callbacks require the same live initiating session and Google account identity, validate actual grants, and preserve session/CSRF state. Expired, replayed, legacy-context, mismatched-account, and provider failures redirect with safe `authError` codes; the authenticated Settings page displays connection errors.
+Validates the callback origin before atomically consuming state, then restores the PKCE verifier and requested scopes, exchanges the code, and loads the Google profile. Sign-in upserts identity and rotates the application session without creating a mailbox or touching existing credentials. Gmail/Calendar callbacks require the same live initiating session and Google account identity, validate actual grants, and preserve session/CSRF state. Expired, replayed, legacy-context, mismatched-origin, mismatched-account, and provider failures redirect with safe `authError` codes; the authenticated Settings page displays connection errors.
 
 ### `POST /api/v1/auth/logout`
 

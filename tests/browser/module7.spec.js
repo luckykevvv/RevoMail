@@ -299,10 +299,16 @@ test("reply uses the reviewed writing panel without bypassing send confirmation"
   await expect(page.getByRole("heading", { name: "Reply draft" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Revo AI writing assistant" })).toBeVisible();
   await expect(page.locator("#reply-text")).toHaveValue("Thank you. I will review it.");
+  await page.locator("#reply-text").fill("Keep this reviewed reply.");
   await page.getByRole("button", { name: "Concise" }).click();
   await expect(page.getByRole("button", { name: "Concise" })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator("#reply-text")).toHaveValue("Thank you. I will review it.");
+  await expect(page.locator("#reply-text")).toHaveValue("Keep this reviewed reply.");
+  await expect(page.locator("[data-reply-draft-status]")).toContainText("Your edited draft is preserved");
+  await page.locator('[data-ai-instructions="reply"]').fill("Keep it short");
   await expect(page.locator('[data-custom-draft="reply"]')).toHaveText(/Regenerate/);
+  await page.locator('[data-custom-draft="reply"]').click();
+  await expect(page.locator("[data-reply-draft-status]")).toBeHidden();
+  await expect(page.locator("#reply-text")).toHaveValue("Thank you. I will review it.");
   await expect(page.getByRole("button", { name: "Review & send" })).toBeVisible();
   expect(calls.sendCalls()).toBe(0);
   expect(errors).toEqual([]);

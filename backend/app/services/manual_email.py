@@ -1,5 +1,6 @@
 """Transient, provider-neutral email import. Never opens URLs or stores uploads."""
 import codecs
+import re
 from email import policy
 from email.parser import BytesParser
 from html.parser import HTMLParser
@@ -36,26 +37,66 @@ class ManualEmail(BaseModel):
 
 
 class TextFromHTML(HTMLParser):
+    _BLOCK_TAGS = {
+        "address", "article", "aside", "blockquote", "dd", "details", "div", "dl", "dt",
+        "fieldset", "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4",
+        "h5", "h6", "header", "hr", "li", "main", "nav", "ol", "p", "pre", "section",
+        "summary", "table", "tbody", "td", "tfoot", "th", "thead", "tr", "ul",
+    }
+    _VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
+    _ALWAYS_HIDDEN = {"script", "style", "head", "template"}
+
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.parts = []
-        self.hidden = 0
+        self.hidden_depth = 0
+        self.stack = []
+
+    @staticmethod
+    def _hidden_by_attributes(attrs):
+        values = {str(name).lower(): "" if value is None else str(value).lower() for name, value in attrs}
+        if "hidden" in values or values.get("aria-hidden") == "true":
+            return True
+        style = re.sub(r"\s+", "", values.get("style", ""))
+        return any(marker in style for marker in ("display:none", "visibility:hidden", "mso-hide:all")) or (
+            "overflow:hidden" in style and ("max-height:0" in style or "max-width:0" in style)
+        )
+
+    def _separator(self):
+        if self.parts and not self.parts[-1].endswith("\n"):
+            self.parts.append("\n")
 
     def handle_starttag(self, tag, attrs):
-        if tag in {"script", "style", "head", "template"}:
-            self.hidden += 1
-        if not self.hidden and tag in {"br", "p", "div", "li", "tr", "h1", "h2", "blockquote"}:
-            self.parts.append("\n")
+        tag = tag.lower()
+        own_hidden = tag in self._ALWAYS_HIDDEN or self._hidden_by_attributes(attrs)
+        if own_hidden and tag not in self._VOID_TAGS:
+            self.hidden_depth += 1
+        if tag not in self._VOID_TAGS:
+            self.stack.append((tag, own_hidden))
+        if not self.hidden_depth and (tag == "br" or tag in self._BLOCK_TAGS):
+            self._separator()
 
     def handle_endtag(self, tag):
-        if tag in {"script", "style", "head", "template"} and self.hidden:
-            self.hidden -= 1
-        if not self.hidden and tag in {"p", "div", "li", "tr"}:
-            self.parts.append("\n")
+        tag = tag.lower()
+        matched = next((index for index in range(len(self.stack) - 1, -1, -1) if self.stack[index][0] == tag), None)
+        if matched is None:
+            return
+        closing = self.stack[matched:]
+        del self.stack[matched:]
+        was_visible = self.hidden_depth == 0
+        self.hidden_depth = max(0, self.hidden_depth - sum(1 for _name, own_hidden in closing if own_hidden))
+        if (was_visible or self.hidden_depth == 0) and tag in self._BLOCK_TAGS:
+            self._separator()
 
     def handle_data(self, data):
-        if not self.hidden:
+        if not self.hidden_depth:
             self.parts.append(data)
+
+    def text(self):
+        text = "".join(self.parts)
+        text = re.sub(r"[\t\f\v ]+", " ", text)
+        text = re.sub(r" *\n *", "\n", text)
+        return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 def _invalid(message="The file is not a valid text email. Paste its plain text instead."):
@@ -119,7 +160,8 @@ def parse_upload(raw: bytes, format: str) -> dict:
             if not body.strip() and html:
                 parser = TextFromHTML()
                 parser.feed("\n".join(html))
-                body = "".join(parser.parts).strip()
+                parser.close()
+                body = parser.text()
                 warnings.append("Imported plain text from HTML; review formatting and missing details.")
         except AppError:
             raise

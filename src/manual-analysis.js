@@ -2,7 +2,7 @@ export const MANUAL_MAX_BODY = 15000;
 export const MANUAL_MAX_UPLOAD = 1024 * 1024;
 
 export function createManualState() {
-  return { body: "", subject: "", sender: "", email_date: "", file_name: "", instructions: "", tone: "professional", draft: "", summary: null, classification: null, extraction: null, busy: "", error: "", retry: "", warnings: [], notice: "" };
+  return { body: "", subject: "", sender: "", email_date: "", file_name: "", instructions: "", tone: "professional", draft: "", draft_generation: null, draft_edited: false, summary: null, classification: null, extraction: null, busy: "", error: "", retry: "", warnings: [], notice: "" };
 }
 
 export function manualProblem(input) {
@@ -25,13 +25,25 @@ export function manualPayload(input, operation) {
 }
 
 export function resetManualResults(input) {
-  Object.assign(input, { summary: null, classification: null, extraction: null, draft: "", error: "", retry: "", notice: "" });
+  Object.assign(input, { summary: null, classification: null, extraction: null, draft: "", draft_generation: null, draft_edited: false, error: "", retry: "", notice: "" });
+}
+
+export function markManualDraftGenerated(input) {
+  input.draft_generation = { tone: input.tone, instructions: input.instructions };
+  input.draft_edited = false;
+}
+
+export function manualDraftNeedsRegeneration(input) {
+  return Boolean(input.draft && input.draft_generation && (
+    input.tone !== input.draft_generation.tone || input.instructions !== input.draft_generation.instructions
+  ));
 }
 
 export function manualView(input, escape, icon) {
   const busy = input.busy ? "disabled" : "";
+  const staleDraft = manualDraftNeedsRegeneration(input);
   const field = (name, label, limit) => `<label for="manual-${name}">${label}<input id="manual-${name}" data-manual-field="${name}" maxlength="${limit}" value="${escape(input[name])}" ${busy}></label>`;
-  const actions = [["summarise", "Summarise"], ["classify", "Classify priority"], ["extract", "Extract tasks / events"], ["draft-reply", "Generate reply draft"]];
+  const actions = [["summarise", "Summarise"], ["classify", "Classify priority"], ["extract", "Extract tasks / events"], ["draft-reply", input.draft ? (staleDraft ? "Regenerate reply draft" : "Update reply draft") : "Generate reply draft"]];
   const copy = (target, label) => `<button type="button" class="secondary-button" data-manual-copy="${target}">${label}</button>`;
   const suggestions = (kind, items) => items.length ? items.map((item, index) => `<label for="manual-${kind}-${index}">${kind === "events" ? "Event" : "Task"} suggestion ${index + 1}</label><textarea id="manual-${kind}-${index}" data-manual-suggestion="${kind}" data-index="${index}">${escape(item)}</textarea>`).join("") : `<p>No explicit ${kind} found.</p>`;
   return `<header class="page-header manual-header"><div><span class="eyebrow">Manual Email Analysis</span><h1 tabindex="-1">Analyse Text</h1><p>Understand email from Outlook, Yahoo, university mail, or any other provider.</p></div></header>
@@ -47,7 +59,7 @@ export function manualView(input, escape, icon) {
       <small id="manual-body-hint"><span data-manual-count>${input.body.length.toLocaleString("en")}</span> / 15,000 characters. Classification uses sender, subject, and the first 400 characters.</small>
       <label for="manual-instructions">Reply instructions (optional)</label><textarea id="manual-instructions" data-manual-field="instructions" maxlength="1000" ${busy}>${escape(input.instructions)}</textarea>
       <label for="manual-tone">Reply tone<select id="manual-tone" data-manual-field="tone" ${busy}>${["professional", "concise", "friendly"].map(tone => `<option value="${tone}" ${input.tone === tone ? "selected" : ""}>${tone[0].toUpperCase() + tone.slice(1)}</option>`).join("")}</select></label>
-      <div class="manual-actions">${actions.map(([action, label]) => `<button type="button" class="primary-button" data-manual-action="${action}" ${busy}>${icon("sparkles")} ${label}</button>`).join("")}</div>
+      <div class="manual-actions">${actions.map(([action, label]) => `<button type="button" class="primary-button" data-manual-action="${action}" ${busy}>${icon("sparkles")} <span data-manual-action-label="${action}">${label}</span></button>`).join("")}</div>
       <div class="manual-actions"><button type="button" class="secondary-button" data-manual-clear>Clear</button>${input.busy ? '<button type="button" class="secondary-button" data-manual-cancel>Cancel request</button>' : ""}</div>
       ${input.busy ? '<p role="status">Processing… You can cancel this request.</p>' : ""}
       ${input.error ? `<div role="alert"><p class="manual-error">${escape(input.error)}</p>${input.retry ? '<button type="button" class="secondary-button" data-manual-retry>Retry analysis</button>' : ""}</div>` : ""}
@@ -58,7 +70,7 @@ export function manualView(input, escape, icon) {
       ${input.summary ? `<article><h3>Summary</h3><p id="manual-summary" data-user-content>${escape(input.summary.summary)}</p><ul>${input.summary.bullets.map(item => `<li data-user-content>${escape(item)}</li>`).join("")}</ul>${copy("summary", "Copy summary")}</article>` : ""}
       ${input.classification ? `<article><h3>Priority suggestion</h3><p data-user-content>${escape(input.classification.priority || "Unclassified")}</p><p data-user-content>${escape(input.classification.reason)}</p>${input.classification.warning ? '<p>The AI did not return a usable priority. You can try classification again.</p>' : ""}</article>` : ""}
       ${input.extraction ? `<article><h3>Task suggestions</h3>${suggestions("tasks", input.extraction.tasks)}<h3>Event suggestions</h3>${suggestions("events", input.extraction.events)}<p>Review and edit these suggestions. Copying does not create tasks or calendar events.</p>${input.extraction.warning ? '<p>The AI response could not be read. Retry extraction.</p>' : ""}${copy("suggestions", "Copy suggestions")}</article>` : ""}
-      ${input.draft ? `<article><h3><label for="manual-draft">Reply draft</label></h3><textarea id="manual-draft" data-manual-field="draft" maxlength="20000" ${busy}>${escape(input.draft)}</textarea><p>Edit and copy this draft into your email provider. RevoMail will not send it.</p>${copy("draft", "Copy reply draft")}</article>` : ""}
+      ${input.draft ? `<article><h3><label for="manual-draft">Reply draft</label></h3><textarea id="manual-draft" data-manual-field="draft" maxlength="20000" ${busy}>${escape(input.draft)}</textarea><p data-manual-draft-status role="status" ${staleDraft ? "" : "hidden"}>Reply tone or instructions changed. Regenerate to apply them. ${input.draft_edited ? "Your edited draft is preserved." : "The current draft is preserved."}</p><p>Edit and copy this draft into your email provider. RevoMail will not send it.</p>${copy("draft", "Copy reply draft")}</article>` : ""}
       <textarea id="manual-copy-fallback" aria-label="Text to copy manually" hidden readonly></textarea>
     </section></div>`;
 }

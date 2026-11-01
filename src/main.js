@@ -1,5 +1,5 @@
 import "./style.css";
-import { createManualState, editableSuggestions, manualFileProblem, manualPayload, manualProblem, manualView, resetManualResults } from "./manual-analysis.js";
+import { createManualState, editableSuggestions, manualDraftNeedsRegeneration, manualFileProblem, manualPayload, manualProblem, manualView, markManualDraftGenerated, resetManualResults } from "./manual-analysis.js";
 import { DEFAULT_PREFERENCES, PreferenceWriter } from "./preferences.js";
 import { VoiceController } from "./voice/controller.js";
 import { filterCandidates, needsMessage, parseOrdinal } from "./voice/commands.js";
@@ -162,6 +162,8 @@ const state = {
   aiDraft: "",
   aiDraftLoading: false,
   aiDraftTone: "professional",
+  aiDraftBasis: null,
+  aiDraftEdited: false,
   calendarMonth: ""
 };
 
@@ -604,6 +606,8 @@ function bindManualEvents(query, queryAll) {
       if (hadResults) render();
       else { const count = app.querySelector("[data-manual-count]"); if (count) count.textContent = state.manual.body.length.toLocaleString("en"); }
     }
+    if (field === "draft") state.manual.draft_edited = true;
+    if (["tone", "instructions", "draft"].includes(field)) syncManualDraftFreshness();
   }));
   queryAll("[data-manual-suggestion]").forEach(input => input.addEventListener("input", () => {
     state.manual.extraction[input.dataset.manualSuggestion][Number(input.dataset.index)] = input.value;
@@ -623,6 +627,17 @@ function bindManualEvents(query, queryAll) {
   queryAll("[data-manual-copy]").forEach(button => button.addEventListener("click", () => void copyManual(button.dataset.manualCopy)));
 }
 
+function syncManualDraftFreshness() {
+  const stale = manualDraftNeedsRegeneration(state.manual);
+  const status = app.querySelector("[data-manual-draft-status]");
+  if (status) {
+    status.hidden = !stale;
+    status.textContent = `Reply tone or instructions changed. Regenerate to apply them. ${state.manual.draft_edited ? "Your edited draft is preserved." : "The current draft is preserved."}`;
+  }
+  const action = app.querySelector('[data-manual-action-label="draft-reply"]');
+  if (action) action.textContent = state.manual.draft ? (stale ? "Regenerate reply draft" : "Update reply draft") : "Generate reply draft";
+}
+
 async function analyseManual(operation) {
   const manual = state.manual;
   if (manual.busy) return;
@@ -638,7 +653,7 @@ async function analyseManual(operation) {
     if (operation === "summarise") manual.summary = result;
     else if (operation === "classify") manual.classification = result;
     else if (operation === "extract") manual.extraction = editableSuggestions(result);
-    else manual.draft = result.draft;
+    else { manual.draft = result.draft; markManualDraftGenerated(manual); }
     manual.notice = "Analysis complete. Review the AI-generated result before using it.";
   } catch (error) {
     if (!isAbortError(error) && state.manual === manual) { manual.error = error.message; manual.retry = operation; }
@@ -811,6 +826,8 @@ async function openMessage(selected, { preserveVoice = false, markRead = true } 
   state.aiExtraction = null;
   state.calendarMonth = "";
   state.aiDraft = "";
+  state.aiDraftBasis = null;
+  state.aiDraftEdited = false;
   const hasBody = selected.bodyText || selected.body_plain || selected.bodyHtmlSafe || selected.body_html;
   state.selectedEmail = { ...selected, _loading: !hasBody };
   if (markRead) state.selectedEmail.unread = false;
@@ -958,7 +975,10 @@ function bindEvents() {
   query("[data-stop-speech]")?.addEventListener("click", () => voicePlayback.stop());
   query("[data-replay-speech]")?.addEventListener("click", () => void voicePlayback.replay());
   query("[data-mute-speech]")?.addEventListener("click", () => voicePlayback.toggleMute());
-  queryAll("[data-ai-instructions]").forEach(input => input.addEventListener("input", () => { state.aiInstructions[input.dataset.aiInstructions] = input.value; }));
+  queryAll("[data-ai-instructions]").forEach(input => input.addEventListener("input", () => {
+    state.aiInstructions[input.dataset.aiInstructions] = input.value;
+    if (input.dataset.aiInstructions === "reply") syncReplyDraftFreshness();
+  }));
   queryAll("[data-ai-instructions]").forEach(input => input.addEventListener("keydown", event => {
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) query(`[data-custom-draft="${input.dataset.aiInstructions}"]`)?.click();
   }));
@@ -988,7 +1008,7 @@ function bindEvents() {
   query("[data-sent-retry]")?.addEventListener("click", () => void fetchSent());
   query("[data-starred-retry]")?.addEventListener("click", () => void fetchStarred());
   query("[data-starred-more]")?.addEventListener("click", () => void fetchStarred(state.starredCursor));
-  query("#reply-text")?.addEventListener("input", event => { state.aiDraft = event.target.value; });
+  query("#reply-text")?.addEventListener("input", event => { state.aiDraft = event.target.value; state.aiDraftEdited = true; syncReplyDraftFreshness(); });
   for (const [id, key] of [["compose-to", "to"], ["compose-subject", "subject"], ["compose-body", "body"]]) {
     query("#" + id)?.addEventListener("input", event => { state.compose[key] = event.target.value; });
   }
@@ -1264,6 +1284,8 @@ function resetMailbox() {
   state.aiExtraction = null;
   state.calendarMonth = "";
   state.aiDraft = "";
+  state.aiDraftBasis = null;
+  state.aiDraftEdited = false;
 }
 
 async function aiSummarise() {
@@ -1307,11 +1329,14 @@ async function aiDraftReply(tone) {
   if (!state.selectedEmail) return;
   const controller = beginRequest("ai-draft");
   state.aiDraftTone = tone;
+  const basis = { tone, instructions: state.aiInstructions.reply };
   state.aiDraftLoading = true;
   render();
   try {
-    const payload = await api("/api/v1/ai/draft-reply", { method: "POST", body: JSON.stringify({ message_id: String(state.selectedEmail.id), tone, instructions: state.aiInstructions.reply, current_draft: state.aiDraft }), signal: controller.signal });
+    const payload = await api("/api/v1/ai/draft-reply", { method: "POST", body: JSON.stringify({ message_id: String(state.selectedEmail.id), tone, instructions: basis.instructions, current_draft: state.aiDraft }), signal: controller.signal });
     state.aiDraft = typeof payload?.draft === "string" ? payload.draft : "";
+    state.aiDraftBasis = basis;
+    state.aiDraftEdited = false;
     return state.aiDraft;
   } catch (error) {
     if (isAbortError(error)) return;
@@ -1342,6 +1367,7 @@ async function bootstrap() {
     INVALID_OAUTH_STATE: "The sign-in request expired or could not be verified. Please try again.",
     INSUFFICIENT_PERMISSIONS: "The required Gmail permissions were not granted.",
     ACCOUNT_MISMATCH: "Choose the same Google account you used to sign in to RevoMail.",
+    OAUTH_ORIGIN_MISMATCH: "Google authorization returned to a different RevoMail address. Restart RevoMail and use its configured address.",
     AUTHORIZATION_SCOPE_MISMATCH: "Google returned permissions from an older RevoMail authorization. Remove RevoMail access from your Google account, then try again.",
     AUTHORIZATION_NETWORK_FAILED: "RevoMail could not reach Google to complete sign-in. Check your connection and try again.",
     AUTHORIZATION_FAILED: "Sign-in could not be completed. Please try again."
@@ -1510,7 +1536,7 @@ function closeActiveDialog() {
 async function replyAction({ preserveVoice = false } = {}) {
   if (!state.selectedEmail) return false;
   navigate("reply", { preserveVoice });
-  return state.aiDraft ? true : aiDraftReply(state.aiDraftTone);
+  return state.aiDraft && !replyDraftNeedsRegeneration() ? true : aiDraftReply(state.aiDraftTone);
 }
 
 function voiceQuery(target) {
@@ -1657,7 +1683,7 @@ async function executeVoiceCommand() {
       if (!resultText) throw new Error("The summary could not be generated.");
     } else if (intent.action === "draft_reply") {
       navigate("reply", { preserveVoice: true });
-      resultText = state.aiDraft || await aiDraftReply(state.aiDraftTone);
+      resultText = state.aiDraft && !replyDraftNeedsRegeneration() ? state.aiDraft : await aiDraftReply(state.aiDraftTone);
       if (!resultText) throw new Error("The reply draft could not be generated.");
     } else if (intent.action === "extract_details") {
       const extraction = await aiExtract();
@@ -1787,12 +1813,28 @@ async function submitCalendar() {
   } catch (error) { state.calendarError = error.message; }
   finally { state.calendarSaving = false; render(); }
 }
+function replyDraftNeedsRegeneration() {
+  return Boolean(state.aiDraft.trim() && state.aiDraftBasis && (
+    state.aiDraftTone !== state.aiDraftBasis.tone || state.aiInstructions.reply !== state.aiDraftBasis.instructions
+  ));
+}
+function replyDraftFreshnessMessage() {
+  return `Reply tone or instructions changed. Regenerate to apply them. ${state.aiDraftEdited ? "Your edited draft is preserved." : "The current draft is preserved."}`;
+}
+function syncReplyDraftFreshness() {
+  const stale = replyDraftNeedsRegeneration();
+  const status = app.querySelector("[data-reply-draft-status]");
+  if (status) { status.hidden = !stale; status.textContent = replyDraftFreshnessMessage(); }
+  const label = app.querySelector('[data-draft-action-label="reply"]');
+  if (label) label.textContent = stale ? "Regenerate draft" : state.aiDraft.trim() ? "Update draft" : "Generate draft";
+}
 function aiPromptPanel(mode) {
   const reply = mode === "reply";
   const loading = reply ? state.aiDraftLoading : state.composeLoading;
   const hasDraft = Boolean((reply ? state.aiDraft : state.compose.body).trim());
   const hasInstructions = Boolean(state.aiInstructions[mode].trim());
-  const label = loading ? "Writing…" : !hasDraft ? "Generate draft" : reply && !hasInstructions ? "Regenerate" : "Update draft";
+  const staleDraft = reply && replyDraftNeedsRegeneration();
+  const label = loading ? "Writing…" : staleDraft ? "Regenerate draft" : !hasDraft ? "Generate draft" : reply && !hasInstructions ? "Regenerate" : "Update draft";
   const placeholder = reply ? "e.g. Say yes, but ask if we can move it to 11am" : "e.g. Ask Sam to send the Q3 report by Friday";
   const hint = hasDraft ? "Your instructions are applied to the draft below. Choose a tone, then update." : "Describe what you want to say, choose a tone, then generate a draft you can edit.";
   return `<section class="ai-prompt" aria-label="Revo AI writing assistant">
@@ -1800,9 +1842,10 @@ function aiPromptPanel(mode) {
     <textarea id="ai-instructions-${mode}" data-ai-instructions="${mode}" rows="2" maxlength="1000" placeholder="${placeholder}" ${loading ? "disabled" : ""}>${escapeHtml(state.aiInstructions[mode])}</textarea>
     <div class="ai-prompt-row">
       <div class="tone-row" role="group" aria-label="Tone"><span>Tone</span>${["professional", "concise", "friendly"].map((tone) => `<button class="tone-chip ${state.aiDraftTone === tone ? "active" : ""}" data-tone="${tone}" aria-pressed="${state.aiDraftTone === tone}" ${loading ? "disabled" : ""}>${tone[0].toUpperCase() + tone.slice(1)}</button>`).join("")}</div>
-      <button class="primary-button" data-custom-draft="${mode}" ${loading ? "disabled" : ""}>${icon("sparkles")} ${label}</button>
+      <button class="primary-button" data-custom-draft="${mode}" ${loading ? "disabled" : ""}>${icon("sparkles")} <span data-draft-action-label="${mode}">${label}</span></button>
     </div>
-    <small>${hint} Nothing is sent until you confirm. Press Ctrl+Enter to generate.</small>
+    ${reply ? `<small data-reply-draft-status role="status" ${staleDraft ? "" : "hidden"}>${escapeHtml(replyDraftFreshnessMessage())}</small>` : ""}
+    <small data-draft-hint>${escapeHtml(hint)} Nothing is sent until you confirm. Press Ctrl+Enter to generate.</small>
   </section>`;
 }
 async function aiCompose() {

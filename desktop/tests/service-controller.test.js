@@ -38,6 +38,10 @@ describe("ServiceController", () => {
     expect(spawn).toHaveBeenCalledOnce();
     expect(spawn.mock.calls[0][0]).toBe("python");
     expect(spawn.mock.calls[0][1]).toEqual(["-m", "backend.run"]);
+    expect(spawn.mock.calls[0][2].env).toMatchObject({
+      APP_BASE_URL: "http://127.0.0.1:4173",
+      GOOGLE_REDIRECT_URI: "http://127.0.0.1:4173/api/v1/auth/google/callback",
+    });
   });
 
   it("reuses an existing healthy RevoMail service without spawning a duplicate", async () => {

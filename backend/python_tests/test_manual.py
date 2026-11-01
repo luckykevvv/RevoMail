@@ -147,6 +147,28 @@ def test_eml_mime_headers_attachments_html_and_date(manual, monkeypatch):
     assert parsed["body"] == "Review & confirm" and parsed["warnings"]
 
 
+def test_html_only_eml_separates_table_cells_and_ignores_hidden_preheaders():
+    html = b"""Subject: HTML table\r
+MIME-Version: 1.0\r
+Content-Type: text/html; charset=utf-8\r
+\r
+<html><body>
+<div style="display: none !important; max-height: 0; overflow: hidden">Hidden inbox preview</div>
+<div aria-hidden="true"><div>Nested hidden preview</div></div>
+<h1>Review schedule</h1>
+<table><tr><th>Owner</th><th>Due date</th></tr><tr><td>Alex</td><td>6 November</td></tr></table>
+<section><p>Please confirm.</p><p>Thank you.</p></section>
+</body></html>"""
+    parsed = parse_upload(html, "eml")
+    body = parsed["body"]
+    assert "Hidden inbox preview" not in body
+    assert "Nested hidden preview" not in body
+    assert "OwnerDue date" not in body and "Alex6 November" not in body
+    assert [line for line in body.splitlines() if line] == [
+        "Review schedule", "Owner", "Due date", "Alex", "6 November", "Please confirm.", "Thank you."
+    ]
+
+
 @pytest.mark.parametrize("raw,format", [(b"", "txt"), (b"binary\x00data", "txt"), (b"\xff\xff", "txt"), (b"not email", "eml"), (b"Subject: Empty\n\n", "eml"), (b"x" * 15001, "txt"), (b"Subject: bad\nContent-Type: multipart/mixed; boundary=x\n\n--x\n", "eml")])
 def test_invalid_uploads(raw, format):
     with pytest.raises(AppError):

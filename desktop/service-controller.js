@@ -64,7 +64,8 @@ export class ServiceController extends EventEmitter {
         REVOMAIL_PROJECT_ROOT: this.projectRoot,
         HOST: settings.host,
         PORT: String(settings.port),
-        APP_BASE_URL: url
+        APP_BASE_URL: url,
+        GOOGLE_REDIRECT_URI: `${url}/api/v1/auth/google/callback`
       },
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true

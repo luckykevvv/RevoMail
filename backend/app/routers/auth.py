@@ -53,6 +53,18 @@ def _safe_return_to(value: str) -> str:
     return urlunsplit(("", "", parts.path, parts.query, ""))
 
 
+def _origin(url) -> tuple[str, str, int]:
+    scheme = url.scheme.lower()
+    return scheme, (url.hostname or "").lower(), url.port or (443 if scheme == "https" else 80)
+
+
+def _request_origin_matches(request: Request) -> bool:
+    try:
+        return _origin(request.url) == _origin(urlsplit(request.app.state.settings.app_base_url))
+    except ValueError:
+        return False
+
+
 def _providers() -> dict[str, bool]:
     return {"google": bool(settings.google_client_id and settings.google_client_secret)}
 
@@ -103,6 +115,8 @@ def _build_flow(scopes=None, code_verifier=None) -> Flow:
 
 
 def _authorization(request: Request, return_to: str = "/", purpose: str = "signin", account_id: str | None = None) -> str:
+    if not _request_origin_matches(request):
+        raise HTTPException(status_code=409, detail="OAuth must start from the configured RevoMail origin.")
     context = {"purpose": purpose, "code_verifier": secrets.token_urlsafe(64), "scopes": list(IDENTITY_SCOPES)}
     options = {"access_type": "online"}
     if purpose != "signin":
@@ -141,6 +155,9 @@ async def provider_start(request: Request, returnTo: str = "/"):
 
 @router.get("/google/callback")
 async def google_callback(request: Request, code: str = "", state: str = "", error: str = ""):
+    if not _request_origin_matches(request):
+        logger.warning("Google OAuth callback rejected correlation_id=%s code=OAUTH_ORIGIN_MISMATCH", request.state.correlation_id)
+        return RedirectResponse("/?authError=OAUTH_ORIGIN_MISMATCH")
     transaction = request.app.state.oauth_transactions.consume(state)
     context = transaction.context if transaction else None
     if not context or context.get("purpose") not in {"signin", "gmail", "calendar"} or not context.get("code_verifier"):

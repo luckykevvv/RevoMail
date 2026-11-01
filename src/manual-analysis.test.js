@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createManualState, editableSuggestions, manualFileProblem, manualPayload, manualProblem, manualView, resetManualResults } from "./manual-analysis.js";
+import { createManualState, editableSuggestions, manualDraftNeedsRegeneration, manualFileProblem, manualPayload, manualProblem, manualView, markManualDraftGenerated, resetManualResults } from "./manual-analysis.js";
 
 describe("manual analysis contracts", () => {
   it("rejects empty, binary and oversized body and unsupported uploads", () => {
@@ -25,6 +25,25 @@ describe("manual analysis contracts", () => {
     expect(input.body).toBe("Keep source");
     expect(input.summary).toBeNull(); expect(input.draft).toBe(""); expect(input.extraction).toBeNull();
     expect(createManualState().body).toBe("");
+  });
+  it("preserves edited drafts but marks changed reply settings for regeneration", () => {
+    const input = { ...createManualState(), body: "Email", draft: "Generated reply" };
+    markManualDraftGenerated(input);
+    expect(manualDraftNeedsRegeneration(input)).toBe(false);
+    input.draft = "User-edited reply";
+    input.draft_edited = true;
+    input.tone = "friendly";
+    expect(manualDraftNeedsRegeneration(input)).toBe(true);
+    let html = manualView(input, value => String(value), () => "");
+    expect(html).toContain("Regenerate reply draft");
+    expect(html).toContain("Your edited draft is preserved.");
+    expect(html).toContain("User-edited reply");
+    input.tone = "professional";
+    expect(manualDraftNeedsRegeneration(input)).toBe(false);
+    input.instructions = "Keep it short";
+    expect(manualDraftNeedsRegeneration(input)).toBe(true);
+    markManualDraftGenerated(input);
+    expect(manualDraftNeedsRegeneration(input)).toBe(false);
   });
   it("makes extraction editable without creating task or calendar identities", () => {
     expect(editableSuggestions({ tasks: [{ title: "Review", due_date: null }], events: [{ title: "Meeting", start: null }] })).toEqual({ tasks: ["title: Review"], events: ["title: Meeting"], warning: undefined });

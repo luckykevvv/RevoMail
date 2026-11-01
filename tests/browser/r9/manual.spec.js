@@ -42,6 +42,14 @@ test("Outlook text uses real manual APIs for all four operations without Gmail",
   await page.getByRole("button", { name: "Generate reply draft" }).click();
   await expect(page.getByRole("textbox", { name: "Reply draft", exact: true })).toHaveValue(/Thank you/);
   await page.getByRole("textbox", { name: "Reply draft", exact: true }).fill("My reviewed reply.");
+  await page.getByLabel("Reply tone").selectOption("friendly");
+  await expect(page.locator("[data-manual-draft-status]")).toContainText("Your edited draft is preserved");
+  await expect(page.getByRole("textbox", { name: "Reply draft", exact: true })).toHaveValue("My reviewed reply.");
+  await page.getByLabel("Reply instructions (optional)").fill("Keep it brief");
+  await expect(page.getByRole("button", { name: "Regenerate reply draft" })).toBeVisible();
+  await page.getByRole("button", { name: "Regenerate reply draft" }).click();
+  await expect(page.locator("[data-manual-draft-status]")).toBeHidden();
+  await page.getByRole("textbox", { name: "Reply draft", exact: true }).fill("My reviewed reply.");
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.getByRole("button", { name: "Copy reply draft" }).click();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("My reviewed reply.");

@@ -68,7 +68,7 @@ npm ci
 npm run desktop
 ```
 
-`npm ci` automatically creates the ignored repository `.venv` and installs `backend/requirements.txt`. Source start, test, and packaging commands repeat this check and install only when the environment is missing or the requirements file changed. If Python is not installed, setup stops with an actionable message; it does not make system-wide changes. Packaged desktop builds launch their bundled standalone backend and do not require Node.js or Python on the target machine. Google sign-in requires server-side Google credentials; AI analysis requires `OPENAI_API_KEY`. Register `${APP_BASE_URL}/api/v1/auth/google/callback` with Google. Optional Gmail connection requests `gmail.modify` so reading an email can mark it read in Gmail; older read-only connections need **Reconnect Gmail** to enable updates.
+`npm ci` automatically creates the ignored repository `.venv` and installs `backend/requirements.txt`. Source start, test, and packaging commands repeat this check and install only when the environment is missing or the requirements file changed. If Python is not installed, setup stops with an actionable message; it does not make system-wide changes. Packaged desktop builds launch their bundled standalone backend and do not require Node.js or Python on the target machine. Google sign-in requires server-side Google credentials; AI analysis requires `OPENAI_API_KEY`. Register `${APP_BASE_URL}/api/v1/auth/google/callback` with Google. If `GOOGLE_REDIRECT_URI` is set explicitly, its scheme, host, and port must exactly match `APP_BASE_URL` so the host-only session cookie reaches Gmail and Calendar callbacks. Optional Gmail connection requests `gmail.modify` so reading an email can mark it read in Gmail; older read-only connections need **Reconnect Gmail** to enable updates.
 
 On Windows, contributors can instead double-click the root-level `RevoMail.cmd`. It checks for Node.js and npm, compares the current `package-lock.json` with the installed Node environment, runs `npm ci` when dependencies are missing or stale (preparing the Python environment through the npm post-install hook), builds the frontend, and opens Electron. Node.js LTS and Python 3.11 or newer are the only source-development prerequisites. No prebuilt executable is committed; `RevoMail.cmd` is the one-click source launcher.
 
@@ -120,7 +120,7 @@ Supported runtime variables:
 | `JOB_MAX_ATTEMPTS` | `3` | Maximum attempts before a recovered job is marked failed |
 | `MAIL_SEND_LIMIT_PER_MINUTE` | `10` | Per-user confirmed-send attempt limit |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Empty | Google OAuth application credentials |
-| `GOOGLE_REDIRECT_URI` | `${APP_BASE_URL}/api/v1/auth/google/callback` | Registered Google callback override |
+| `GOOGLE_REDIRECT_URI` | `${APP_BASE_URL}/api/v1/auth/google/callback` | Registered Google callback override; must use the exact `APP_BASE_URL` origin |
 | `OPENAI_API_KEY` | Empty | OpenAI server-side API key |
 | `OPENAI_MODEL` | `gpt-4o` | OpenAI model used by the merged AI service |
 | `SPEECH_MODEL`, `SPEECH_API_URL` | `gpt-transcribe`, OpenAI transcription endpoint | Server-side speech-to-text adapter |

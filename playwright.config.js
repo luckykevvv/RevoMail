@@ -6,6 +6,6 @@ export default defineConfig({
   outputDir: "build/module7-browser-results",
   webServer: {
     command: "npm run start", url: "http://127.0.0.1:4278/api/v1/health", reuseExistingServer: false, timeout: 60000,
-    env: { HOST: "127.0.0.1", PORT: "4278", APP_BASE_URL: "http://127.0.0.1:4278", REVOMAIL_ENV: "test", DATABASE_URL: "file:./data/module7-browser.db", RUNTIME_KEY_FILE: "./data/module7-browser.key", GOOGLE_CLIENT_ID: "", GOOGLE_CLIENT_SECRET: "", OPENAI_API_KEY: "" }
+    env: { HOST: "127.0.0.1", PORT: "4278", APP_BASE_URL: "http://127.0.0.1:4278", GOOGLE_REDIRECT_URI: "http://127.0.0.1:4278/api/v1/auth/google/callback", REVOMAIL_ENV: "test", DATABASE_URL: "file:./data/module7-browser.db", RUNTIME_KEY_FILE: "./data/module7-browser.key", GOOGLE_CLIENT_ID: "", GOOGLE_CLIENT_SECRET: "", OPENAI_API_KEY: "" }
   }
 });
