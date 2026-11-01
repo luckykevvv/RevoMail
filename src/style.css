@@ -343,6 +343,7 @@ input.input-shell { padding: 0; }
 .setting-name strong { font-size: 13px; }
 .setting-name small { margin-top: 2px; color: var(--muted); font-size: 11px; }
 .setting-row select, .modal-footer select { min-width: 255px; height: 40px; padding: 0 36px 0 12px; border: 1px solid var(--line); border-radius: 9px; outline: 0; color: var(--ink); background: var(--surface); }
+.setting-toggle-row { cursor: pointer; }
 .segmented { display: flex; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }
 .segmented button { min-height: 33px; display: flex; align-items: center; gap: 6px; padding: 0 15px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); cursor: pointer; }
 .segmented button.active { color: var(--blue); background: var(--surface); box-shadow: var(--shadow-sm); }
@@ -454,6 +455,7 @@ input.input-shell { padding: 0; }
   .extraction-actions { flex-wrap: wrap; }
   .task-copy dl div { grid-template-columns: 75px 1fr; }
   .setting-row { align-items: flex-start; flex-direction: column; }
+  .setting-toggle-row { align-items: center; flex-direction: row; }
   .setting-row select { width: 100%; min-width: 0; }
   .segmented { width: 100%; }
   .segmented button { flex: 1; justify-content: center; }
@@ -477,9 +479,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 html[data-reduce-motion="true"] *, html[data-reduce-motion="true"] *::before, html[data-reduce-motion="true"] *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 .skip-link { position: fixed; top: -100px; left: 12px; z-index: 300; padding: 12px; background: var(--surface); color: var(--ink); }
 .skip-link:focus { top: 12px; }
-fieldset.setting-group { min-width: 0; padding: 12px 0; margin: 0; }
-fieldset.setting-group legend { margin-left: 20px; padding: 0 6px; font-weight: 700; }
-.setting-row input[type="checkbox"] { width: 24px; height: 24px; accent-color: var(--blue); }
+fieldset.setting-group { min-width: 0; padding: 0; margin: 0; }
+.setting-row input[type="checkbox"] { flex: none; width: 24px; height: 24px; margin: 0; accent-color: var(--blue); }
 .voice-modal { width: min(1080px, 100%); height: min(760px, calc(100dvh - 32px)); max-height: calc(100dvh - 32px); display: grid; grid-template-rows: auto auto minmax(0, 1fr); overflow: hidden; overflow-wrap: anywhere; }
 .voice-intro { display: grid; grid-template-columns: minmax(0, .92fr) minmax(0, 1.08fr); gap: 22px; align-items: start; margin: 14px 0 18px; }
 .voice-intro p { margin: 0; }

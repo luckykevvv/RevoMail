@@ -473,6 +473,23 @@ for (const width of [1280, 320]) {
     const errors = []; page.on("pageerror", error => errors.push(error.message));
     const calls = await fixture(page, { summaryBullets: ["Repeated key point must stay in the email Summary card."] });
     await page.locator('[data-nav="settings"]').click();
+    await expect(page.locator("fieldset.setting-group")).toHaveCount(3);
+    const settingGeometry = await page.locator("fieldset.setting-group").evaluateAll(groups => groups.map(group => {
+      const box = group.getBoundingClientRect();
+      const heading = group.querySelector(":scope > h2").getBoundingClientRect();
+      return {
+        labelledBy: group.getAttribute("aria-labelledby"), headingId: group.querySelector(":scope > h2").id,
+        headingInside: heading.top >= box.top && heading.left >= box.left && heading.right <= box.right && heading.bottom < box.bottom,
+      };
+    }));
+    expect(settingGeometry.every(item => item.labelledBy === item.headingId && item.headingInside)).toBe(true);
+    if (width === 320) {
+      await expect(page.locator('.setting-toggle-row').first()).toHaveCSS("flex-direction", "row");
+      const selectBox = await page.locator('[data-preference="theme"]').boundingBox();
+      const groupBox = await page.locator("fieldset.setting-group").first().boundingBox();
+      expect(selectBox.width).toBeLessThanOrEqual(groupBox.width - 24);
+    }
+    await page.screenshot({ path: `build/module7-browser-results/settings-${width}.png`, fullPage: true });
     await page.locator('[data-preference="theme"]').selectOption("dark");
     await expect(page.locator("body")).toHaveAttribute("data-theme", "dark");
     await page.locator('[data-preference="reducedMotion"]').check();
