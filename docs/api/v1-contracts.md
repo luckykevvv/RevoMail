@@ -53,6 +53,8 @@ Clients may retry only when `retryable` is true and the operation itself is safe
 
 Gmail message identifiers and page cursors are opaque. Gmail payloads, credentials, raw HTML, and provider errors never cross the public boundary. There is no parallel account-scoped mailbox API.
 
+Synchronization failures expose safe `sync.errorCode` categories. Non-retryable Google credential refresh failures map to `AUTHORIZATION_EXPIRED` and require explicit Gmail reconnection; transient credential/transport/DNS failures map to retryable `PROVIDER_UNAVAILABLE`, timeouts to `PROVIDER_TIMEOUT`, and throttling to `PROVIDER_RATE_LIMITED`. The worker preserves cached messages and the last successful history cursor on these failures. Unknown failures remain `SYNC_FAILED` and log only job identifier and exception type, never exception text, tokens, or message content.
+
 ## Sending email and the Sent mailbox
 
 `GET /api/v1/emails?label=SENT` lists live, paginated Gmail Sent mail using the same list response shape as INBOX. Accepted labels are uppercase INBOX (default) and SENT. Sent pages and sent-only details do not enter the inbox cache.
@@ -82,13 +84,45 @@ Gmail message identifiers and page cursors are opaque. Gmail payloads, credentia
 
 The implemented endpoints are `POST /api/v1/ai/summarise`, `POST /api/v1/ai/extract`, `POST /api/v1/ai/draft-reply`, and `POST /api/v1/ai/classify`. The first three accept a mailbox `message_id`; reply drafting also accepts `professional`, `concise`, or `friendly` tone. Output remains a draft for human review.
 
+### Manual email analysis (R9)
+
+These separate endpoints require a valid RevoMail session and `X-CSRF-Token`, never Gmail credentials or message IDs:
+
+| Method and route | Input | Result |
+| --- | --- | --- |
+| `POST /api/v1/ai/manual/import?format=txt` | Raw text file, `text/plain` or `application/octet-stream` | `{body, subject, sender, email_date, warnings}` |
+| `POST /api/v1/ai/manual/import?format=eml` | Raw email export, `message/rfc822`, `text/plain`, or `application/octet-stream` | Same editable preview; no AI call |
+| `POST /api/v1/ai/manual/summarise` | Manual email JSON | `{summary, bullets}` |
+| `POST /api/v1/ai/manual/classify` | Manual email JSON | `{priority, reason, warning}` |
+| `POST /api/v1/ai/manual/extract` | Manual email JSON | `{tasks, events, warning}` |
+| `POST /api/v1/ai/manual/draft-reply` | Manual email JSON with optional drafting fields | `{draft}` |
+
+```json
+{
+  "body": "Please review the proposal by 2026-11-06.",
+  "subject": "Project review",
+  "sender": "Fixture Tutor <tutor@outlook.example>",
+  "email_date": ""
+}
+```
+
+`body` is required, readable, nonblank text of at most 15,000 characters. Optional subject/sender/date default to empty strings and have limits of 1,000/500/128 characters; headers must be single-line text. Unknown fields, including `message_id`, are rejected. Drafting additionally accepts `tone` (`professional`, `concise`, `friendly`), `instructions` (up to 1,000 characters), and `current_draft` (up to 20,000). Shared JSON Schema definitions are `manualEmail`, `manualDraft`, and `manualImport`.
+
+Uploads are limited to 1 MiB and analysis JSON to 256 KiB, enforced while streaming before parsing. Decoded text exceeding 15,000 characters is rejected, never silently truncated. Text files support UTF-8/BOM and BOM-marked UTF-16. Email exports use standard MIME/header/charset decoding with bounded traversal (100 parts, 20 nested levels), ignore attachments and nested attached messages, prefer text/plain, and use resource-free HTML-to-text fallback if needed. Fallback/charset warnings must be shown for review. RevoMail does not render imported HTML.
+
+Classification uses sender/subject and the first 400 body characters. `priority` is `high`, `medium`, `low`, or `null`; missing/invalid output returns an explicit warning rather than an invented priority. Extraction returns the existing event date fields and separate tasks, stripping raw model responses; `unreadable_reply` signals unusable output. Missing original dates are not replaced with today's date. Replies and extraction results are suggestions only: these routes cannot send mail, create provider drafts, save tasks, or call Calendar.
+
+Errors use the standard safe envelope: 401 `NOT_AUTHENTICATED`, 403 for invalid CSRF, 413 `MANUAL_TOO_LARGE`, 415 `MANUAL_UNSUPPORTED_FILE` or unsupported analysis content type, 422 `MANUAL_INVALID_FILE`/`MANUAL_INVALID_INPUT`, 429 `MANUAL_RATE_LIMITED`, 503 `AI_UNAVAILABLE`, and retryable 502 `AI_PROVIDER_FAILED`. Provider exception details and invalid input are not echoed. The per-user manual AI limit defaults to 12 actions/minute (`MANUAL_AI_LIMIT_PER_MINUTE`, range 1-120); import does not consume an AI action.
+
+All manual responses, including errors, carry `Cache-Control: no-store`. Content and results exist only in request/page memory; there is no upload/body persistence, content-bearing audit, or background job. Other Gmail-specific AI routes retain their mailbox requirements.
+
 ### Event extraction
 
 `POST /api/v1/ai/extract` returns `events` and `tasks`. Each event keeps the text as written in the email (`date`, `time`, `location`, `organiser`) and also carries `start`, `end` and `all_day`. `start` is `YYYY-MM-DDTHH:MM` (or `YYYY-MM-DD` for an all-day event) and `end` is `YYYY-MM-DDTHH:MM`; both are `null` when the AI could not resolve them with certainty. Relative dates such as "tomorrow" are resolved against the email's sent date. Values that are not real calendar dates are dropped by the server. These fields only pre-fill the calendar form; the user checks and can change them before anything is created.
 
 ## Calendar
 
-`POST /api/v1/calendar/events` adds an event to the connected Google account's primary calendar (`https://www.googleapis.com/auth/calendar.events` scope; reconnect older accounts to grant it):
+`POST /api/v1/calendar/events` adds an event to the connected Google account's primary calendar (`https://www.googleapis.com/auth/calendar.events` scope; choose Enable Calendar in Settings to grant it separately):
 
 ```json
 {

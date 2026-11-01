@@ -13,14 +13,16 @@ from backend.app.services.oauth_transactions import OAuthTransactionStore, oauth
 class FakeFlow:
     authorization_options = None
 
-    def __init__(self):
+    def __init__(self, scopes=None, code_verifier=None):
+        self.code_verifier = code_verifier
         self.credentials = SimpleNamespace(
             token="access-token",
             refresh_token="refresh-token",
             token_uri="https://oauth.example/token",
             client_id="client-id",
             client_secret="client-secret",
-            scopes=list(auth.SCOPES),
+            scopes=list(scopes or auth.IDENTITY_SCOPES),
+            granted_scopes=list(scopes or auth.IDENTITY_SCOPES),
         )
 
     def authorization_url(self, **kwargs):
@@ -66,13 +68,31 @@ def client(monkeypatch, tmp_path):
         yield test_client
 
 
-def authenticate(client):
+def sign_in(client):
     start = client.get("/api/v1/auth/google/start", follow_redirects=False)
     assert start.status_code == 307
     return client.get(
         "/api/v1/auth/google/callback?code=valid-code&state=test-state",
         follow_redirects=False,
     )
+
+
+def connect_gmail(client, calendar=True):
+    csrf = client.get("/api/v1/auth/session").json()["csrfToken"]
+    response = client.post("/api/v1/accounts/google/connect", headers={"X-CSRF-Token": csrf})
+    assert response.status_code == 200
+    callback = client.get("/api/v1/auth/google/callback?code=valid-code&state=test-state", follow_redirects=False)
+    if calendar:
+        account_id = client.get("/api/v1/accounts").json()["accounts"][0]["id"]
+        assert client.post(f"/api/v1/accounts/{account_id}/authorize-calendar", headers={"X-CSRF-Token": csrf}).status_code == 200
+        callback = client.get("/api/v1/auth/google/callback?code=valid-code&state=test-state", follow_redirects=False)
+    return callback
+
+
+def authenticate(client):
+    """Compatibility fixture for existing tests that exercise a connected mailbox."""
+    sign_in(client)
+    return connect_gmail(client)
 
 
 def test_health_and_signed_out_session(client):
@@ -89,7 +109,7 @@ def test_google_authorization_does_not_merge_legacy_grants(client):
     FakeFlow.authorization_options = None
     response = client.get("/api/v1/auth/google/start", follow_redirects=False)
     assert response.status_code == 307
-    assert FakeFlow.authorization_options == {"access_type": "offline", "prompt": "consent"}
+    assert FakeFlow.authorization_options == {"access_type": "online"}
 
 
 def test_google_flow_retries_connect_failures_without_read_retries(monkeypatch):

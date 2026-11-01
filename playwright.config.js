@@ -1,7 +1,7 @@
 import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
-  testDir: "./tests/browser", timeout: 30000, workers: 1,
+  testDir: "./tests/browser", testIgnore: "**/r9/**", timeout: 30000, workers: 1,
   use: { ...(process.env.BROWSER_CHANNEL ? { channel: process.env.BROWSER_CHANNEL } : {}), baseURL: "http://127.0.0.1:4278", trace: "retain-on-failure", launchOptions: { args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] } },
   outputDir: "build/module7-browser-results",
   webServer: {

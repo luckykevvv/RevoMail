@@ -266,13 +266,13 @@ def test_calendar_api_not_enabled_is_reported_distinctly(client, monkeypatch):
         assert "123456" not in response.text  # Google's own message (with the project number) is not passed on
 
 
-def test_calendar_insufficient_scope_still_asks_to_reconnect(client, monkeypatch):
+def test_calendar_insufficient_scope_asks_for_separate_authorization(client, monkeypatch):
     authenticate(client)
     block = {"errors": [{"reason": "insufficientPermissions"}], "status": "PERMISSION_DENIED"}
     monkeypatch.setattr(calendar_router.calendar_service, "create_event", lambda *a: (_ for _ in ()).throw(google_403(block)))
     response = client.post("/api/v1/calendar/events", json=body())
     assert response.status_code == 403 and response.json()["error"]["code"] == "INSUFFICIENT_PERMISSIONS"
-    assert "tick the Calendar permission" in response.json()["error"]["message"]
+    assert "Enable Calendar" in response.json()["error"]["message"]
 
 
 def test_google_error_reasons_ignores_unreadable_bodies():

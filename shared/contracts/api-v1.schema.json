@@ -45,6 +45,40 @@
       },
       "additionalProperties": false
     },
+    "manualEmailFields": {
+      "type": "object",
+      "required": ["body"],
+      "properties": {
+        "body": { "type": "string", "minLength": 1, "maxLength": 15000, "pattern": "\\S" },
+        "subject": { "type": "string", "maxLength": 1000 },
+        "sender": { "type": "string", "maxLength": 500 },
+        "email_date": { "type": "string", "maxLength": 128 }
+      }
+    },
+    "manualEmail": {
+      "allOf": [{ "$ref": "#/$defs/manualEmailFields" }],
+      "unevaluatedProperties": false
+    },
+    "manualDraft": {
+      "allOf": [
+        { "$ref": "#/$defs/manualEmailFields" },
+        { "properties": {
+          "tone": { "enum": ["professional", "concise", "friendly"] },
+          "instructions": { "type": "string", "maxLength": 1000 },
+          "current_draft": { "type": "string", "maxLength": 20000 }
+        } }
+      ],
+      "unevaluatedProperties": false
+    },
+    "manualImport": {
+      "allOf": [
+        { "$ref": "#/$defs/manualEmailFields" },
+        { "required": ["subject", "sender", "email_date", "warnings"], "properties": {
+          "warnings": { "type": "array", "items": { "type": "string" } }
+        } }
+      ],
+      "unevaluatedProperties": false
+    },
     "voiceCommand": {
       "type": "object",
       "required": ["transcript", "confirmed"],
@@ -64,7 +98,7 @@
           "type": "object",
           "required": ["view"],
           "properties": {
-            "view": { "enum": ["inbox", "reading", "reply", "tasks", "calendar", "settings", "starred", "drafts", "sent", "compose"] },
+            "view": { "enum": ["inbox", "reading", "reply", "tasks", "calendar", "settings", "starred", "drafts", "sent", "compose", "analyse-text"] },
             "currentMessageId": { "type": ["string", "null"], "maxLength": 512 },
             "followUpMessageId": { "type": ["string", "null"], "maxLength": 512 }
           },

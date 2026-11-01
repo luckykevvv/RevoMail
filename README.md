@@ -2,13 +2,14 @@
 
 RevoMail is an AI-assisted email client for email summarization, reply drafting, voice commands, and task/calendar extraction.
 
-> **Current status:** RevoMail is a Gmail-only, single-user MVP. Python/FastAPI and SQLite provide active sessions, encrypted credentials and cached message bodies, recoverable Gmail synchronization through the original `/api/v1/emails` contract, safe reading, message-state changes, and confirmed idempotent sending. Google and OpenAI provider calls remain covered by sanitized fixtures until the dedicated test account is exercised. Cloud Speech-to-Text and confirmed Google Calendar creation are implemented with fixture coverage; real-provider verification remains pending.
+> **Current status:** RevoMail is a single-user MVP with optional Gmail integration and provider-independent manual email analysis. Python/FastAPI and SQLite provide active sessions, encrypted credentials and cached Gmail message bodies, recoverable synchronization through `/api/v1/emails`, safe reading, message-state changes, and confirmed idempotent sending. Google and OpenAI provider calls remain covered by sanitized fixtures until the dedicated test account is exercised. Cloud Speech-to-Text and confirmed Google Calendar creation have fixture coverage; real-provider verification remains pending.
 
 ## Current Prototype
 
 The frontend currently demonstrates:
 
 - Google sign-in backed by the authentication API.
+- Analyse Text for pasted email and `.txt`/`.eml` imports, without connecting Gmail.
 - Searchable and filterable inbox with AI priority labels (High, Medium, Low) and priority filters.
 - Email reading with an AI summary and extracted information.
 - Editable and regeneratable AI reply drafts.
@@ -35,6 +36,23 @@ Run `npm run test:browser` after `npm run build` and `npx playwright install chr
 
 The authenticated inbox contains only synchronized provider data. Gmail synchronization is paginated and recoverable, HTML is sanitized and isolated from the application document, and sending requires a final review plus an idempotency key. Extracted events open an editable confirmation dialog before creating an event in the primary Google Calendar. Sent mail is fetched separately from the inbox cache.
 
+The inbox greeting follows the user's device-local time: morning from 05:00, afternoon from 12:00, and evening from 18:00 (also used overnight before 05:00). It updates while the inbox remains open and when the app regains focus. A failed refresh keeps cached messages readable and explains whether to retry or reconnect. If Google rejects saved authorisation (`invalid_grant`), choose **Reconnect Gmail** in the inbox banner or Settings; repeatedly refreshing cannot repair a rejected grant. Reconnecting requires Google's consent flow and preserves the RevoMail sign-in session. A successful callback displays **Gmail authorisation saved** and the frontend starts synchronization. Gmail reconnection does not require an older Calendar grant to be returned: restore missing Calendar access separately with **Enable Calendar**.
+
+## Manual Email Analysis (R9)
+
+1. Sign in with Google. This requests only `openid`, `email`, and `profile`; Gmail is optional.
+2. Open **Analyse Text** from the navigation or disconnected inbox. Paste email copied from Outlook, Yahoo, university email, or another provider, or import a `.txt`/`.eml` file. Review the imported text and optional subject, sender, and original email date.
+3. Choose **Summarise**, **Classify priority**, **Extract tasks / events**, or **Generate reply draft**. The selected action sends content to the configured AI provider (currently OpenAI). Importing alone does not call AI.
+4. Review results. Reply drafts and task/event suggestions are editable and copyable. Manual analysis never sends email, creates Gmail drafts, or saves tasks/calendar events.
+
+Email text is limited to 15,000 characters; uploads to 1 MiB and analysis JSON to 256 KiB. Text imports support UTF-8/BOM and BOM-marked UTF-16. Email imports decode standard MIME/headers, prefer plain text, fall back to safe text extracted from HTML, and ignore attachments and attached emails. Classification reuses the existing sender/subject/first-400-character preview logic. Missing dates stay unresolved rather than using today's date.
+
+RevoMail keeps manual content and results only in page/request memory, retaining the editor across internal navigation and clearing it on Clear, sign-out, session expiry, or reload. It does not store uploads, manual email bodies, drafts, or extracted suggestions in SQLite, jobs, or browser storage. Cancelling cannot recall content already submitted to the server or provider. The configured provider's retention policies still apply.
+
+Use **Connect Gmail** in the inbox or Settings to grant `gmail.modify` and `gmail.send` separately. Use **Enable Calendar** on a connected Gmail account to grant `calendar.events`. Existing connected accounts retain their credentials and grants when signing in; no blanket reauthorisation is required. Disconnect removes local Gmail/Calendar credentials without signing out. Provider-side revocation is not implemented: remove RevoMail in your Google account to revoke its grant. Keep the application and callback on the same host for connection flows; a callback without the originating signed-in session is rejected safely.
+
+After building, run `npm run test:browser:r9` for real frontend-to-FastAPI functional checks with deterministic Google/AI provider fakes. These cover all four AI operations without Gmail, actual text/MIME imports, optional authorisation, and desktop/320px light/dark keyboard and axe checks. The separate fixture server is test-only and is never used by production startup. Set `$env:BROWSER_CHANNEL='msedge'` on Windows when using installed Microsoft Edge.
+
 ## Quick Start
 
 Prerequisites:
@@ -50,7 +68,7 @@ npm ci
 npm run desktop
 ```
 
-`npm ci` automatically creates the ignored repository `.venv` and installs `backend/requirements.txt`. Source start, test, and packaging commands repeat this check and install only when the environment is missing or the requirements file changed. If Python is not installed, setup stops with an actionable message; it does not make system-wide changes. Packaged desktop builds launch their bundled standalone backend and do not require Node.js or Python on the target machine. Google and OpenAI buttons remain unavailable until the relevant server-side credentials are supplied. Register `${APP_BASE_URL}/api/v1/auth/google/callback` with Google. RevoMail requests the `gmail.modify` scope so that reading an email in RevoMail also marks it read in Gmail; accounts connected earlier with read-only access must use Reconnect in Settings once.
+`npm ci` automatically creates the ignored repository `.venv` and installs `backend/requirements.txt`. Source start, test, and packaging commands repeat this check and install only when the environment is missing or the requirements file changed. If Python is not installed, setup stops with an actionable message; it does not make system-wide changes. Packaged desktop builds launch their bundled standalone backend and do not require Node.js or Python on the target machine. Google sign-in requires server-side Google credentials; AI analysis requires `OPENAI_API_KEY`. Register `${APP_BASE_URL}/api/v1/auth/google/callback` with Google. Optional Gmail connection requests `gmail.modify` so reading an email can mark it read in Gmail; older read-only connections need **Reconnect Gmail** to enable updates.
 
 On Windows, contributors can instead double-click the root-level `RevoMail.cmd`. It checks for Node.js and npm, compares the current `package-lock.json` with the installed Node environment, runs `npm ci` when dependencies are missing or stale (preparing the Python environment through the npm post-install hook), builds the frontend, and opens Electron. Node.js LTS and Python 3.11 or newer are the only source-development prerequisites. No prebuilt executable is committed; `RevoMail.cmd` is the one-click source launcher.
 
@@ -95,6 +113,7 @@ Supported runtime variables:
 | `APP_BASE_URL` | `http://localhost:4173` | Public same-origin URL and OAuth callback base |
 | `REVOMAIL_DEBUG` | `false` | Enables FastAPI development documentation |
 | `DATABASE_URL` | `file:./data/revomail.db` | SQLite database URL used by the active Python repositories |
+| `MANUAL_AI_LIMIT_PER_MINUTE` | `12` | Per-user manual AI action limit, 1-120; imports do not invoke AI |
 | `SECRET_KEY` | Auto-generated | Signs the opaque session cookie; optional, generated and stored in `data/revomail-server.key` on first startup |
 | `TOKEN_ENCRYPTION_KEY` | Auto-generated | Fernet key for stored provider credentials; optional, generated and stored in `data/revomail-server.key` on first startup |
 | `JOB_LEASE_SECONDS` | `60` | Lease duration before an interrupted job can be recovered |
@@ -123,6 +142,7 @@ Process variables take precedence over the ignored root `.env`, followed by code
 | `npm test` | Run JavaScript and Python tests |
 | `npm run test:js` | Run the retained Node authentication and desktop tests |
 | `npm run test:python` | Run FastAPI, OAuth, Gmail, and AI tests |
+| `npm run test:browser:r9` | Run manual-analysis browser workflows against FastAPI with provider fakes |
 | `npm run test:db` | Run isolated SQLite repository integration tests |
 | `npm run db:migrate` | Apply committed SQLite migrations to the configured local database |
 | `npm run db:migrate:dev` | Apply committed SQLite migrations during development |
@@ -213,7 +233,7 @@ Do not mark mocked UI behavior as a completed production integration. The full r
 
 ## Main integration: Calendar, Sent, and guided drafts
 
-Enable Google Calendar API in the same test project as Gmail, then reconnect existing accounts to grant the least-privilege `calendar.events` scope. Extraction does not create events: review the title, date, time, location and displayed local time zone, then explicitly confirm. Missing or ambiguous dates require correction. Unknown provider outcomes must be checked in Google Calendar before another attempt; the application retains the request key across dialog retries.
+Enable Google Calendar API in the same test project as Gmail, then choose **Enable Calendar** on the connected Gmail account in Settings to grant `calendar.events`. Existing Calendar grants remain usable. Gmail extraction does not create events: review the title, date, time, location and displayed local time zone, then explicitly confirm. Manual extraction remains copy-only. Missing or ambiguous dates require correction. Unknown provider outcomes must be checked in Google Calendar before another attempt; the application retains the request key across dialog retries.
 
 Reply and compose views accept instructions and can revise existing drafts. Model and reply length come from persisted account settings. Sending always uses a separate final confirmation. Sent mail has independent pagination and does not contaminate the inbox cache. The desktop backend includes Calendar discovery documents and the pinned tzdata package for Windows time-zone support.
 

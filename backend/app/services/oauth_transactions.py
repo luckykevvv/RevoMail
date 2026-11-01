@@ -8,6 +8,7 @@ from typing import Callable
 class OAuthTransaction:
     return_to: str
     expires_at: float
+    context: dict | None = None
 
 
 class OAuthTransactionStore:
@@ -17,11 +18,11 @@ class OAuthTransactionStore:
         self._transactions: dict[str, OAuthTransaction] = {}
         self._lock = Lock()
 
-    def put(self, state: str, return_to: str) -> None:
+    def put(self, state: str, return_to: str, context: dict | None = None) -> None:
         now = self.clock()
         with self._lock:
             self._remove_expired(now)
-            self._transactions[state] = OAuthTransaction(return_to=return_to, expires_at=now + self.ttl_seconds)
+            self._transactions[state] = OAuthTransaction(return_to=return_to, expires_at=now + self.ttl_seconds, context=context)
 
     def consume(self, state: str) -> OAuthTransaction | None:
         if not state:

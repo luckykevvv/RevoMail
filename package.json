@@ -39,7 +39,9 @@
     "desktop:pack": "npm run build && npm run backend:pack && electron-builder --dir",
     "desktop:dist": "npm run build && npm run backend:pack && electron-builder",
     "verify:push": "npm test && npm run build && npm run desktop:pack && npm run desktop:smoke",
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "test:browser:r9": "playwright test --config=playwright.r9.config.js",
+    "test:r9:server": "node scripts/python-runtime.mjs -m backend.python_tests.r9_browser_server"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

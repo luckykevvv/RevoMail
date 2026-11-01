@@ -1,5 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { mergeRefreshedPage } from "./mailbox-state.js";
+import { mergeRefreshedPage, localGreeting, mailboxSyncProblem } from "./mailbox-state.js";
+
+describe("local inbox greeting", () => {
+  it.each([[0, "Good evening"], [4, "Good evening"], [5, "Good morning"], [11, "Good morning"], [12, "Good afternoon"], [17, "Good afternoon"], [18, "Good evening"], [23, "Good evening"]])("uses the local hour %i", (hour, greeting) => {
+    expect(localGreeting(new Date(2026, 10, 1, hour, 59))).toBe(greeting);
+  });
+});
+
+describe("sync failure guidance", () => {
+  it("requires reconnect for rejected authorisation rather than repeatedly retrying", () => {
+    expect(mailboxSyncProblem({ status: "failed", errorCode: "AUTHORIZATION_EXPIRED" })).toMatchObject({ reconnect: true, message: expect.stringContaining("Reconnect Gmail") });
+    expect(mailboxSyncProblem({ status: "syncing", errorCode: "AUTHORIZATION_EXPIRED" })).toBeNull();
+  });
+  it.each(["PROVIDER_RATE_LIMITED", "PROVIDER_TIMEOUT", "PROVIDER_UNAVAILABLE", "SYNC_FAILED"])("allows retry for %s", code => {
+    expect(mailboxSyncProblem({ status: "failed", errorCode: code })).toMatchObject({ reconnect: false, message: expect.any(String) });
+  });
+});
 
 const page1 = [
   { id: "new", subject: "Brand new", receivedAt: "2026-10-10T02:00:00Z" },

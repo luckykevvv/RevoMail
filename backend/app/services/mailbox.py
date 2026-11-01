@@ -1,10 +1,14 @@
 import asyncio
+import logging
 from contextlib import suppress
 
 from backend.app.jobs import JobRepository
 from backend.app.mailbox import MailboxRepository
 from backend.app.persistence import AuthRepository, utc_now
 from backend.app.services.gmail import GmailAdapter, HistoryExpired, MailProviderError
+
+
+logger = logging.getLogger("revomail.mailbox.sync")
 
 
 class MailboxSyncService:
@@ -50,8 +54,8 @@ class MailboxSyncService:
             return True
         account, tokens = account_tokens
         state = self.repository.sync_state(connection_id)
-        adapter = GmailAdapter(tokens)
         try:
+            adapter = GmailAdapter(tokens)
             if state["phase"] == "full":
                 page = adapter.list_messages(20, state.get("pageCursor"))
                 self.repository.upsert_messages(connection_id, page["items"])
@@ -88,7 +92,8 @@ class MailboxSyncService:
             else:
                 self.jobs.fail(job.id, exc.code)
                 self.repository.set_sync_state(connection_id, status="failed", job_id=None, error_code=exc.code)
-        except Exception:
+        except Exception as exc:
+            logger.warning("Mailbox sync failed job_id=%s error_type=%s", job.id, type(exc).__name__)
             self.jobs.fail(job.id, "SYNC_FAILED")
             self.repository.set_sync_state(connection_id, status="failed", job_id=None, error_code="SYNC_FAILED")
         return True

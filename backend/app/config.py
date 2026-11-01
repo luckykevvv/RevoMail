@@ -104,6 +104,7 @@ class Settings(BaseSettings):
 
     openai_api_key: str = ""
     openai_model: str = "gpt-4o"
+    manual_ai_limit_per_minute: int = Field(default=12, ge=1, le=120)
     ai_allowed_models: list[str] = Field(default_factory=list)
     speech_model: str = "gpt-transcribe"
     speech_api_url: str = "https://api.openai.com/v1/audio/transcriptions"
