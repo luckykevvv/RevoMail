@@ -21,6 +21,6 @@ Manual source text, results, files, drafts, and suggestions remain transient. Th
 - Signed-in users without Gmail can analyse controlled content from any email provider without a provider API integration.
 - Manual replies and task/event suggestions are editable and copy-only. Existing Gmail send/Calendar writes retain their separate confirmation and idempotency boundaries.
 - Optional connection callbacks must arrive on a host carrying the initiating session cookie; missing continuity fails safely. Identity sign-in retains its loopback-host transition support.
-- Disconnect removes all locally stored credentials for the Google connection but preserves identity/session. Provider-side revocation remains future work.
+- Disconnect removes all locally stored credentials and cached mailbox data for the Google connection without contacting Google, and preserves identity/session. A separate confirmed action can revoke the complete Google project grant; local data is retained when the provider outcome is failed or uncertain. Google does not support revoking only the Gmail or Calendar subset through this endpoint.
 - Manual input is capped at the existing AI service's 15,000-character body budget. Priority classification retains the existing 400-character preview behaviour.
 - Browser functional tests run the real frontend and FastAPI with test-only Google/AI fakes. They prove R9 behaviour, not real-provider authorisation or model quality.

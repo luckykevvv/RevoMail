@@ -56,8 +56,20 @@ def test_oauth_callback_must_share_the_application_origin(tmp_path):
     assert settings.app_base_url == "http://localhost:4173"
     assert settings.effective_google_redirect_uri == "http://localhost:4173/api/v1/auth/google/callback"
 
+    with pytest.raises(ValidationError) as mismatched_origin:
+        Settings(
+            _env_file=None,
+            environment="test",
+            app_base_url="http://localhost:4173",
+            google_redirect_uri="http://127.0.0.1:4173/api/v1/auth/google/callback",
+            database_url="file:./test.db",
+            secret_key="test-session-secret-that-is-long-enough",
+            token_encryption_key=key,
+            runtime_key_file=tmp_path / "keys",
+        )
+    assert "scheme, host, and port" in str(mismatched_origin.value)
+
     for redirect_uri in (
-        "http://127.0.0.1:4173/api/v1/auth/google/callback",
         "http://localhost:4273/api/v1/auth/google/callback",
         "http://localhost:4173/wrong/callback",
     ):

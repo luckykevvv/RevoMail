@@ -140,7 +140,10 @@ class Settings(BaseSettings):
                     or redirect.path != "/api/v1/auth/google/callback" or redirect.params or redirect.query or redirect.fragment):
                 raise ValueError("GOOGLE_REDIRECT_URI must be the absolute RevoMail Google callback URL.")
             if redirect_origin != app_origin:
-                raise ValueError("GOOGLE_REDIRECT_URI must use the same origin as APP_BASE_URL so the session cookie reaches the callback.")
+                raise ValueError(
+                    "GOOGLE_REDIRECT_URI must exactly match the APP_BASE_URL origin "
+                    "(scheme, host, and port) so the RevoMail session cookie reaches the OAuth callback."
+                )
         if not self.database_url.startswith("file:"):
             raise ValueError("DATABASE_URL must use the file: SQLite URL format.")
         secret_key, token_key = resolve_runtime_keys(self.secret_key, self.token_encryption_key, self.runtime_key_file)

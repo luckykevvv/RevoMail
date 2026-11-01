@@ -23,7 +23,7 @@ Clients may retry only when `retryable` is true and the operation itself is safe
 
 - `GET /api/v1/health` returns process status, a non-sensitive database readiness check, service name, and timestamp.
 - `GET /api/v1/auth/session` returns authentication state, safe user display fields, CSRF value, and provider availability.
-- `GET /api/v1/auth/google/start?returnTo=/` redirects to Google.
+- `GET /api/v1/auth/google/start?returnTo=/` redirects to Google from the configured application origin. A request on a mismatched host or port safely navigates to that configured origin with a user-facing error before any OAuth transaction is created.
 - `GET /api/v1/auth/google/callback` consumes a single-use server-side OAuth transaction and creates an opaque application session.
 - `POST /api/v1/auth/logout` invalidates the server-side session and returns `204`.
 
@@ -31,7 +31,8 @@ Clients may retry only when `retryable` is true and the operation itself is safe
 
 - `GET /api/v1/accounts` returns only accounts owned by the authenticated user.
 - `POST /api/v1/accounts/{id}/reauthorize` returns a fresh authorization URL.
-- `DELETE /api/v1/accounts/{id}` deletes the local connection and encrypted credential, then returns `204`.
+- `DELETE /api/v1/accounts/{id}` deletes the local connection, encrypted credential, and cached mailbox data without contacting Google, then returns `204`.
+- `POST /api/v1/accounts/{id}/revoke` submits the server-held refresh token (or access token fallback) to Google's whole-grant revocation endpoint. It deletes local connection data only after a confirmed `200`, preserves the RevoMail session, and otherwise returns a safe retryable error without claiming success.
 
 ## Gmail mailbox
 

@@ -150,6 +150,11 @@ async def session(request: Request):
 
 @router.get("/google/start")
 async def provider_start(request: Request, returnTo: str = "/"):
+    if not _request_origin_matches(request):
+        # This route has no authorization code. It is safe to navigate to the
+        # configured application origin before beginning OAuth, which also gives
+        # the user a rendered explanation instead of a raw API error.
+        return RedirectResponse(f"{request.app.state.settings.app_base_url}/?authError=OAUTH_ORIGIN_MISMATCH")
     return RedirectResponse(_authorization(request, returnTo))
 
 

@@ -139,7 +139,7 @@ Acceptance criteria:
 - [ ] Support interface language, light/dark theme, and reduced motion.
 - [x] Support a default AI model, reply length, automatic/English/Chinese speech language, and spoken-result preference.
 - [x] Allow users to enable or disable voice input.
-- [ ] Show connected accounts, granted permissions, and a revoke-access action.
+- [x] Show connected accounts, granted permissions, and separate local-disconnect and Google revoke-access actions.
 - [ ] Persist user settings across sessions.
 
 ### FR-08 Errors and Status Feedback

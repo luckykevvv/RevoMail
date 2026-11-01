@@ -133,7 +133,7 @@ test("clipboard failure exposes selectable reviewed text", async ({ page }) => {
   await expect(page.getByLabel("Text to copy manually")).toHaveValue(/Thank you/);
 });
 
-test("optional Gmail/Calendar grants and disconnect retain sign-in", async ({ page }) => {
+test("optional Gmail/Calendar grants and local disconnect retain sign-in", async ({ page }) => {
   await openManual(page);
   await page.getByRole("navigation").getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "Connect Gmail", exact: true }).click();
@@ -146,11 +146,38 @@ test("optional Gmail/Calendar grants and disconnect retain sign-in", async ({ pa
   await expect(page.locator(".account-connection-notice")).toContainText("Gmail authorisation saved");
   await expect(page.getByRole("button", { name: "Enable Calendar" })).toBeVisible();
   await expect.poll(() => page.request.get("/api/v1/emails").then(response => response.json()).then(result => result.sync.status)).toBe("idle");
-  page.on("dialog", dialog => dialog.accept());
-  await page.getByRole("button", { name: "Disconnect", exact: true }).click();
+  const disconnectButton = page.getByRole("button", { name: "Disconnect Gmail", exact: true });
+  await disconnectButton.click();
+  const disconnectDialog = page.getByRole("dialog", { name: "Disconnect Gmail?" });
+  await expect(disconnectDialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(disconnectDialog).toBeHidden();
+  await expect(disconnectButton).toBeFocused();
+  await disconnectButton.click();
+  await disconnectDialog.getByRole("button", { name: "Disconnect Gmail", exact: true }).click();
   await expect(page.getByRole("button", { name: "Connect Gmail", exact: true })).toBeVisible();
   await page.getByRole("navigation").getByRole("button", { name: "Analyse Text" }).click();
-  await expect(page.getByLabel("Email text", { exact: true })).toBeVisible();
+  const disconnectedInput = page.getByLabel("Email text", { exact: true });
+  await disconnectedInput.click();
+  await page.keyboard.type("Typing works immediately after disconnect.");
+  await expect(disconnectedInput).toHaveValue("Typing works immediately after disconnect.");
+});
+
+test("confirmed Google revocation remains separate and retains sign-in", async ({ page }) => {
+  await openManual(page);
+  await page.getByRole("navigation").getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Connect Gmail", exact: true }).click();
+  await page.getByRole("button", { name: "Revoke Google Access", exact: true }).click();
+  const revokeDialog = page.getByRole("dialog", { name: "Revoke Google Access?" });
+  await expect(revokeDialog).toContainText("both Gmail and Calendar");
+  await revokeDialog.getByRole("button", { name: "Revoke Google Access", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Connect Gmail", exact: true })).toBeVisible();
+  await expect(page.locator(".toast")).toContainText("Google access revoked and local Gmail data removed");
+  await page.getByRole("navigation").getByRole("button", { name: "Analyse Text" }).click();
+  const revokedInput = page.getByLabel("Email text", { exact: true });
+  await revokedInput.click();
+  await page.keyboard.type("Typing works immediately after revocation.");
+  await expect(revokedInput).toHaveValue("Typing works immediately after revocation.");
 });
 
 for (const width of [1280, 320]) for (const theme of ["light", "dark"]) {

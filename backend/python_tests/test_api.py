@@ -250,8 +250,9 @@ def test_google_signin_callback_does_not_require_a_preexisting_session_cookie(cl
 def test_oauth_requests_reject_a_mismatched_cookie_origin_without_consuming_state(client):
     mismatch = {"host": "127.0.0.1:4173"}
     start = client.get("/api/v1/auth/google/start", headers=mismatch, follow_redirects=False)
-    assert start.status_code == 409
-    assert start.json()["error"]["message"] == "OAuth must start from the configured RevoMail origin."
+    assert start.status_code == 307
+    assert start.headers["location"] == "http://localhost:4173/?authError=OAUTH_ORIGIN_MISMATCH"
+    assert client.app.state.oauth_transactions.consume("test-state") is None
 
     client.get("/api/v1/auth/google/start", follow_redirects=False)
     callback = client.get(

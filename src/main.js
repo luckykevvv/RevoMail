@@ -123,6 +123,7 @@ const state = {
   authError: "",
   accountNotice: "",
   accountBusy: "",
+  accountConfirmation: null,
   view: "inbox",
   selectedEmail: null,
   category: "Primary",
@@ -495,12 +496,12 @@ function connectedAccountsGroup() {
       ${account.requiresReauthorization ? '<p class="provider-note">Reconnect to enable read/unread, starring, and confirmed sending.</p>' : ""}
       ${account.calendarRequiresReauthorization ? '<p class="provider-note">Enable Calendar separately to add reviewed events from Gmail.</p>' : ""}
       <details><summary>Granted permissions</summary><ul>${account.scopes.map((scope) => `<li>${escapeHtml(scope)}</li>`).join("")}</ul></details>
-      <div class="account-actions"><button class="secondary-button" data-reauthorize="${account.id}" ${busy ? "disabled" : ""}>Reconnect Gmail</button>${account.calendarRequiresReauthorization ? `<button class="secondary-button" data-enable-calendar="${account.id}" ${busy ? "disabled" : ""}>Enable Calendar</button>` : ""}<button class="danger-button" data-disconnect="${account.id}" data-provider-name="${provider}" data-account-email="${escapeHtml(account.email)}" ${busy ? "disabled" : ""}>Disconnect</button></div>
+      <div class="account-actions"><button class="secondary-button" data-reauthorize="${account.id}" ${busy ? "disabled" : ""}>Reconnect Gmail</button>${account.calendarRequiresReauthorization ? `<button class="secondary-button" data-enable-calendar="${account.id}" ${busy ? "disabled" : ""}>Enable Calendar</button>` : ""}<button class="secondary-button" data-disconnect="${account.id}" data-provider-name="${provider}" data-account-email="${escapeHtml(account.email)}" ${busy ? "disabled" : ""}>Disconnect Gmail</button><button class="danger-button" data-revoke-google="${account.id}" data-account-email="${escapeHtml(account.email)}" ${busy ? "disabled" : ""}>Revoke Google Access</button></div>
     </article>`;
   }).join("") : '<div class="empty-account"><p>No connected Gmail account. Your RevoMail session can analyse email text independently.</p><div class="manual-actions"><button class="primary-button" data-connect-gmail>Connect Gmail</button><button class="secondary-button" data-nav="analyse-text">Analyse Text</button></div></div>';
   const authError = state.authError ? `<p role="alert">${escapeHtml(state.authError)}</p>` : "";
   const notice = state.accountNotice ? `<p class="account-connection-notice" role="status">${escapeHtml(state.accountNotice)}</p>` : "";
-  return settingGroup("Connected accounts", "shield-check", `<div class="connected-account-list">${authError}${notice}${content}<p>Gmail and Calendar permissions are optional. Disconnect removes local credentials, including Calendar access, and keeps you signed in. Remove RevoMail in your Google account to revoke provider-side access.</p><div class="session-actions"><span><strong>RevoMail session</strong><small>Signing out keeps provider access connected until you disconnect it above.</small></span><button class="secondary-button" data-logout>${icon("log-out")} Sign out of RevoMail</button></div></div>`);
+  return settingGroup("Connected accounts", "shield-check", `<div class="connected-account-list">${authError}${notice}${content}<p>Gmail and Calendar permissions are optional. Disconnect Gmail removes only local credentials. Revoke Google Access asks Google to revoke the entire RevoMail grant, which can affect both Gmail and Calendar, then removes local data after Google confirms success. Both actions keep you signed in.</p><p>If you already disconnected and RevoMail no longer has a token, remove its access in Google Account settings.</p><div class="session-actions"><span><strong>RevoMail session</strong><small>Signing out does not disconnect or revoke provider access.</small></span><button class="secondary-button" data-logout>${icon("log-out")} Sign out of RevoMail</button></div></div>`);
 }
 
 function settingGroup(title, groupIcon, content) {
@@ -572,6 +573,25 @@ function sendConfirmationModal() {
     <label>Message<textarea id="confirmed-body" class="reply-editor">${escapeHtml(draft.bodyText)}</textarea></label>
     <p>RevoMail will contact Gmail only after you choose “Confirm and send”.</p>
     <div class="modal-footer"><button class="secondary-button" data-cancel-send ${state.sendBusy ? "disabled" : ""}>Keep editing</button><button class="primary-button" data-confirm-send ${state.sendBusy ? "disabled" : ""}>${state.sendBusy ? "Sending…" : "Confirm and send"}</button></div>
+  </section></div>`;
+}
+
+function accountConfirmationModal() {
+  const confirmation = state.accountConfirmation;
+  if (!confirmation) return "";
+  const revoking = confirmation.type === "revoke";
+  const busy = state.accountBusy === confirmation.accountId;
+  const title = revoking ? "Revoke Google Access?" : "Disconnect Gmail?";
+  const explanation = revoking
+    ? "Google does not support partial-scope revocation. This can affect both Gmail and Calendar. RevoMail will remove local credentials and cached mailbox data only after Google confirms revocation. Your RevoMail session will stay active."
+    : "This removes RevoMail's local Gmail and Calendar credentials and cached mailbox data, but does not revoke Google's provider-side grant. Your RevoMail session will stay active.";
+  const action = revoking ? "Revoke Google Access" : "Disconnect Gmail";
+  return `<div class="modal-backdrop" role="presentation"><section class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="account-confirm-title" aria-describedby="account-confirm-description">
+    <div class="modal-header"><div><span class="eyebrow">CONNECTED ACCOUNT</span><h2 id="account-confirm-title">${title}</h2></div><button class="icon-button" data-cancel-account-action aria-label="Cancel account action" ${busy ? "disabled" : ""}>${icon("x")}</button></div>
+    <p id="account-confirm-description">${explanation}</p>
+    <p><strong data-user-content>${escapeHtml(confirmation.email)}</strong></p>
+    ${confirmation.error ? `<p class="send-error" role="alert">${escapeHtml(confirmation.error)}</p>` : ""}
+    <div class="modal-footer"><button class="secondary-button" data-cancel-account-action ${busy ? "disabled" : ""}>Cancel</button><button class="danger-button" data-confirm-account-action ${busy ? "disabled" : ""}>${busy ? (revoking ? "Revoking…" : "Disconnecting…") : action}</button></div>
   </section></div>`;
 }
 
@@ -879,7 +899,7 @@ function bindEvents() {
     clearTimeout(syncTimer);
     stopAutoRefresh(); state.refreshing = false;
     state.outgoing = { compose: [], reply: [] };
-    state.sent = []; state.sentCursor = null; state.starred = []; state.starredCursor = null; state.returnView = "inbox"; state.calendarDraft = null; state.addedEvents = {}; state.calendarAttempts = {}; state.aiInstructions = { reply: "", compose: "" };
+    state.sent = []; state.sentCursor = null; state.starred = []; state.starredCursor = null; state.returnView = "inbox"; state.calendarDraft = null; state.accountConfirmation = null; state.addedEvents = {}; state.calendarAttempts = {}; state.aiInstructions = { reply: "", compose: "" };
     state.authenticated = false; state.user = null; state.csrfToken = ""; state.accounts = []; state.view = "inbox"; resetMailbox(); render();
   }));
   queryAll("[data-nav]").forEach((button) => button.addEventListener("click", () => navigate(button.dataset.nav)));
@@ -928,13 +948,14 @@ function bindEvents() {
   queryAll("[data-refresh-mail]").forEach(button => button.addEventListener("click", () => void startMailboxSync({ manual: true })));
   query("[data-ai-summarise]")?.addEventListener("click", () => void aiSummarise());
   query("[data-ai-extract]")?.addEventListener("click", () => void aiExtract());
-  queryAll("[data-disconnect]").forEach((button) => button.addEventListener("click", async () => {
-    const confirmed = window.confirm(`Disconnect Gmail and Calendar access for ${button.dataset.accountEmail}? This removes RevoMail's local credentials and keeps you signed in. Provider-side access can be revoked in your Google account.`);
-    if (!confirmed) return;
-    state.accountBusy = button.dataset.disconnect; render();
-    try { await api(`/api/v1/accounts/${button.dataset.disconnect}`, { method: "DELETE" }); await loadAccounts(); showToast("Account disconnected and local credentials removed", false); }
-    catch (error) { state.accountBusy = ""; showToast(error.message); }
+  queryAll("[data-disconnect]").forEach((button) => button.addEventListener("click", () => {
+    openAccountConfirmation("disconnect", button.dataset.disconnect, button.dataset.accountEmail);
   }));
+  queryAll("[data-revoke-google]").forEach((button) => button.addEventListener("click", () => {
+    openAccountConfirmation("revoke", button.dataset.revokeGoogle, button.dataset.accountEmail);
+  }));
+  queryAll("[data-cancel-account-action]").forEach((button) => button.addEventListener("click", closeAccountConfirmation));
+  query("[data-confirm-account-action]")?.addEventListener("click", () => void confirmAccountAction());
   queryAll("[data-reauthorize]").forEach(button => button.addEventListener("click", () => void authoriseProvider(`/api/v1/accounts/${encodeURIComponent(button.dataset.reauthorize)}/reauthorize`, button.dataset.reauthorize)));
   queryAll("[data-voice]").forEach((button) => button.addEventListener("click", openVoice));
   query("[data-close-voice]")?.addEventListener("click", () => closeVoice());
@@ -1017,6 +1038,41 @@ function bindEvents() {
 
 function activeAccount() {
   return state.accounts[0] || null;
+}
+
+function openAccountConfirmation(type, accountId, email) {
+  if (state.accountBusy || state.accountConfirmation || !["disconnect", "revoke"].includes(type)) return;
+  if (state.voiceOpen) closeVoice(false);
+  state.accountConfirmation = { type, accountId, email, error: "" };
+  render();
+}
+
+function closeAccountConfirmation() {
+  if (!state.accountConfirmation || state.accountBusy) return;
+  state.accountConfirmation = null;
+  render();
+}
+
+async function confirmAccountAction() {
+  const confirmation = state.accountConfirmation;
+  if (!confirmation || state.accountBusy) return;
+  state.accountBusy = confirmation.accountId;
+  confirmation.error = "";
+  render();
+  try {
+    const revoking = confirmation.type === "revoke";
+    const path = `/api/v1/accounts/${encodeURIComponent(confirmation.accountId)}${revoking ? "/revoke" : ""}`;
+    await api(path, { method: revoking ? "POST" : "DELETE" });
+    state.accounts = state.accounts.filter(account => account.id !== confirmation.accountId);
+    state.accountBusy = "";
+    state.accountConfirmation = null;
+    if (!state.accounts.length) clearDisconnectedMailboxState();
+    showToast(revoking ? "Google access revoked and local Gmail data removed" : "Account disconnected and local credentials removed", false);
+  } catch (error) {
+    state.accountBusy = "";
+    if (state.accountConfirmation === confirmation) confirmation.error = error.message;
+    render();
+  }
 }
 
 async function updateMessageState(email, change) {
@@ -1348,15 +1404,17 @@ async function aiDraftReply(tone) {
   }
 }
 
+function clearDisconnectedMailboxState() {
+  for (const key of ["mailbox-list", "mailbox-refresh", "message-detail", "sent-list", "starred-list", "ai-summary", "ai-extraction", "ai-draft"]) cancelRequest(key);
+  clearTimeout(syncTimer); clearTimeout(searchTimer); stopAutoRefresh(); state.refreshing = false;
+  state.sent = []; state.starred = []; resetMailbox();
+}
+
 async function loadAccounts() {
   const payload = await api("/api/v1/accounts");
   state.accounts = payload.accounts;
   state.accountBusy = "";
-  if (!state.accounts.length) {
-    for (const key of ["mailbox-list", "mailbox-refresh", "message-detail", "sent-list", "starred-list", "ai-summary", "ai-extraction", "ai-draft"]) cancelRequest(key);
-    clearTimeout(syncTimer); clearTimeout(searchTimer); stopAutoRefresh(); state.refreshing = false;
-    state.sent = []; state.starred = []; resetMailbox();
-  }
+  if (!state.accounts.length) clearDisconnectedMailboxState();
   render();
 }
 
@@ -1530,6 +1588,7 @@ function closeVoice(shouldRender = true) {
 function closeActiveDialog() {
   if (state.sendConfirmation) closeSendConfirmation();
   else if (state.calendarDraft) closeCalendar();
+  else if (state.accountConfirmation) closeAccountConfirmation();
   else closeVoice();
 }
 
@@ -1722,7 +1781,7 @@ function renderOverlays() {
   const overlays = app.querySelector("[data-overlays]");
   if (!overlays.querySelector("[data-dialog-host]")) overlays.innerHTML = '<div data-dialog-host></div><div data-toast-host></div>';
   const host = overlays.querySelector("[data-dialog-host]");
-  const content = voiceModal() + sendConfirmationModal() + calendarModal();
+  const content = voiceModal() + sendConfirmationModal() + calendarModal() + accountConfirmationModal();
   if (host._content !== content) {
     const focus = captureFocus(host);
     const scroll = [...host.querySelectorAll("[data-preserve-scroll]")].map(element => [element.dataset.preserveScroll, element.scrollTop, element.scrollLeft]);

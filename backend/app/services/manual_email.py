@@ -1,6 +1,7 @@
 """Transient, provider-neutral email import. Never opens URLs or stores uploads."""
 import codecs
 import re
+from collections import Counter
 from email import policy
 from email.parser import BytesParser
 from html.parser import HTMLParser
@@ -51,6 +52,7 @@ class TextFromHTML(HTMLParser):
         self.parts = []
         self.hidden_depth = 0
         self.stack = []
+        self.open_counts = Counter()
 
     @staticmethod
     def _hidden_by_attributes(attrs):
@@ -68,21 +70,35 @@ class TextFromHTML(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         tag = tag.lower()
+        # HTML permits omitting </head>. HTMLParser does not imply that close,
+        # so end the hidden head explicitly when visible body content begins.
+        if tag == "body" and self.open_counts.get("head", 0):
+            self.handle_endtag("head")
         own_hidden = tag in self._ALWAYS_HIDDEN or self._hidden_by_attributes(attrs)
         if own_hidden and tag not in self._VOID_TAGS:
             self.hidden_depth += 1
         if tag not in self._VOID_TAGS:
             self.stack.append((tag, own_hidden))
+            self.open_counts[tag] += 1
         if not self.hidden_depth and (tag == "br" or tag in self._BLOCK_TAGS):
             self._separator()
 
     def handle_endtag(self, tag):
         tag = tag.lower()
+        # Avoid scanning the entire open-element stack for each unmatched close.
+        # Once a matching tag is known to be open, the scan plus popped suffix is
+        # amortised linear across matched closing tags.
+        if not self.open_counts.get(tag, 0):
+            return
         matched = next((index for index in range(len(self.stack) - 1, -1, -1) if self.stack[index][0] == tag), None)
         if matched is None:
             return
         closing = self.stack[matched:]
         del self.stack[matched:]
+        for name, _own_hidden in closing:
+            self.open_counts[name] -= 1
+            if self.open_counts[name] <= 0:
+                del self.open_counts[name]
         was_visible = self.hidden_depth == 0
         self.hidden_depth = max(0, self.hidden_depth - sum(1 for _name, own_hidden in closing if own_hidden))
         if (was_visible or self.hidden_depth == 0) and tag in self._BLOCK_TAGS:

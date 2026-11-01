@@ -57,7 +57,11 @@ Requires authentication, `X-CSRF-Token`, and ownership of an existing Gmail conn
 
 ### `DELETE /api/v1/accounts/:id`
 
-Requires authentication, `X-CSRF-Token`, and ownership. Removes the connection and local Gmail/Calendar credentials, leaving the RevoMail session and identity intact. Provider-side revocation is not implemented in the Python path; revoke the grant in Google account settings if needed.
+Requires authentication, `X-CSRF-Token`, and ownership. Removes the connection, local Gmail/Calendar credentials, and cached mailbox data, leaving the RevoMail session and identity intact. It does not call Google's revocation endpoint.
+
+### `POST /api/v1/accounts/:id/revoke`
+
+Requires authentication, `X-CSRF-Token`, account ownership, and an available local Google token. The backend prefers the stored refresh token and submits it directly to Google's revocation endpoint with bounded timeouts; tokens never cross the frontend boundary. Google revocation applies to the complete project grant rather than an individual Gmail or Calendar scope. RevoMail removes the local connection, credential, and cached mailbox data only after a confirmed provider `200` response, while retaining the application session. Provider failures are retryable and leave local state intact. If the credential was already removed, the response directs the user to Google Account settings rather than claiming revocation.
 
 ## Gmail and AI
 

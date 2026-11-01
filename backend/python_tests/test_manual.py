@@ -4,7 +4,7 @@ from email.message import EmailMessage
 import pytest
 
 from backend.app.services import ai, gmail
-from backend.app.services.manual_email import MAX_BODY, MAX_UPLOAD, parse_upload
+from backend.app.services.manual_email import MAX_BODY, MAX_UPLOAD, TextFromHTML, parse_upload
 from backend.app.errors import AppError
 from backend.python_tests.test_api import client, sign_in  # noqa: F401
 
@@ -167,6 +167,36 @@ Content-Type: text/html; charset=utf-8\r
     assert [line for line in body.splitlines() if line] == [
         "Review schedule", "Owner", "Due date", "Alex", "6 November", "Please confirm.", "Thank you."
     ]
+
+
+def test_html_only_eml_body_is_visible_when_head_close_is_omitted():
+    html = b"""Subject: Optional head close\r
+MIME-Version: 1.0\r
+Content-Type: text/html; charset=utf-8\r
+\r
+<html><head><title>Hidden title</title><style>.hidden { display: none }</style>
+<body><div style="display:none">Hidden preheader</div><script>hidden()</script>
+<div>Visible message</div><div aria-hidden="true"><span>Nested hidden text</span></div>
+<table><tr><td>First cell</td><td>Second cell</td></tr></table></body></html>"""
+    body = parse_upload(html, "eml")["body"]
+    assert "Hidden title" not in body
+    assert "Hidden preheader" not in body
+    assert "hidden()" not in body
+    assert "Nested hidden text" not in body
+    assert [line for line in body.splitlines() if line] == ["Visible message", "First cell", "Second cell"]
+
+
+def test_repeated_unmatched_end_tags_do_not_scan_the_open_stack():
+    class NoBackwardScan(list):
+        def __getitem__(self, key):
+            raise AssertionError(f"unmatched closing tag scanned the stack at {key}")
+
+    parser = TextFromHTML()
+    parser.feed("<div>" * 5000)
+    parser.stack = NoBackwardScan(parser.stack)
+    for _index in range(5000):
+        parser.handle_endtag("not-open")
+    assert parser.open_counts["div"] == 5000
 
 
 @pytest.mark.parametrize("raw,format", [(b"", "txt"), (b"binary\x00data", "txt"), (b"\xff\xff", "txt"), (b"not email", "eml"), (b"Subject: Empty\n\n", "eml"), (b"x" * 15001, "txt"), (b"Subject: bad\nContent-Type: multipart/mixed; boundary=x\n\n--x\n", "eml")])

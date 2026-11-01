@@ -8,7 +8,7 @@ import uvicorn
 
 from backend.app.config import Settings
 from backend.app.main import create_app
-from backend.app.routers import auth, emails
+from backend.app.routers import accounts, auth, emails
 from backend.app.services import ai, mailbox
 
 
@@ -70,6 +70,9 @@ def main():
     ai._chat = chat
     emails.GmailAdapter = EmptyMailbox
     mailbox.GmailAdapter = EmptyMailbox
+    async def revoke_google_token(token):
+        assert token == "fixture-refresh"
+    accounts.revoke_google_token = revoke_google_token
     uvicorn.run(create_app(fixture_settings), host=fixture_settings.host, port=fixture_settings.port, access_log=False)
 
 
