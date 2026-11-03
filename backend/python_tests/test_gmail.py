@@ -6,6 +6,37 @@ import pytest
 from backend.app.services.gmail import GmailAdapter, MessageNotFound, ProviderTimeout, _sanitise_html, normalise_message
 
 
+@pytest.mark.parametrize("failure,expected", [
+    ("invalid_grant", "AUTHORIZATION_EXPIRED"),
+    ("transient_refresh", "PROVIDER_UNAVAILABLE"),
+    ("transport", "PROVIDER_UNAVAILABLE"),
+    ("dns", "PROVIDER_UNAVAILABLE"),
+    ("connection", "PROVIDER_UNAVAILABLE"),
+    ("timeout", "PROVIDER_TIMEOUT"),
+])
+def test_google_refresh_and_transport_errors_are_safe_provider_categories(failure, expected, caplog):
+    from google.auth.exceptions import RefreshError, TransportError
+    from httplib2 import ServerNotFoundError
+    from backend.app.services.gmail import MailProviderError
+    failures = {
+        "invalid_grant": RefreshError("private credential detail", {"error": "invalid_grant"}),
+        "transient_refresh": RefreshError("private credential detail", retryable=True),
+        "transport": TransportError("private credential detail"),
+        "dns": ServerNotFoundError("private credential detail"),
+        "connection": ConnectionError("private credential detail"),
+        "timeout": TimeoutError("private credential detail"),
+    }
+    class FailedRequest:
+        def execute(self):
+            raise failures[failure]
+    adapter = object.__new__(GmailAdapter)
+    with pytest.raises(MailProviderError) as result:
+        adapter._execute(FailedRequest())
+    assert result.value.code == expected
+    assert result.value.retryable is (expected != "AUTHORIZATION_EXPIRED")
+    assert "private credential detail" not in str(result.value) + caplog.text
+
+
 def test_email_html_keeps_safe_layout_and_https_images_but_removes_executable_content():
     cleaned = _sanitise_html('<div id="preheader" class="mcnPreviewText" aria-hidden="true">Preview</div><p style="color: red; position: fixed">Hello</p><script>alert(1)</script><img src="https://images.example/photo.png"><a href="javascript:alert(2)">bad</a>')
     assert "script" not in cleaned

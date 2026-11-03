@@ -1,21 +1,22 @@
 export function preferencesView({ preferences: p, models, status, error, accounts, escape: e, t }) {
   const select = (key, label, options) => `<label class="setting-row"><span>${t(label)}</span><select data-preference="${key}" id="setting-${key}">${options.map(([value, text]) => `<option value="${e(value)}" ${p[key] === value ? "selected" : ""}>${t(text)}</option>`).join("")}</select></label>`;
-  const toggle = (key, label) => `<label class="setting-row"><span>${t(label)}</span><input type="checkbox" data-preference="${key}" ${p[key] ? "checked" : ""}></label>`;
+  const toggle = (key, label) => `<label class="setting-row setting-toggle-row"><span>${t(label)}</span><input type="checkbox" data-preference="${key}" id="setting-${key}" ${p[key] ? "checked" : ""}></label>`;
+  const group = (key, title, content) => `<fieldset class="setting-group" aria-labelledby="setting-group-${key}" ${error || status === "loading" ? "disabled" : ""}><h2 id="setting-group-${key}">${t(title)}</h2>${content}</fieldset>`;
   return `<header class="page-header"><div><h1>${t("Settings")}</h1><p>${t("Customise your RevoMail assistant experience.")}</p></div><span role="status">${t({ loading: "Loading settings…", saving: "Saving…", saved: "Settings saved", error: "Settings could not be saved" }[status] || "Settings")}</span></header>
     ${error ? `<p role="alert">${t("Settings could not be loaded. Retry before changing preferences.")} <button data-retry-settings>${t("Retry")}</button></p>` : ""}
     ${status === "error" ? `<button class="secondary-button" data-retry-save>${t("Retry saving")}</button>` : ""}
-    <div class="settings-stack">${accounts}<fieldset class="setting-group" ${error || status === "loading" ? "disabled" : ""}><legend>${t("General")}</legend>
+    <div class="settings-stack">${accounts}${group("general", "General", `
     ${select("theme", "Theme", [["system", "System"], ["light", "Light"], ["dark", "Dark"]])}
-    ${toggle("reducedMotion", "Reduce motion")}</fieldset>
-    <fieldset class="setting-group" ${error || status === "loading" ? "disabled" : ""}><legend>${t("AI preferences")}</legend>
+    ${toggle("reducedMotion", "Reduce motion")}`)}
+    ${group("ai", "AI preferences", `
     ${select("defaultAiModel", "Default AI model", models.map(value => [value, value]))}
     ${select("replyLength", "Response length", [["concise", "Concise"], ["medium", "Medium"], ["detailed", "Detailed"]])}
-    <p class="setting-row">${t("Human review is always required before sending.")}</p></fieldset>
-    <fieldset class="setting-group" ${error || status === "loading" ? "disabled" : ""}><legend>${t("Voice")}</legend>
+    <p class="setting-row">${t("Human review is always required before sending.")}</p>`)}
+    ${group("voice", "Voice", `
     ${toggle("voiceEnabled", "Voice input")}
     ${toggle("voiceAutoPlay", "Automatically read voice-command results")}
     ${select("speechLanguage", "Speech-to-text language", [["auto", "Automatic (English)"], ["en-AU", "English (AU)"], ["en-US", "English (US)"]])}
-    <p class="setting-row">${t("English commands are supported. Keyboard commands remain available when voice is off.")}</p></fieldset></div>`;
+    <p class="setting-row">${t("English commands are supported. Keyboard commands remain available when voice is off.")}</p>`)}</div>`;
 }
 
 export function voiceView({ voice: v, enabled, capabilities, currentEmail, escape: e, t }) {

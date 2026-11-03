@@ -56,7 +56,7 @@ class VoiceCommandRequest(BaseModel):
 
 class VoiceContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    view: Literal["inbox", "reading", "reply", "tasks", "calendar", "settings", "starred", "drafts", "sent", "compose"]
+    view: Literal["inbox", "reading", "reply", "tasks", "calendar", "settings", "starred", "drafts", "sent", "compose", "analyse-text"]
     currentMessageId: str | None = Field(default=None, max_length=512)
     followUpMessageId: str | None = Field(default=None, max_length=512)
 

@@ -13,14 +13,16 @@ from backend.app.services.oauth_transactions import OAuthTransactionStore, oauth
 class FakeFlow:
     authorization_options = None
 
-    def __init__(self):
+    def __init__(self, scopes=None, code_verifier=None):
+        self.code_verifier = code_verifier
         self.credentials = SimpleNamespace(
             token="access-token",
             refresh_token="refresh-token",
             token_uri="https://oauth.example/token",
             client_id="client-id",
             client_secret="client-secret",
-            scopes=list(auth.SCOPES),
+            scopes=list(scopes or auth.IDENTITY_SCOPES),
+            granted_scopes=list(scopes or auth.IDENTITY_SCOPES),
         )
 
     def authorization_url(self, **kwargs):
@@ -62,17 +64,35 @@ def client(monkeypatch, tmp_path):
         secret_key="test-session-secret-that-is-long-enough",
         token_encryption_key=Fernet.generate_key().decode("ascii"),
     )
-    with TestClient(create_app(test_settings)) as test_client:
+    with TestClient(create_app(test_settings), base_url=test_settings.app_base_url) as test_client:
         yield test_client
 
 
-def authenticate(client):
+def sign_in(client):
     start = client.get("/api/v1/auth/google/start", follow_redirects=False)
     assert start.status_code == 307
     return client.get(
         "/api/v1/auth/google/callback?code=valid-code&state=test-state",
         follow_redirects=False,
     )
+
+
+def connect_gmail(client, calendar=True):
+    csrf = client.get("/api/v1/auth/session").json()["csrfToken"]
+    response = client.post("/api/v1/accounts/google/connect", headers={"X-CSRF-Token": csrf})
+    assert response.status_code == 200
+    callback = client.get("/api/v1/auth/google/callback?code=valid-code&state=test-state", follow_redirects=False)
+    if calendar:
+        account_id = client.get("/api/v1/accounts").json()["accounts"][0]["id"]
+        assert client.post(f"/api/v1/accounts/{account_id}/authorize-calendar", headers={"X-CSRF-Token": csrf}).status_code == 200
+        callback = client.get("/api/v1/auth/google/callback?code=valid-code&state=test-state", follow_redirects=False)
+    return callback
+
+
+def authenticate(client):
+    """Compatibility fixture for existing tests that exercise a connected mailbox."""
+    sign_in(client)
+    return connect_gmail(client)
 
 
 def test_health_and_signed_out_session(client):
@@ -89,7 +109,7 @@ def test_google_authorization_does_not_merge_legacy_grants(client):
     FakeFlow.authorization_options = None
     response = client.get("/api/v1/auth/google/start", follow_redirects=False)
     assert response.status_code == 307
-    assert FakeFlow.authorization_options == {"access_type": "offline", "prompt": "consent"}
+    assert FakeFlow.authorization_options == {"access_type": "online"}
 
 
 def test_google_flow_retries_connect_failures_without_read_retries(monkeypatch):
@@ -216,7 +236,7 @@ def test_scope_mismatch_returns_actionable_frontend_status(client, monkeypatch):
     assert response.headers["location"] == "/?authError=AUTHORIZATION_SCOPE_MISMATCH"
 
 
-def test_google_callback_survives_loopback_cookie_host_change(client):
+def test_google_signin_callback_does_not_require_a_preexisting_session_cookie(client):
     client.get("/api/v1/auth/google/start", follow_redirects=False)
     client.cookies.clear()
     response = client.get(
@@ -224,6 +244,29 @@ def test_google_callback_survives_loopback_cookie_host_change(client):
         follow_redirects=False,
     )
     assert response.status_code == 307
+    assert client.get("/api/v1/auth/session").json()["authenticated"] is True
+
+
+def test_oauth_requests_reject_a_mismatched_cookie_origin_without_consuming_state(client):
+    mismatch = {"host": "127.0.0.1:4173"}
+    start = client.get("/api/v1/auth/google/start", headers=mismatch, follow_redirects=False)
+    assert start.status_code == 307
+    assert start.headers["location"] == "http://localhost:4173/?authError=OAUTH_ORIGIN_MISMATCH"
+    assert client.app.state.oauth_transactions.consume("test-state") is None
+
+    client.get("/api/v1/auth/google/start", follow_redirects=False)
+    callback = client.get(
+        "/api/v1/auth/google/callback?code=valid-code&state=test-state",
+        headers=mismatch,
+        follow_redirects=False,
+    )
+    assert callback.status_code == 307
+    assert callback.headers["location"] == "/?authError=OAUTH_ORIGIN_MISMATCH"
+    assert client.get("/api/v1/auth/session").json()["authenticated"] is False
+    assert client.get(
+        "/api/v1/auth/google/callback?code=valid-code&state=test-state",
+        follow_redirects=False,
+    ).status_code == 307
     assert client.get("/api/v1/auth/session").json()["authenticated"] is True
 
 
@@ -294,7 +337,7 @@ def test_lost_encryption_key_returns_401_not_500(tmp_path, monkeypatch):
         secret_key=shared_secret,
         token_encryption_key=first_key,
     )
-    with TestClient(create_app(first_settings)) as first_client:
+    with TestClient(create_app(first_settings), base_url=first_settings.app_base_url) as first_client:
         first_client.get("/api/v1/auth/google/start", follow_redirects=False)
         callback = first_client.get(
             "/api/v1/auth/google/callback?code=valid-code&state=test-state",
@@ -311,7 +354,7 @@ def test_lost_encryption_key_returns_401_not_500(tmp_path, monkeypatch):
         secret_key=shared_secret,
         token_encryption_key=Fernet.generate_key().decode("ascii"),
     )
-    with TestClient(create_app(lost_key_settings)) as lost_client:
+    with TestClient(create_app(lost_key_settings), base_url=lost_key_settings.app_base_url) as lost_client:
         lost_client.cookies.set("revomail_session", session_cookie)
         response = lost_client.get("/api/v1/emails")
         assert response.status_code == 401

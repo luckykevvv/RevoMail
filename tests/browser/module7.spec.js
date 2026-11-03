@@ -2,11 +2,12 @@ import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
 async function fixture(page, initial = {}) {
-  const { message: messageOverrides = {}, messages: messageFixtures, transcriptionText = "Show my tasks", summaryText = "Review the proposal.", summaryBullets = [], extraction = { events: [{ title: "Review meeting", date: "tomorrow", start: null, end: null, location: "Room 1" }], tasks: [{ title: "Submit review", due_date: "2026-10-12" }] }, ...preferenceOverrides } = initial;
+  const { message: messageOverrides = {}, messages: messageFixtures, syncErrorCode = "", transcriptionText = "Show my tasks", summaryText = "Review the proposal.", summaryBullets = [], extraction = { events: [{ title: "Review meeting", date: "tomorrow", start: null, end: null, location: "Room 1" }], tasks: [{ title: "Submit review", due_date: "2026-10-12" }] }, ...preferenceOverrides } = initial;
   let preferences = { language: "en", theme: "light", reducedMotion: false, defaultAiModel: "fixture-model", replyLength: "medium", speechLanguage: "auto", voiceEnabled: false, voiceAutoPlay: true, ...preferenceOverrides };
   let summaryCalls = 0; let sendCalls = 0; let syncCalls = 0; const classifiedIds = []; const patches = []; const sendBodies = []; const calendarCalls = []; const intentContexts = []; const speechRequests = [];
   const message = { id: "fixture-1", sender: "tester@example.com", recipients: ["reader@example.com"], subject: "Fixture planning", preview: "Review the proposal.", body_plain: "Please review the proposal.", unread: false, starred: false, category: "Primary", attachments: [], ...messageOverrides };
   const messages = messageFixtures || [message];
+  const syncState = () => syncErrorCode ? { status: "failed", errorCode: syncErrorCode } : { status: "completed" };
   await page.route("**/api/v1/**", async route => {
     const url = new URL(route.request().url());
     let body;
@@ -40,11 +41,11 @@ async function fixture(page, initial = {}) {
       else if (transcript.includes("task")) body = { detectedLanguage: "en", action: "show_tasks", target: { mode: "none", terms: "", sender: "", subject: "", unread: null, starred: null, priority: null, newest: true }, destination: null, displayText: "Show tasks", confidence: "high" };
       else body = { detectedLanguage: "en", action: "summarize_message", target: { mode: "current", terms: "", sender: "", subject: "", unread: null, starred: null, priority: null, newest: true }, destination: null, displayText: "Summarise the current email", confidence: "high" };
     }
-    else if (url.pathname === "/api/v1/emails") body = { messages: url.searchParams.get("label") === "STARRED" ? messages.filter(item => item.starred) : messages, sync: { status: "completed" } };
+    else if (url.pathname === "/api/v1/emails") body = { messages: url.searchParams.get("label") === "STARRED" ? messages.filter(item => item.starred) : messages, sync: syncState() };
     else if (messages.some(item => url.pathname === `/api/v1/emails/${item.id}`)) body = messages.find(item => url.pathname === `/api/v1/emails/${item.id}`) || message;
     else if (url.pathname === "/api/v1/emails/fixture-1/reply-metadata") body = { reply_to: ["support@example.com"], subject: message.subject };
     else if (url.pathname === "/api/v1/emails/sync") { syncCalls++; body = { jobId: "fixture-job", status: "syncing" }; }
-    else if (url.pathname.startsWith("/api/v1/emails/sync/")) body = { sync: { status: "completed" } };
+    else if (url.pathname.startsWith("/api/v1/emails/sync/")) body = { sync: syncState() };
     else if (url.pathname === "/api/v1/ai/classify") body = { classifications: Object.fromEntries((route.request().postDataJSON()?.messages || []).flatMap(item => {
       classifiedIds.push(String(item.id));
       const found = messages.find(candidate => String(candidate.id) === String(item.id));
@@ -79,6 +80,67 @@ test("inbox refreshes from Gmail on demand and automatically every 5 minutes", a
   expect(calls.syncCalls()).toBe(2);
   await page.clock.fastForward("01:05");
   await expect.poll(calls.syncCalls).toBe(3);
+});
+
+for (const width of [1280, 320]) test(`rejected Gmail authorisation offers direct reconnect and keeps cached mail at ${width}px`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 900 });
+  let reconnectCalls = 0;
+  const calls = await fixture(page, { syncErrorCode: "AUTHORIZATION_EXPIRED" });
+  await page.route("**/api/v1/accounts/fixture/reauthorize", async route => {
+    expect(route.request().method()).toBe("POST");
+    expect(route.request().headers()["x-csrf-token"]).toBe("fixture");
+    reconnectCalls++;
+    await route.fulfill({ json: { authorizationUrl: "/?view=settings&connected=gmail" } });
+  });
+  await expect(page.locator(".mailbox-sync-notice")).toContainText("Google rejected the saved Gmail authorisation");
+  await expect(page.locator("[data-email]")).toHaveCount(1);
+  await page.locator("[data-refresh-mail]").click();
+  await expect.poll(calls.syncCalls).toBe(2);
+  await expect(page.locator(".toast")).toContainText("Reconnect Gmail");
+  await expect(page.locator("[data-email]")).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Reconnect Gmail", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  const axe = await new AxeBuilder({ page }).include(".mailbox-sync-notice").withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
+  expect(axe.violations).toEqual([]);
+  await page.screenshot({ path: `build/refresh-auth-${width}.png`, fullPage: true });
+  await page.getByRole("button", { name: "Reconnect Gmail", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
+  expect(reconnectCalls).toBe(1);
+  await expect(page.locator(".account-connection-notice")).toContainText("Gmail authorisation saved");
+});
+
+test("temporary Gmail connection errors offer a working retry", async ({ page }) => {
+  const calls = await fixture(page, { syncErrorCode: "PROVIDER_UNAVAILABLE" });
+  await expect(page.locator(".mailbox-sync-notice")).toContainText("Check your connection");
+  await page.getByRole("button", { name: "Retry refresh", exact: true }).click();
+  await expect.poll(calls.syncCalls).toBe(2);
+  await expect(page.locator("[data-email]")).toHaveCount(1);
+});
+
+for (const [timezoneId, expected] of [["Australia/Sydney", "Good afternoon"], ["America/Los_Angeles", "Good evening"]]) {
+  test.describe(`local greeting in ${timezoneId}`, () => {
+    test.use({ timezoneId });
+    test("uses the user's local clock", async ({ page }) => {
+      await page.clock.install({ time: new Date("2026-11-01T06:00:00Z") });
+      await fixture(page);
+      await expect(page.locator("[data-inbox-greeting]")).toHaveText(`${expected}, Test`);
+    });
+  });
+}
+
+test.describe("greeting changes while the inbox stays open", () => {
+  test.use({ timezoneId: "Australia/Sydney" });
+  test("updates at noon without interrupting the focused search field", async ({ page }) => {
+    await page.clock.install({ time: new Date("2026-11-01T00:59:00Z") });
+    await fixture(page);
+    await expect(page.locator("[data-inbox-greeting]")).toHaveText("Good morning, Test");
+    await expect(page.locator("[data-refresh-mail]")).toBeEnabled();
+    await page.locator("#search").focus();
+    await page.clock.fastForward("01:00");
+    await expect(page.locator("[data-inbox-greeting]")).toHaveText("Good afternoon, Test");
+    await expect(page.locator("#search")).toBeFocused();
+  });
 });
 
 test("search keeps the caret while typing and shows Gmail matches beyond the visible text", async ({ page }) => {
@@ -237,10 +299,16 @@ test("reply uses the reviewed writing panel without bypassing send confirmation"
   await expect(page.getByRole("heading", { name: "Reply draft" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Revo AI writing assistant" })).toBeVisible();
   await expect(page.locator("#reply-text")).toHaveValue("Thank you. I will review it.");
+  await page.locator("#reply-text").fill("Keep this reviewed reply.");
   await page.getByRole("button", { name: "Concise" }).click();
   await expect(page.getByRole("button", { name: "Concise" })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator("#reply-text")).toHaveValue("Thank you. I will review it.");
+  await expect(page.locator("#reply-text")).toHaveValue("Keep this reviewed reply.");
+  await expect(page.locator("[data-reply-draft-status]")).toContainText("Your edited draft is preserved");
+  await page.locator('[data-ai-instructions="reply"]').fill("Keep it short");
   await expect(page.locator('[data-custom-draft="reply"]')).toHaveText(/Regenerate/);
+  await page.locator('[data-custom-draft="reply"]').click();
+  await expect(page.locator("[data-reply-draft-status]")).toBeHidden();
+  await expect(page.locator("#reply-text")).toHaveValue("Thank you. I will review it.");
   await expect(page.getByRole("button", { name: "Review & send" })).toBeVisible();
   expect(calls.sendCalls()).toBe(0);
   expect(errors).toEqual([]);
@@ -405,6 +473,23 @@ for (const width of [1280, 320]) {
     const errors = []; page.on("pageerror", error => errors.push(error.message));
     const calls = await fixture(page, { summaryBullets: ["Repeated key point must stay in the email Summary card."] });
     await page.locator('[data-nav="settings"]').click();
+    await expect(page.locator("fieldset.setting-group")).toHaveCount(3);
+    const settingGeometry = await page.locator("fieldset.setting-group").evaluateAll(groups => groups.map(group => {
+      const box = group.getBoundingClientRect();
+      const heading = group.querySelector(":scope > h2").getBoundingClientRect();
+      return {
+        labelledBy: group.getAttribute("aria-labelledby"), headingId: group.querySelector(":scope > h2").id,
+        headingInside: heading.top >= box.top && heading.left >= box.left && heading.right <= box.right && heading.bottom < box.bottom,
+      };
+    }));
+    expect(settingGeometry.every(item => item.labelledBy === item.headingId && item.headingInside)).toBe(true);
+    if (width === 320) {
+      await expect(page.locator('.setting-toggle-row').first()).toHaveCSS("flex-direction", "row");
+      const selectBox = await page.locator('[data-preference="theme"]').boundingBox();
+      const groupBox = await page.locator("fieldset.setting-group").first().boundingBox();
+      expect(selectBox.width).toBeLessThanOrEqual(groupBox.width - 24);
+    }
+    await page.screenshot({ path: `build/module7-browser-results/settings-${width}.png`, fullPage: true });
     await page.locator('[data-preference="theme"]').selectOption("dark");
     await expect(page.locator("body")).toHaveAttribute("data-theme", "dark");
     await page.locator('[data-preference="reducedMotion"]').check();
@@ -500,7 +585,8 @@ test("global voice review resolves ranked candidates and requires target confirm
   await page.locator("[data-voice-candidate]").first().check();
   await page.locator("[data-run-command]").click();
   await expect.poll(calls.summaryCalls).toBe(1);
-  await expect(page.getByRole("heading", { name: "Result ready" })).toBeVisible();
+  await expect(page.locator(".voice-result").getByRole("heading", { name: "Summary", exact: true })).toBeVisible();
+  await expect(page.locator(".voice-result-copy")).toContainText("Review the proposal.");
 });
 
 test("a reviewed search target remains available to a recorded follow-up command", async ({ browser }) => {
@@ -626,7 +712,7 @@ test("real browser media capture enables consent, pauses, releases and requires 
   await page.locator("[data-run-command]").click();
   await expect(page.getByRole("heading", { name: "Command preview" })).toBeVisible();
   await page.locator("[data-run-command]").click();
-  await expect(page.getByRole("heading", { name: "Tasks", exact: true })).toBeVisible();
+  await expect(page.locator(".voice-result").getByRole("heading", { name: "Tasks", exact: true })).toBeVisible();
   await expect(page.getByText("Project Meeting", { exact: true })).toHaveCount(0);
   await context.close();
 });

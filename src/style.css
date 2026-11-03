@@ -343,6 +343,7 @@ input.input-shell { padding: 0; }
 .setting-name strong { font-size: 13px; }
 .setting-name small { margin-top: 2px; color: var(--muted); font-size: 11px; }
 .setting-row select, .modal-footer select { min-width: 255px; height: 40px; padding: 0 36px 0 12px; border: 1px solid var(--line); border-radius: 9px; outline: 0; color: var(--ink); background: var(--surface); }
+.setting-toggle-row { cursor: pointer; }
 .segmented { display: flex; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }
 .segmented button { min-height: 33px; display: flex; align-items: center; gap: 6px; padding: 0 15px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); cursor: pointer; }
 .segmented button.active { color: var(--blue); background: var(--surface); box-shadow: var(--shadow-sm); }
@@ -454,6 +455,7 @@ input.input-shell { padding: 0; }
   .extraction-actions { flex-wrap: wrap; }
   .task-copy dl div { grid-template-columns: 75px 1fr; }
   .setting-row { align-items: flex-start; flex-direction: column; }
+  .setting-toggle-row { align-items: center; flex-direction: row; }
   .setting-row select { width: 100%; min-width: 0; }
   .segmented { width: 100%; }
   .segmented button { flex: 1; justify-content: center; }
@@ -477,9 +479,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 html[data-reduce-motion="true"] *, html[data-reduce-motion="true"] *::before, html[data-reduce-motion="true"] *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 .skip-link { position: fixed; top: -100px; left: 12px; z-index: 300; padding: 12px; background: var(--surface); color: var(--ink); }
 .skip-link:focus { top: 12px; }
-fieldset.setting-group { min-width: 0; padding: 12px 0; margin: 0; }
-fieldset.setting-group legend { margin-left: 20px; padding: 0 6px; font-weight: 700; }
-.setting-row input[type="checkbox"] { width: 24px; height: 24px; accent-color: var(--blue); }
+fieldset.setting-group { min-width: 0; padding: 0; margin: 0; }
+.setting-row input[type="checkbox"] { flex: none; width: 24px; height: 24px; margin: 0; accent-color: var(--blue); }
 .voice-modal { width: min(1080px, 100%); height: min(760px, calc(100dvh - 32px)); max-height: calc(100dvh - 32px); display: grid; grid-template-rows: auto auto minmax(0, 1fr); overflow: hidden; overflow-wrap: anywhere; }
 .voice-intro { display: grid; grid-template-columns: minmax(0, .92fr) minmax(0, 1.08fr); gap: 22px; align-items: start; margin: 14px 0 18px; }
 .voice-intro p { margin: 0; }
@@ -610,3 +611,45 @@ fieldset.setting-group legend { margin-left: 20px; padding: 0 6px; font-weight: 
 [data-ai-instructions] { min-width: 0; width: 100%; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
 body[data-theme="dark"] .send-error { color: var(--red); }
 @media (max-width: 640px) { .cal-row { grid-template-columns: 1fr; } }
+
+/* Manual email analysis uses the existing theme and form primitives. */
+.nav-item:not(.active) { color: var(--muted-strong); }
+.account-copy small { color: var(--muted-strong); }
+body:not([data-theme="dark"]) .nav-item.active { color: var(--blue-dark); }
+.manual-header p { color: var(--muted-strong); }
+.manual-notice { max-width: 1180px; margin: 0 auto 20px; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-soft); color: var(--ink); }
+.manual-notice p { margin: 8px 0 0; line-height: 1.6; font-size: 13px; }
+.manual-grid { max-width: 1180px; margin: auto; display: grid; grid-template-columns: 1fr 1fr; align-items: start; gap: 20px; }
+.manual-panel { min-width: 0; padding: 22px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); color: var(--ink); display: grid; gap: 14px; }
+.manual-panel h2, .manual-panel h3, .manual-panel p { margin: 0; }
+.manual-panel h2 { font-size: 20px; }
+.manual-panel h3 { font-size: 16px; margin-bottom: 10px; }
+.manual-panel label { min-width: 0; display: grid; gap: 7px; font-size: 13px; color: var(--ink); }
+.manual-panel input, .manual-panel textarea, .manual-panel select { min-width: 0; width: 100%; box-sizing: border-box; border: 1px solid var(--line-strong); border-radius: 9px; padding: 10px; color: var(--ink); background: var(--surface); font: inherit; }
+.manual-panel textarea { resize: vertical; min-height: 90px; line-height: 1.6; }
+#manual-body, #manual-draft { min-height: 240px; }
+.manual-panel small { font-size: 12px; line-height: 1.6; color: var(--muted-strong); }
+.manual-panel :focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; }
+.manual-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.manual-file-control { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--line-strong); border-radius: 9px; }
+.manual-file-control span { min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
+.mailbox-sync-notice { max-width: 1180px; margin: 16px auto; padding: 16px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-soft); color: var(--ink); display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.mailbox-sync-notice p { flex: 1 1 240px; margin: 0; overflow-wrap: anywhere; line-height: 1.6; }
+.mailbox-sync-notice button { max-width: 100%; white-space: normal; }
+.account-connection-notice { padding: 12px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface-soft); color: var(--ink); line-height: 1.6; }
+.manual-actions button { white-space: normal; min-height: 42px; }
+.manual-results article { display: grid; gap: 12px; min-width: 0; padding-block: 12px; border-top: 1px solid var(--line); }
+.manual-results p, .manual-results li { overflow-wrap: anywhere; white-space: pre-wrap; line-height: 1.6; }
+.manual-error { color: var(--red); }
+.manual-panel [hidden] { display: none; }
+@media (max-width: 900px) { .manual-grid { grid-template-columns: 1fr; } }
+@media (max-width: 720px) {
+  .nav-list { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .nav-item:nth-child(3), .nav-item:nth-child(4) { display: flex; }
+  .nav-item[data-nav="drafts"], .nav-item[data-nav="sent"] { display: none; }
+  .nav-item { min-width: 0; }
+  .nav-item span { max-width: 100%; overflow-wrap: anywhere; }
+  .sidebar { height: 74px; }
+  .app-shell { padding-bottom: 78px; }
+  .manual-panel { padding: 16px; }
+}

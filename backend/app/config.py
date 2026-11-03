@@ -104,6 +104,7 @@ class Settings(BaseSettings):
 
     openai_api_key: str = ""
     openai_model: str = "gpt-4o"
+    manual_ai_limit_per_minute: int = Field(default=12, ge=1, le=120)
     ai_allowed_models: list[str] = Field(default_factory=list)
     speech_model: str = "gpt-transcribe"
     speech_api_url: str = "https://api.openai.com/v1/audio/transcriptions"
@@ -121,8 +122,28 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_runtime(self):
         parsed = urlparse(self.app_base_url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        if (parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password
+                or parsed.path not in {"", "/"} or parsed.params or parsed.query or parsed.fragment):
             raise ValueError("APP_BASE_URL must be an absolute HTTP or HTTPS URL.")
+        try:
+            app_origin = (parsed.scheme.lower(), (parsed.hostname or "").lower(), parsed.port or (443 if parsed.scheme == "https" else 80))
+        except ValueError as exc:
+            raise ValueError("APP_BASE_URL must contain a valid port.") from exc
+        self.app_base_url = self.app_base_url.rstrip("/")
+        if self.google_redirect_uri:
+            redirect = urlparse(self.google_redirect_uri)
+            try:
+                redirect_origin = (redirect.scheme.lower(), (redirect.hostname or "").lower(), redirect.port or (443 if redirect.scheme == "https" else 80))
+            except ValueError as exc:
+                raise ValueError("GOOGLE_REDIRECT_URI must contain a valid port.") from exc
+            if (redirect.scheme not in {"http", "https"} or not redirect.netloc or redirect.username or redirect.password
+                    or redirect.path != "/api/v1/auth/google/callback" or redirect.params or redirect.query or redirect.fragment):
+                raise ValueError("GOOGLE_REDIRECT_URI must be the absolute RevoMail Google callback URL.")
+            if redirect_origin != app_origin:
+                raise ValueError(
+                    "GOOGLE_REDIRECT_URI must exactly match the APP_BASE_URL origin "
+                    "(scheme, host, and port) so the RevoMail session cookie reaches the OAuth callback."
+                )
         if not self.database_url.startswith("file:"):
             raise ValueError("DATABASE_URL must use the file: SQLite URL format.")
         secret_key, token_key = resolve_runtime_keys(self.secret_key, self.token_encryption_key, self.runtime_key_file)

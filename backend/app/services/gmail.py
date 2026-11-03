@@ -12,6 +12,8 @@ from typing import Any
 import bleach
 from bleach.css_sanitizer import CSSSanitizer
 import google.oauth2.credentials
+from google.auth.exceptions import RefreshError, TransportError
+from httplib2 import ServerNotFoundError
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseUpload
@@ -33,6 +35,10 @@ class ProviderRateLimited(MailProviderError):
 
 class ProviderTimeout(MailProviderError):
     code = "PROVIDER_TIMEOUT"
+
+
+class ProviderUnavailable(MailProviderError):
+    code = "PROVIDER_UNAVAILABLE"
 
 
 class MessageNotFound(MailProviderError):
@@ -262,6 +268,14 @@ class GmailAdapter:
     def _execute(self, request, *, history: bool = False, message_lookup: bool = False):
         try:
             return request.execute()
+        except RefreshError as exc:
+            # Token refresh failures are not Google API HttpErrors. Never log their
+            # messages: provider exception details can include sensitive values.
+            if exc.retryable:
+                raise ProviderUnavailable() from exc
+            raise InvalidAuthorization() from exc
+        except TransportError as exc:
+            raise ProviderUnavailable() from exc
         except HttpError as exc:
             status = getattr(exc.resp, "status", 0)
             content = bytes(getattr(exc, "content", b"")).lower()
@@ -276,6 +290,8 @@ class GmailAdapter:
             raise MailProviderError() from exc
         except (socket.timeout, TimeoutError) as exc:
             raise ProviderTimeout() from exc
+        except (ServerNotFoundError, OSError) as exc:
+            raise ProviderUnavailable() from exc
 
     def get_message(self, message_id: str) -> dict:
         detail = self._execute(

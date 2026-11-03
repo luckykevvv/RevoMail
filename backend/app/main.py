@@ -17,7 +17,7 @@ from backend.app.idempotency import IdempotencyRepository
 from backend.app.jobs import JobRepository
 from backend.app.mailbox import MailboxRepository
 from backend.app.persistence import build_persistence
-from backend.app.routers import accounts, ai, auth, calendar, emails, health, preferences, voice
+from backend.app.routers import accounts, ai, auth, calendar, emails, health, manual, preferences, voice
 from backend.app.preferences import PreferencesRepository
 from backend.app.services.speech import SpeechService
 from backend.app.services.mailbox import MailboxSyncService
@@ -50,6 +50,7 @@ def create_app(app_settings: Settings = settings) -> FastAPI:
         app.state.mailbox_sync = MailboxSyncService(app.state.mailbox_repository, auth_repository, app.state.job_repository)
         app.state.settings = app_settings
         app.state.preferences = PreferencesRepository(database, app_settings)
+        app.state.manual_attempts = {}
         app.state.speech = SpeechService(app_settings)
         worker = asyncio.create_task(app.state.mailbox_sync.run())
         try:
@@ -82,6 +83,8 @@ def create_app(app_settings: Settings = settings) -> FastAPI:
         request.state.correlation_id = incoming if 1 <= len(incoming) <= 128 and incoming.isascii() else str(uuid4())
         response = await call_next(request)
         response.headers["X-Correlation-ID"] = request.state.correlation_id
+        if request.url.path.startswith("/api/v1/ai/manual"):
+            response.headers["Cache-Control"] = "no-store"
         return response
 
     @app.exception_handler(AppError)
@@ -113,6 +116,7 @@ def create_app(app_settings: Settings = settings) -> FastAPI:
     app.include_router(emails.router, prefix="/api/v1/emails", tags=["emails"])
     app.include_router(calendar.router, prefix="/api/v1/calendar", tags=["calendar"])
     app.include_router(ai.router, prefix="/api/v1/ai", tags=["ai"])
+    app.include_router(manual.router, prefix="/api/v1/ai/manual", tags=["manual"])
     app.include_router(preferences.router, prefix="/api/v1/settings", tags=["settings"])
     app.include_router(voice.router, prefix="/api/v1/voice", tags=["voice"])
 

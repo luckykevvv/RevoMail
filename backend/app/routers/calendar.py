@@ -19,7 +19,7 @@ CREATE_ONCE = OnceConfig(
     unknown_code="CALENDAR_OUTCOME_UNKNOWN",
     validation_error=calendar_service.EventValidationError,
     validation_code="INVALID_EVENT",
-    permission_message="RevoMail needs permission to use Google Calendar. Reconnect your Google account in Settings and tick the Calendar permission.",
+    permission_message="RevoMail needs permission to use Google Calendar. Choose Enable Calendar on your connected Gmail account in Settings.",
     api_name="Google Calendar API",
     enable_url="https://console.cloud.google.com/apis/library/calendar-json.googleapis.com",
 )

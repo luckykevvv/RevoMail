@@ -111,12 +111,26 @@ class AuthenticatedSession:
 @dataclass(frozen=True)
 class OAuthTransactionRecord:
     return_to: str
+    context: dict | None = None
 
 
 class AuthRepository:
     def __init__(self, database: Database, protector: TokenProtector):
         self.database = database
         self.protector = protector
+
+    def save_identity(self, profile: dict) -> str:
+        """Persist identity independently of any provider credential or mailbox."""
+        now = utc_now().isoformat()
+        user_id = str(profile["id"])
+        with self.database.connect() as connection:
+            connection.execute(
+                'INSERT INTO "User" ("id", "email", "displayName", "avatarUrl", "createdAt", "updatedAt") '
+                'VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT("id") DO UPDATE SET "email"=excluded."email", '
+                '"displayName"=excluded."displayName", "avatarUrl"=excluded."avatarUrl", "updatedAt"=excluded."updatedAt"',
+                (user_id, profile["email"], profile["displayName"], profile.get("avatarUrl"), now, now),
+            )
+        return user_id
 
     def save_authorized_account(self, profile: dict, provider: str, scopes: list[str], tokens: dict) -> tuple[str, str]:
         now = utc_now().isoformat()
@@ -264,10 +278,10 @@ class OAuthTransactionRepository:
         self.protector = protector
         self.ttl_seconds = ttl_seconds
 
-    def put(self, state: str, return_to: str) -> None:
+    def put(self, state: str, return_to: str, context: dict | None = None) -> None:
         now = utc_now()
         state_hash = hashlib.sha256(state.encode("utf-8")).hexdigest()
-        encrypted_marker = self.protector.protect({"purpose": "oauth-state"})
+        encrypted_marker = self.protector.protect(context or {"purpose": "oauth-state"})
         with self.database.connect() as connection:
             connection.execute('DELETE FROM "OAuthTransaction" WHERE "expiresAt"<=?', (now.isoformat(),))
             connection.execute(
@@ -284,7 +298,7 @@ class OAuthTransactionRepository:
             connection.execute("BEGIN IMMEDIATE")
             try:
                 row = connection.execute(
-                    'SELECT "id", "returnTo", "expiresAt" FROM "OAuthTransaction" WHERE "stateHash"=?',
+                    'SELECT "id", "returnTo", "expiresAt", "verifierEncrypted" FROM "OAuthTransaction" WHERE "stateHash"=?',
                     (state_hash,),
                 ).fetchone()
                 if row:
@@ -296,7 +310,11 @@ class OAuthTransactionRepository:
                 raise
         if not row or row["expiresAt"] <= now:
             return None
-        return OAuthTransactionRecord(return_to=row["returnTo"])
+        try:
+            context = self.protector.unprotect(row["verifierEncrypted"])
+        except RuntimeError:
+            return None
+        return OAuthTransactionRecord(return_to=row["returnTo"], context=context)
 
 
 def build_persistence(settings: Settings) -> tuple[Database, AuthRepository, OAuthTransactionRepository]:

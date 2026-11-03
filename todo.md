@@ -1,6 +1,6 @@
 # RevoMail Project Requirements and TODO
 
-Last updated: 2026-10-05
+Last updated: 2026-11-01
 
 ## 1. Project Objectives
 
@@ -139,7 +139,7 @@ Acceptance criteria:
 - [ ] Support interface language, light/dark theme, and reduced motion.
 - [x] Support a default AI model, reply length, automatic/English/Chinese speech language, and spoken-result preference.
 - [x] Allow users to enable or disable voice input.
-- [ ] Show connected accounts, granted permissions, and a revoke-access action.
+- [x] Show connected accounts, granted permissions, and separate local-disconnect and Google revoke-access actions.
 - [ ] Persist user settings across sessions.
 
 ### FR-08 Errors and Status Feedback
@@ -148,6 +148,17 @@ Acceptance criteria:
 - [ ] Provide retry handling for network failures, timeouts, rate limits, and unavailable services.
 - [ ] Show progress for long-running actions so buttons never appear unresponsive.
 - [ ] Never mark a failed operation as successful.
+
+### R9 Manual Email Analysis
+
+- [x] Allow signed-in users to paste email or import `.txt`/`.eml` files without connecting Gmail.
+- [x] Reuse AI summary, priority classification, task/event extraction, and editable reply drafting without Gmail retrieval or tokens.
+- [x] Separate Google identity sign-in, optional Gmail connection, and explicit Calendar permission. Existing connections remain compatible; disconnect keeps the application session.
+- [x] Validate streamed file/request sizes, MIME/text input, session and CSRF; keep manual content transient and sensitive content out of logs.
+- [x] Keep manual task/event suggestions and replies editable and copy-only; never send or create external records automatically.
+- [x] Verify the acceptance criterion through functional frontend-to-FastAPI tests with deterministic provider fakes, plus desktop/320px light/dark keyboard and axe checks.
+
+Acceptance criterion: a signed-in user can analyse controlled text without Gmail retrieval. Verified using actual manual API routes and the production frontend against test-only Google/AI fakes. Dedicated real-provider OAuth and AI quality verification remain pending and are not implied by R9 completion. The supplied final report has not been edited.
 
 ## 4. Non-Functional Requirements (P0)
 

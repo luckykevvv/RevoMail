@@ -7,7 +7,7 @@ from fastapi.concurrency import run_in_threadpool
 from backend.app.contracts import MessageStateMutation, SendEmailRequest
 from backend.app.dependencies import require_csrf, require_mailbox
 from backend.app.errors import AppError
-from backend.app.services.gmail import HTML_FORMAT_MARKER, GmailAdapter, InvalidAuthorization, MailProviderError, MessageNotFound, ProviderRateLimited, ProviderTimeout
+from backend.app.services.gmail import HTML_FORMAT_MARKER, GmailAdapter, InvalidAuthorization, MailProviderError, MessageNotFound, ProviderRateLimited, ProviderTimeout, ProviderUnavailable
 
 
 router = APIRouter()
@@ -23,6 +23,8 @@ def _provider_error(exc: MailProviderError) -> AppError:
         return AppError(exc.code, "Gmail is temporarily rate limiting requests.", 429, True)
     if isinstance(exc, ProviderTimeout):
         return AppError(exc.code, "Gmail did not respond in time.", 504, True)
+    if isinstance(exc, ProviderUnavailable):
+        return AppError(exc.code, "Could not connect to Gmail. Try again shortly.", 502, True)
     return AppError(exc.code, "Gmail could not complete the request.", 502, True)
 
 

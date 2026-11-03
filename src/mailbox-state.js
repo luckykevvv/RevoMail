@@ -1,3 +1,25 @@
+export function localGreeting(now = new Date()) {
+  const hour = now.getHours();
+  if (hour >= 5 && hour < 12) return "Good morning";
+  if (hour >= 12 && hour < 18) return "Good afternoon";
+  return "Good evening";
+}
+
+export function mailboxSyncProblem(sync) {
+  if (sync?.status !== "failed") return null;
+  const code = sync.errorCode || "SYNC_FAILED";
+  const reconnect = ["AUTHORIZATION_EXPIRED", "MAILBOX_NOT_CONNECTED", "INSUFFICIENT_PERMISSIONS"].includes(code);
+  const messages = {
+    AUTHORIZATION_EXPIRED: "Google rejected the saved Gmail authorisation. Choose Reconnect Gmail to refresh your inbox.",
+    MAILBOX_NOT_CONNECTED: "Gmail is no longer connected. Choose Reconnect Gmail to restore access.",
+    INSUFFICIENT_PERMISSIONS: "Gmail permissions are missing. Choose Reconnect Gmail to restore access.",
+    PROVIDER_RATE_LIMITED: "Gmail is limiting requests. Please wait a moment before trying Refresh again.",
+    PROVIDER_TIMEOUT: "Gmail did not respond in time. Try Refresh again shortly.",
+    PROVIDER_UNAVAILABLE: "Could not connect to Gmail. Check your connection and try Refresh again.",
+  };
+  return { code, reconnect, message: messages[code] || "RevoMail could not finish refreshing Gmail. Try Refresh again; if the problem continues, check the service logs." };
+}
+
 export class LatestRequestCoordinator {
   constructor() {
     this.controllers = new Map();

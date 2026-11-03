@@ -2,7 +2,7 @@
 
 FastAPI is RevoMail's active HTTP backend. It serves the built Vite frontend and exposes the same-origin `/api/v1` contract used by the retained Module 1 account UI. SQLite is the active persistence layer for server-side sessions, encrypted credentials, OAuth transactions, user/account records, settings, tasks, audits, jobs, and idempotency keys.
 
-Implemented Python paths include Google OAuth, session bootstrap, connected-account actions, recoverable Gmail full/history synchronization through `/api/v1/emails`, cached search and reading, Gmail-backed unread/starred changes, safe HTML handling, confirmed idempotent sending, and OpenAI-backed summary, extraction, and reply drafts. The current MVP is Gmail-only and single-user. Real Google authorization initiation has been verified, while Gmail synchronization, mutation, and sending still require the dedicated provider test account; automated tests use sanitized local fakes.
+Implemented Python paths include identity-only Google sign-in, optional Gmail and separate Calendar authorisation, session bootstrap, connected-account actions, recoverable Gmail synchronization through `/api/v1/emails`, cached reading, unread/starred changes, safe HTML, confirmed idempotent sending, and AI analysis. `/api/v1/ai/manual` accepts bounded pasted/imported email text with session and CSRF validation but no mailbox dependency. Its text/MIME parser is provider-neutral and transient; AI functions and user preferences are shared with Gmail analysis. The MVP remains single-user. Provider verification still requires dedicated test credentials; automated tests use sanitized local fakes.
 
 ## Layout
 
